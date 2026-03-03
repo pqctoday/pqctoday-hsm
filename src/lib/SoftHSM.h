@@ -40,20 +40,24 @@
 #include "SessionManager.h"
 #include "SlotManager.h"
 #include "HandleManager.h"
-#include "RSAPublicKey.h"
-#include "RSAPrivateKey.h"
-#include "ECPublicKey.h"
-#include "ECPrivateKey.h"
-#include "EDPublicKey.h"
-#include "EDPrivateKey.h"
-#include "MLDSAPublicKey.h"
-#include "MLDSAPrivateKey.h"
-#include "SLHDSAPublicKey.h"
-#include "SLHDSAPrivateKey.h"
-#include "MLKEMPublicKey.h"
-#include "MLKEMPrivateKey.h"
-
 #include <memory>
+
+// Forward declarations — full definitions are only needed in SoftHSM.cpp where
+// these types are used in downcasts. Keeping them out of the header reduces
+// coupling and avoids cascading recompilation when key class implementations
+// change (fixes maintainability gap Md2).
+class RSAPublicKey;
+class RSAPrivateKey;
+class ECPublicKey;
+class ECPrivateKey;
+class EDPublicKey;
+class EDPrivateKey;
+class MLDSAPublicKey;
+class MLDSAPrivateKey;
+class SLHDSAPublicKey;
+class SLHDSAPrivateKey;
+class MLKEMPublicKey;
+class MLKEMPrivateKey;
 
 class SoftHSM
 {

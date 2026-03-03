@@ -83,6 +83,7 @@ set(WITH_CRYPTO_BACKEND "openssl")
 # ---- Compiler Options -------------------------------------------------------
 
 include(CompilerOptions)
+include(CompilerSanitizers)
 
 # Enforce minimum OpenSSL version after CompilerOptions resolved the library.
 if(OPENSSL_VERSION VERSION_LESS "3.3")
@@ -107,6 +108,18 @@ enable_testing()
 # ---- Config Header ----------------------------------------------------------
 
 include_directories(${CMAKE_BINARY_DIR})
+
+# ---- pkg-config .pc file (fixes OSS gap C2) ---------------------------------
+# Generated into the build directory; installed to <libdir>/pkgconfig so that
+# consumers can discover include paths and link flags via pkg-config.
+configure_file(
+    ${CMAKE_SOURCE_DIR}/softhsmv3.pc.in
+    ${CMAKE_BINARY_DIR}/softhsmv3.pc
+    @ONLY
+)
+install(FILES ${CMAKE_BINARY_DIR}/softhsmv3.pc
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig
+        )
 
 # ---- Subdirectories ---------------------------------------------------------
 

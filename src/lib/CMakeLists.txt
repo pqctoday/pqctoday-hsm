@@ -162,3 +162,13 @@ if(ENABLE_STATIC)
                 DESTINATION ${CMAKE_INSTALL_LIBDIR}/softhsm
                 )
 endif()
+
+# Install public PKCS#11 headers so C/C++ consumers can link without
+# manually copying headers (fixes OSS gap C1).
+install(FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/pkcs11/pkcs11.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/pkcs11/pkcs11f.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/pkcs11/pkcs11t.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/pkcs11/cryptoki.h
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/softhsm
+        )

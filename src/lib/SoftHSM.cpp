@@ -1403,6 +1403,8 @@ CK_RV SoftHSM::C_GetOperationState(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*pOp
 	Session* session = sessionGuard.get();
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 
+	// Session-state serialization is not planned in the current Phase 0â6 roadmap.
+	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
@@ -1416,6 +1418,8 @@ CK_RV SoftHSM::C_SetOperationState(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*pOp
 	Session* session = sessionGuard.get();
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 
+	// Session-state serialization is not planned in the current Phase 0â6 roadmap.
+	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
@@ -4892,6 +4896,8 @@ CK_RV SoftHSM::C_SignRecoverInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR /*
 	// Check if we have another operation
 	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
 
+	// CKM_RSA_X_509 recovery is not planned in the current Phase 0â6 roadmap.
+	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
@@ -4905,6 +4911,8 @@ CK_RV SoftHSM::C_SignRecover(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*pData*/, 
 	Session* session = sessionGuard.get();
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 
+	// CKM_RSA_X_509 recovery is not planned in the current Phase 0â6 roadmap.
+	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
@@ -6051,6 +6059,8 @@ CK_RV SoftHSM::C_VerifyRecoverInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR 
 	// Check if we have another operation
 	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
 
+	// CKM_RSA_X_509 recovery is not planned in the current Phase 0â6 roadmap.
+	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
@@ -6064,6 +6074,8 @@ CK_RV SoftHSM::C_VerifyRecover(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*pSignat
 	Session* session = sessionGuard.get();
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 
+	// CKM_RSA_X_509 recovery is not planned in the current Phase 0â6 roadmap.
+	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
@@ -6077,6 +6089,8 @@ CK_RV SoftHSM::C_DigestEncryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*p
 	Session* session = sessionGuard.get();
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 
+	// Combined multi-part operations are not planned in the current Phase 0â6 roadmap.
+	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
@@ -6090,6 +6104,8 @@ CK_RV SoftHSM::C_DecryptDigestUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*p
 	Session* session = sessionGuard.get();
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 
+	// Combined multi-part operations are not planned in the current Phase 0â6 roadmap.
+	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
@@ -6103,6 +6119,8 @@ CK_RV SoftHSM::C_SignEncryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*pPa
 	Session* session = sessionGuard.get();
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 
+	// Combined multi-part operations are not planned in the current Phase 0â6 roadmap.
+	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
@@ -6116,6 +6134,8 @@ CK_RV SoftHSM::C_DecryptVerifyUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*p
 	Session* session = sessionGuard.get();
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 
+	// Combined multi-part operations are not planned in the current Phase 0â6 roadmap.
+	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
@@ -7327,7 +7347,11 @@ CK_RV SoftHSM::C_UnwrapKey
 			break;
 
 	        case CKM_AES_CBC_PAD:
-			// TODO check block length
+			// Ciphertext must be a non-empty multiple of the AES block size (16 bytes).
+			// PKCS#7 padding means at least one full block is always present.
+			if ((ulWrappedKeyLen < 16) || ((ulWrappedKeyLen % 16) != 0))
+				return CKR_WRAPPED_KEY_LEN_RANGE;
+			// IV is mandatory and must be exactly one AES block (16 bytes).
 			if (pMechanism->pParameter == NULL_PTR ||
                             pMechanism->ulParameterLen != 16)
 				return CKR_ARGUMENTS_BAD;
