@@ -2585,6 +2585,13 @@ CK_RV SoftHSM::C_VerifySignatureInit(CK_SESSION_HANDLE hSession,
 	void* algoParam = session->getParameters(algoParamLen);
 
 	// Build the combined blob: header + signature + algo params.
+	// Guard against wrap-around on 32-bit targets (e.g. Emscripten WASM where
+	// CK_ULONG and size_t are both 32-bit).
+	if (ulSignatureLen > SIZE_MAX - sizeof(PreBoundVerifySig) - algoParamLen)
+	{
+		session->resetOp();
+		return CKR_ARGUMENTS_BAD;
+	}
 	size_t totalLen = sizeof(PreBoundVerifySig) + ulSignatureLen + algoParamLen;
 	std::vector<uint8_t> blob(totalLen);
 	PreBoundVerifySig* hdr = reinterpret_cast<PreBoundVerifySig*>(blob.data());
@@ -2630,7 +2637,10 @@ CK_RV SoftHSM::C_VerifySignature(CK_SESSION_HANDLE hSession,
 		return CKR_OPERATION_NOT_INITIALIZED;
 	}
 	PreBoundVerifySig* hdr = reinterpret_cast<PreBoundVerifySig*>(blobPtr);
-	if (sizeof(PreBoundVerifySig) + hdr->sigLen + hdr->algoParamLen > blobLen)
+	// Overflow-safe secondary bounds check (guards 32-bit/WASM targets where
+	// CK_ULONG addition can wrap to a value smaller than the individual operands).
+	if (hdr->sigLen > blobLen - sizeof(PreBoundVerifySig) ||
+	    hdr->algoParamLen > blobLen - sizeof(PreBoundVerifySig) - hdr->sigLen)
 	{
 		session->resetOp();
 		return CKR_OPERATION_NOT_INITIALIZED;
@@ -2663,6 +2673,7 @@ CK_RV SoftHSM::C_VerifySignatureUpdate(CK_SESSION_HANDLE hSession,
 	CK_BYTE_PTR pPart, CK_ULONG ulPartLen)
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	if (pPart == NULL_PTR && ulPartLen != 0) return CKR_ARGUMENTS_BAD;
 
 	auto sessionGuard = handleManager->getSessionShared(hSession);
 	Session* session = sessionGuard.get();
@@ -2711,6 +2722,13 @@ CK_RV SoftHSM::C_VerifySignatureFinal(CK_SESSION_HANDLE hSession)
 		return CKR_OPERATION_NOT_INITIALIZED;
 	}
 	PreBoundVerifySig* hdr = reinterpret_cast<PreBoundVerifySig*>(blobPtr);
+	// Secondary bounds check: ensure sigLen does not overrun the allocation
+	// (mirrors the check in C_VerifySignature to guard against blob corruption).
+	if (hdr->sigLen > blobLen - sizeof(PreBoundVerifySig))
+	{
+		session->resetOp();
+		return CKR_OPERATION_NOT_INITIALIZED;
+	}
 	CK_BYTE_PTR sigBytes = reinterpret_cast<CK_BYTE_PTR>(
 		reinterpret_cast<uint8_t*>(blobPtr) + sizeof(PreBoundVerifySig));
 
