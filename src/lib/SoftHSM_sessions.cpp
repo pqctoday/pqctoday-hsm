@@ -229,4 +229,36 @@ CK_RV SoftHSM::C_Logout(CK_SESSION_HANDLE hSession)
 	return CKR_OK;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// G6: PKCS#11 v3.0 session management extensions
+// ─────────────────────────────────────────────────────────────────────────────
+
+// C_LoginUser — Like C_Login but adds an optional username (PKCS#11 v3.0 §5.6.8).
+// softhsmv3 uses single-user per-role tokens; pUsername is accepted but ignored.
+CK_RV SoftHSM::C_LoginUser(CK_SESSION_HANDLE hSession, CK_USER_TYPE userType,
+	CK_UTF8CHAR_PTR pPin, CK_ULONG ulPinLen,
+	CK_UTF8CHAR_PTR /*pUsername*/, CK_ULONG /*ulUsernameLen*/)
+{
+	// Delegate to C_Login; username is not used in single-user token model.
+	return C_Login(hSession, userType, pPin, ulPinLen);
+}
+
+// C_SessionCancel — Cancel one or more active cryptographic operations in the
+// session (PKCS#11 v3.0 §5.6.7).  flags is a bitmask of CKF_* operation types
+// (0 = cancel all).  softhsmv3 supports exactly one active operation per
+// session, so all active operations are always cancelled together.
+CK_RV SoftHSM::C_SessionCancel(CK_SESSION_HANDLE hSession, CK_FLAGS /*flags*/)
+{
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+
+	auto sessionGuard = handleManager->getSessionShared(hSession);
+	Session* session = sessionGuard.get();
+	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+
+	if (session->getOpType() != SESSION_OP_NONE)
+		session->resetOp();
+
+	return CKR_OK;
+}
+
 

@@ -1433,18 +1433,22 @@ PKCS_API CK_RV C_WaitForSlotEvent(CK_FLAGS flags, CK_SLOT_ID_PTR pSlot, CK_VOID_
 // ---------------------------------------------------------------------------
 
 // Extended login with username field (v3.0 §5.6.3)
-PKCS_API CK_RV C_LoginUser(CK_SESSION_HANDLE /*hSession*/,
-	CK_USER_TYPE /*userType*/,
-	CK_UTF8CHAR_PTR /*pPin*/, CK_ULONG /*ulPinLen*/,
-	CK_UTF8CHAR_PTR /*pUsername*/, CK_ULONG /*ulUsernameLen*/)
+PKCS_API CK_RV C_LoginUser(CK_SESSION_HANDLE hSession,
+	CK_USER_TYPE userType,
+	CK_UTF8CHAR_PTR pPin, CK_ULONG ulPinLen,
+	CK_UTF8CHAR_PTR pUsername, CK_ULONG ulUsernameLen)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try { return SoftHSM::i()->C_LoginUser(hSession, userType, pPin, ulPinLen, pUsername, ulUsernameLen); }
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
 // Cancel an active operation in a session (v3.0 §5.6.7)
-PKCS_API CK_RV C_SessionCancel(CK_SESSION_HANDLE /*hSession*/, CK_FLAGS /*flags*/)
+PKCS_API CK_RV C_SessionCancel(CK_SESSION_HANDLE hSession, CK_FLAGS flags)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try { return SoftHSM::i()->C_SessionCancel(hSession, flags); }
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
 // ---------------------------------------------------------------------------
