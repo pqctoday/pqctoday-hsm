@@ -1890,7 +1890,11 @@ CK_RV SoftHSM::C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pT
 	FindOperation *findOp = FindOperation::create();
 
 	// Check if we are out of memory
-	if (findOp == NULL_PTR) return CKR_HOST_MEMORY;
+	if (findOp == NULL_PTR)
+	{
+		session->resetOp();
+		return CKR_HOST_MEMORY;
+	}
 
 	std::set<OSObject*> allObjects;
 	token->getObjects(allObjects);
@@ -1952,6 +1956,7 @@ CK_RV SoftHSM::C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pT
 							if (!token->decrypt(attr.getByteStringValue(), bsAttrValue))
 							{
 								delete findOp;
+								session->resetOp();
 								return CKR_GENERAL_ERROR;
 							}
 						}
@@ -1989,6 +1994,7 @@ CK_RV SoftHSM::C_FindObjectsInit(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pT
 			if (hObject == CK_INVALID_HANDLE)
 			{
 				delete findOp;
+				session->resetOp();
 				return CKR_GENERAL_ERROR;
 			}
 			handles.insert(hObject);
@@ -2548,11 +2554,17 @@ static CK_RV SymEncryptUpdate(Session* session, CK_BYTE_PTR pData, CK_ULONG ulDa
 	// Check data size
 	size_t blockSize = cipher->getBlockSize();
 	size_t remainingSize = cipher->getBufferSize();
-	CK_ULONG maxSize = ulDataLen + remainingSize;
+	// Guard against integer overflow before adding ulDataLen + remainingSize.
+	if (ulDataLen > (~(CK_ULONG)0 - (CK_ULONG)remainingSize))
+	{
+		session->resetOp();
+		return CKR_DATA_LEN_RANGE;
+	}
+	CK_ULONG maxSize = ulDataLen + (CK_ULONG)remainingSize;
 	if (cipher->isBlockCipher())
 	{
-		int nrOfBlocks = (ulDataLen + remainingSize) / blockSize;
-		maxSize = nrOfBlocks * blockSize;
+		CK_ULONG nrOfBlocks = (ulDataLen + (CK_ULONG)remainingSize) / (CK_ULONG)blockSize;
+		maxSize = nrOfBlocks * (CK_ULONG)blockSize;
 	}
 	if (!cipher->checkMaximumBytes(ulDataLen))
 	{
@@ -7137,6 +7149,8 @@ CK_RV SoftHSM::UnwrapMechRsaAesKw
 
 	CK_ULONG ulWrappedKeyLen = wrapped.size();
 	CK_ULONG wrappedLen1 = modulus.size();
+	if (wrappedLen1 > ulWrappedKeyLen)
+		return CKR_WRAPPED_KEY_LEN_RANGE;
 	CK_ULONG wrappedLen2 = ulWrappedKeyLen - wrappedLen1;
 
 	ByteString wrapped_1(&wrapped[0], wrappedLen1); // the wrapped AES key

@@ -36,7 +36,6 @@
 #include "config.h"
 #include "log.h"
 #include "SlotManager.h"
-#include <cassert>
 #include <stdexcept>
 typedef std::pair<CK_SLOT_ID, Slot*> SlotMapElement;
 typedef std::pair<SlotMap::iterator, bool> InsertResult;
@@ -79,7 +78,12 @@ SlotManager::SlotManager(ObjectStore*const objectStore)
 void SlotManager::insertToken(ObjectStore*const objectStore, const CK_SLOT_ID slotID, ObjectStoreToken*const pToken) {
 	Slot*const newSlot( new Slot(objectStore, slotID, pToken) );
 	const InsertResult result( slots.insert(SlotMapElement(slotID, newSlot)) );
-	assert(result.second);// fails if there is already a token on this slot
+	if (!result.second)
+	{
+		// Duplicate slot ID — should never happen during normal initialisation.
+		ERROR_MSG("SlotManager: duplicate slotID %lu; discarding new slot", (unsigned long)slotID);
+		delete newSlot;
+	}
 }
 
 // Destructor
@@ -155,7 +159,12 @@ CK_RV SlotManager::getSlotList(ObjectStore* objectStore, CK_BBOOL tokenPresent, 
 			pSlotList[startIx++] = i->second->getSlotID();
 		}
 	}
-	assert(startIx==endIx+1);
+	if (startIx != endIx + 1)
+	{
+		ERROR_MSG("SlotManager::getSlotList: slot list fill inconsistency (startIx=%zu endIx=%zu size=%zu)",
+			  startIx, endIx, size);
+		return CKR_GENERAL_ERROR;
+	}
 	*pulCount = size;
 
 	return CKR_OK;

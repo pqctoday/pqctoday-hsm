@@ -227,6 +227,15 @@ bool File::readByteString(ByteString& value)
 		return false;
 	}
 
+	// Sanity-check before allocating: reject implausibly large lengths.
+	// No single attribute value in a PKCS#11 object store should exceed 64 MB;
+	// a larger value in the on-disk file indicates corruption or a malicious file.
+	if (len > 64UL * 1024UL * 1024UL)
+	{
+		ERROR_MSG("readByteString: rejecting oversized length %lu", len);
+		return false;
+	}
+
 	// Read the byte string from the file
 	value.resize(len);
 
