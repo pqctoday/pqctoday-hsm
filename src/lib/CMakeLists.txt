@@ -28,6 +28,14 @@ set(SOURCES access.cpp
             P11Attributes.cpp
             P11Objects.cpp
             SoftHSM.cpp
+            SoftHSM_digest.cpp
+            SoftHSM_kem.cpp
+            SoftHSM_sessions.cpp
+            SoftHSM_slots.cpp
+            SoftHSM_objects.cpp
+            SoftHSM_cipher.cpp
+            SoftHSM_sign.cpp
+            SoftHSM_keygen.cpp
             )
 
 set(STATIC_FILES softhsm_common
