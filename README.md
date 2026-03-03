@@ -1,6 +1,64 @@
-# SoftHSMv3
+# SoftHSMv3 / `@pqctoday/softhsm-wasm`
 
-A modernized fork of [SoftHSM2](https://github.com/softhsm/SoftHSMv2) with **OpenSSL 3.x**, **PKCS#11 v3.2**, and **post-quantum cryptography** support.
+A modernized fork of [SoftHSM2](https://github.com/softhsm/SoftHSMv2) with **OpenSSL 3.x**, **PKCS#11 v3.2**, and **post-quantum cryptography** support — compiled to WebAssembly for use in browsers and Node.js.
+
+## Installation
+
+```bash
+npm install @pqctoday/softhsm-wasm
+```
+
+## Quick Start
+
+```js
+// CJS
+const createSoftHSMModule = require('@pqctoday/softhsm-wasm')
+const { CK } = require('@pqctoday/softhsm-wasm')
+
+// ESM dynamic import
+const { default: createSoftHSMModule, CK } = await import('@pqctoday/softhsm-wasm')
+
+// Named import
+const { createSoftHSMModule, CK } = require('@pqctoday/softhsm-wasm')
+
+// ── ML-KEM-768 key encapsulation example ──────────────────────────────────
+const M = await createSoftHSMModule()
+
+// Allocate helper
+const writeStr = (s) => {
+  const len = M.lengthBytesUTF8(s) + 1
+  const ptr = M._malloc(len)
+  M.stringToUTF8(s, ptr, len)
+  return ptr
+}
+
+// Initialize + open token
+M._C_Initialize(0)
+const slotPtr = M._malloc(4)
+const slotCountPtr = M._malloc(4)
+M._C_GetSlotList(0, slotPtr, slotCountPtr)
+const slot = M.getValue(slotPtr, 'i32')
+
+const labelPtr = M._malloc(32)
+M.HEAPU8.fill(0x20, labelPtr, labelPtr + 32)   // blank-pad label
+M.stringToUTF8('MyToken', labelPtr, 8)
+const soPinPtr = writeStr('12345678')
+M._C_InitToken(slot, soPinPtr, 8, labelPtr)
+M._free(soPinPtr); M._free(labelPtr); M._free(slotPtr); M._free(slotCountPtr)
+
+// Open session, generate ML-KEM-768 key pair, encapsulate, decapsulate
+// See tests/smoke-wasm.mjs for the complete lifecycle example.
+```
+
+**TypeScript** types are included — import from `'@pqctoday/softhsm-wasm'` for full
+`SoftHSMModule` intellisense. Constants are available separately:
+
+```ts
+import CK from '@pqctoday/softhsm-wasm/constants'
+// CK.CKM_ML_KEM, CK.CKP_ML_KEM_768, CK.CKR_OK, CK.CK_ATTRIBUTE_SIZE, …
+```
+
+---
 
 ## What's New vs SoftHSM2
 
