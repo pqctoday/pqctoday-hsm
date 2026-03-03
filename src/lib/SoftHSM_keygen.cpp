@@ -1642,12 +1642,21 @@ CK_RV SoftHSM::C_WrapKeyAuthenticated
 	}
 	if (keydata.size() == 0) return CKR_KEY_NOT_WRAPPABLE;
 
+	// Size-query path: return output length without performing crypto.
+	if (pWrappedKey == NULL_PTR)
+	{
+		*pulWrappedKeyLen = static_cast<CK_ULONG>(keydata.size() + tagLen);
+		keydata.wipe();
+		return CKR_OK;
+	}
+
 	// Load the AES wrapping key
 	SymmetricAlgorithm* cipher = CryptoFactory::i()->getSymmetricAlgorithm(SymAlgo::AES);
-	if (cipher == NULL) return CKR_MECHANISM_INVALID;
+	if (cipher == NULL) { keydata.wipe(); return CKR_MECHANISM_INVALID; }
 	SymmetricKey* aesKey = new SymmetricKey();
 	if (getSymmetricKey(aesKey, token, wrapKey) != CKR_OK)
 	{
+		keydata.wipe();
 		cipher->recycleKey(aesKey);
 		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
 		return CKR_GENERAL_ERROR;
@@ -1655,13 +1664,15 @@ CK_RV SoftHSM::C_WrapKeyAuthenticated
 	aesKey->setBitLen(aesKey->getKeyBits().size() * 8);
 
 	// AES-GCM encrypt: ciphertext || tag
+	// padding=false, counterBits=0 for GCM; tag length passed as tagBytes (7th arg).
 	ByteString iv(gcmParam->pIv, gcmParam->ulIvLen);
 	ByteString aad;
 	if (pAssociatedData != NULL_PTR && ulAssociatedDataLen > 0)
 		aad = ByteString(pAssociatedData, ulAssociatedDataLen);
 
-	if (!cipher->encryptInit(aesKey, SymMode::GCM, iv, true, tagLen, aad))
+	if (!cipher->encryptInit(aesKey, SymMode::GCM, iv, false, 0, aad, tagLen))
 	{
+		keydata.wipe();
 		cipher->recycleKey(aesKey);
 		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
 		return CKR_MECHANISM_INVALID;
@@ -1669,17 +1680,14 @@ CK_RV SoftHSM::C_WrapKeyAuthenticated
 
 	ByteString cipherOut, tagOut;
 	bool ok = cipher->encryptUpdate(keydata, cipherOut) && cipher->encryptFinal(tagOut);
+	keydata.wipe();  // clear plaintext key material regardless of outcome
 	cipher->recycleKey(aesKey);
 	CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
 	if (!ok) return CKR_FUNCTION_FAILED;
 
 	ByteString wrapped = cipherOut + tagOut;
-
-	if (pWrappedKey != NULL_PTR)
-	{
-		if (*pulWrappedKeyLen < wrapped.size()) return CKR_BUFFER_TOO_SMALL;
-		memcpy(pWrappedKey, wrapped.byte_str(), wrapped.size());
-	}
+	if (*pulWrappedKeyLen < wrapped.size()) return CKR_BUFFER_TOO_SMALL;
+	memcpy(pWrappedKey, wrapped.byte_str(), wrapped.size());
 	*pulWrappedKeyLen = static_cast<CK_ULONG>(wrapped.size());
 	return CKR_OK;
 }
@@ -1773,7 +1781,8 @@ CK_RV SoftHSM::C_UnwrapKeyAuthenticated
 	if (pAssociatedData != NULL_PTR && ulAssociatedDataLen > 0)
 		aad = ByteString(pAssociatedData, ulAssociatedDataLen);
 
-	if (!cipher->decryptInit(aesKey, SymMode::GCM, iv, true, tagLen, aad))
+	// padding=false, counterBits=0 for GCM; tag length passed as tagBytes (7th arg).
+	if (!cipher->decryptInit(aesKey, SymMode::GCM, iv, false, 0, aad, tagLen))
 	{
 		cipher->recycleKey(aesKey);
 		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
@@ -1786,7 +1795,7 @@ CK_RV SoftHSM::C_UnwrapKeyAuthenticated
 	bool ok = cipher->decryptUpdate(aeadBuf, keydata) && cipher->decryptFinal(discarded);
 	cipher->recycleKey(aesKey);
 	CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
-	if (!ok) return CKR_WRAPPED_KEY_INVALID; // auth tag mismatch
+	if (!ok) { keydata.wipe(); return CKR_WRAPPED_KEY_INVALID; } // auth tag mismatch
 
 	// Build the secret-key creation template (mirrors C_UnwrapKey pattern)
 	const CK_ULONG maxAttribs = 32;
@@ -1830,6 +1839,7 @@ CK_RV SoftHSM::C_UnwrapKeyAuthenticated
 			else
 				value = keydata;
 			bOK = bOK && osobject->setAttribute(CKA_VALUE, value);
+			value.wipe();  // clear encrypted/plaintext value copy
 			if (bOK)
 				bOK = osobject->commitTransaction();
 			else
@@ -1841,6 +1851,7 @@ CK_RV SoftHSM::C_UnwrapKeyAuthenticated
 			rv = CKR_FUNCTION_FAILED;
 		}
 	}
+	keydata.wipe();  // clear decrypted plaintext key material
 
 	if (rv != CKR_OK && *phKey != CK_INVALID_HANDLE)
 	{

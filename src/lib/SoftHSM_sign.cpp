@@ -2473,14 +2473,22 @@ CK_RV SoftHSM::C_SignMessageNext(CK_SESSION_HANDLE hSession,
 	// crypto objects survive — stay in BEGIN to allow a subsequent real-sign call.
 	// Real sign path (pSignature!=NULL): AsymSign calls resetOp, restore MESSAGE_SIGN
 	// so the caller may begin another message under the same session.
+	// CKR_BUFFER_TOO_SMALL path: AsymSign does NOT call resetOp (crypto context
+	// survives for retry); restore MESSAGE_SIGN_BEGIN so caller can retry with a
+	// correctly-sized buffer.  All other errors: AsymSign called resetOp, leaving
+	// SESSION_OP_NONE — the multi-message context is terminated per spec.
 	session->setOpType(SESSION_OP_SIGN);
 	rv = AsymSign(session, pData, ulDataLen, pSignature, pulSignatureLen);
 	if (rv == CKR_OK)
 	{
 		if (pSignature != NULL_PTR)
-			session->setOpType(SESSION_OP_MESSAGE_SIGN);   // message complete
+			session->setOpType(SESSION_OP_MESSAGE_SIGN);        // message complete
 		else
-			session->setOpType(SESSION_OP_MESSAGE_SIGN_BEGIN); // size query, stay
+			session->setOpType(SESSION_OP_MESSAGE_SIGN_BEGIN);  // size query, stay
+	}
+	else if (rv == CKR_BUFFER_TOO_SMALL)
+	{
+		session->setOpType(SESSION_OP_MESSAGE_SIGN_BEGIN);      // restore for retry
 	}
 	return rv;
 }
