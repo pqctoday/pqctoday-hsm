@@ -1451,80 +1451,126 @@ PKCS_API CK_RV C_SessionCancel(CK_SESSION_HANDLE /*hSession*/, CK_FLAGS /*flags*
 // v3.0 additions — §5.16 Message-based encryption
 // ---------------------------------------------------------------------------
 
-PKCS_API CK_RV C_MessageEncryptInit(CK_SESSION_HANDLE /*hSession*/,
-	CK_MECHANISM_PTR /*pMechanism*/, CK_OBJECT_HANDLE /*hKey*/)
+PKCS_API CK_RV C_MessageEncryptInit(CK_SESSION_HANDLE hSession,
+	CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try { return SoftHSM::i()->C_MessageEncryptInit(hSession, pMechanism, hKey); }
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
-PKCS_API CK_RV C_EncryptMessage(CK_SESSION_HANDLE /*hSession*/,
-	CK_VOID_PTR /*pParameter*/, CK_ULONG /*ulParameterLen*/,
-	CK_BYTE_PTR /*pAssociatedData*/, CK_ULONG /*ulAssociatedDataLen*/,
-	CK_BYTE_PTR /*pPlaintext*/, CK_ULONG /*ulPlaintextLen*/,
-	CK_BYTE_PTR /*pCiphertext*/, CK_ULONG_PTR /*pulCiphertextLen*/)
+PKCS_API CK_RV C_EncryptMessage(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pAssociatedData, CK_ULONG ulAssociatedDataLen,
+	CK_BYTE_PTR pPlaintext, CK_ULONG ulPlaintextLen,
+	CK_BYTE_PTR pCiphertext, CK_ULONG_PTR pulCiphertextLen)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try
+	{
+		return SoftHSM::i()->C_EncryptMessage(hSession, pParameter, ulParameterLen,
+			pAssociatedData, ulAssociatedDataLen, pPlaintext, ulPlaintextLen,
+			pCiphertext, pulCiphertextLen);
+	}
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
-PKCS_API CK_RV C_EncryptMessageBegin(CK_SESSION_HANDLE /*hSession*/,
-	CK_VOID_PTR /*pParameter*/, CK_ULONG /*ulParameterLen*/,
-	CK_BYTE_PTR /*pAssociatedData*/, CK_ULONG /*ulAssociatedDataLen*/)
+PKCS_API CK_RV C_EncryptMessageBegin(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pAssociatedData, CK_ULONG ulAssociatedDataLen)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try
+	{
+		return SoftHSM::i()->C_EncryptMessageBegin(hSession, pParameter, ulParameterLen,
+			pAssociatedData, ulAssociatedDataLen);
+	}
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
-PKCS_API CK_RV C_EncryptMessageNext(CK_SESSION_HANDLE /*hSession*/,
-	CK_VOID_PTR /*pParameter*/, CK_ULONG /*ulParameterLen*/,
-	CK_BYTE_PTR /*pPlaintextPart*/, CK_ULONG /*ulPlaintextPartLen*/,
-	CK_BYTE_PTR /*pCiphertextPart*/, CK_ULONG_PTR /*pulCiphertextPartLen*/,
-	CK_FLAGS /*flags*/)
+PKCS_API CK_RV C_EncryptMessageNext(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pPlaintextPart, CK_ULONG ulPlaintextPartLen,
+	CK_BYTE_PTR pCiphertextPart, CK_ULONG_PTR pulCiphertextPartLen,
+	CK_FLAGS flags)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try
+	{
+		return SoftHSM::i()->C_EncryptMessageNext(hSession, pParameter, ulParameterLen,
+			pPlaintextPart, ulPlaintextPartLen, pCiphertextPart, pulCiphertextPartLen, flags);
+	}
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
-PKCS_API CK_RV C_MessageEncryptFinal(CK_SESSION_HANDLE /*hSession*/)
+PKCS_API CK_RV C_MessageEncryptFinal(CK_SESSION_HANDLE hSession)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try { return SoftHSM::i()->C_MessageEncryptFinal(hSession); }
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
 // ---------------------------------------------------------------------------
 // v3.0 additions — §5.17 Message-based decryption
 // ---------------------------------------------------------------------------
 
-PKCS_API CK_RV C_MessageDecryptInit(CK_SESSION_HANDLE /*hSession*/,
-	CK_MECHANISM_PTR /*pMechanism*/, CK_OBJECT_HANDLE /*hKey*/)
+PKCS_API CK_RV C_MessageDecryptInit(CK_SESSION_HANDLE hSession,
+	CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try { return SoftHSM::i()->C_MessageDecryptInit(hSession, pMechanism, hKey); }
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
-PKCS_API CK_RV C_DecryptMessage(CK_SESSION_HANDLE /*hSession*/,
-	CK_VOID_PTR /*pParameter*/, CK_ULONG /*ulParameterLen*/,
-	CK_BYTE_PTR /*pAssociatedData*/, CK_ULONG /*ulAssociatedDataLen*/,
-	CK_BYTE_PTR /*pCiphertext*/, CK_ULONG /*ulCiphertextLen*/,
-	CK_BYTE_PTR /*pPlaintext*/, CK_ULONG_PTR /*pulPlaintextLen*/)
+PKCS_API CK_RV C_DecryptMessage(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pAssociatedData, CK_ULONG ulAssociatedDataLen,
+	CK_BYTE_PTR pCiphertext, CK_ULONG ulCiphertextLen,
+	CK_BYTE_PTR pPlaintext, CK_ULONG_PTR pulPlaintextLen)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try
+	{
+		return SoftHSM::i()->C_DecryptMessage(hSession, pParameter, ulParameterLen,
+			pAssociatedData, ulAssociatedDataLen, pCiphertext, ulCiphertextLen,
+			pPlaintext, pulPlaintextLen);
+	}
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
-PKCS_API CK_RV C_DecryptMessageBegin(CK_SESSION_HANDLE /*hSession*/,
-	CK_VOID_PTR /*pParameter*/, CK_ULONG /*ulParameterLen*/,
-	CK_BYTE_PTR /*pAssociatedData*/, CK_ULONG /*ulAssociatedDataLen*/)
+PKCS_API CK_RV C_DecryptMessageBegin(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pAssociatedData, CK_ULONG ulAssociatedDataLen)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try
+	{
+		return SoftHSM::i()->C_DecryptMessageBegin(hSession, pParameter, ulParameterLen,
+			pAssociatedData, ulAssociatedDataLen);
+	}
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
-PKCS_API CK_RV C_DecryptMessageNext(CK_SESSION_HANDLE /*hSession*/,
-	CK_VOID_PTR /*pParameter*/, CK_ULONG /*ulParameterLen*/,
-	CK_BYTE_PTR /*pCiphertextPart*/, CK_ULONG /*ulCiphertextPartLen*/,
-	CK_BYTE_PTR /*pPlaintextPart*/, CK_ULONG_PTR /*pulPlaintextPartLen*/,
-	CK_FLAGS /*flags*/)
+PKCS_API CK_RV C_DecryptMessageNext(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pCiphertextPart, CK_ULONG ulCiphertextPartLen,
+	CK_BYTE_PTR pPlaintextPart, CK_ULONG_PTR pulPlaintextPartLen,
+	CK_FLAGS flags)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try
+	{
+		return SoftHSM::i()->C_DecryptMessageNext(hSession, pParameter, ulParameterLen,
+			pCiphertextPart, ulCiphertextPartLen, pPlaintextPart, pulPlaintextPartLen, flags);
+	}
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
-PKCS_API CK_RV C_MessageDecryptFinal(CK_SESSION_HANDLE /*hSession*/)
+PKCS_API CK_RV C_MessageDecryptFinal(CK_SESSION_HANDLE hSession)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	try { return SoftHSM::i()->C_MessageDecryptFinal(hSession); }
+	catch (...) { FatalException(); }
+	return CKR_FUNCTION_FAILED;
 }
 
 // ---------------------------------------------------------------------------

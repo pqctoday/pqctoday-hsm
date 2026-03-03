@@ -1293,4 +1293,634 @@ CK_RV SoftHSM::C_DecryptFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_
 		return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
+// ── PKCS#11 v3.0: message-based AEAD (AES-GCM per-message IV + AAD) ─────────────────────────
+//
+// Session state machine:
+//   C_MessageEncryptInit()           → SESSION_OP_MESSAGE_ENCRYPT (0x15)
+//     C_EncryptMessage()             → one-shot per-message AEAD, stays in MESSAGE_ENCRYPT
+//     C_EncryptMessageBegin()        → → SESSION_OP_MESSAGE_ENCRYPT_BEGIN (0x17)
+//       C_EncryptMessageNext(part)   → streaming chunk(s)
+//       C_EncryptMessageNext(END)    → final chunk + tag → back to MESSAGE_ENCRYPT
+//   C_MessageEncryptFinal()          → SESSION_OP_NONE
+//
+// C_MessageDecryptInit / C_DecryptMessage / C_DecryptMessageBegin / C_DecryptMessageNext /
+// C_MessageDecryptFinal are symmetric using 0x16 / 0x18.
+//
+// Key persistence across messages: the AES key bytes are stored in session->param as a
+// GcmMsgCtx struct.  resetOp() frees param at MessageEncryptFinal/MessageDecryptFinal.
+// Each one-shot message creates and destroys its own cipher context without touching param.
+// The streaming cipher (Begin→Next→END) is stored in session->symmetricCryptoOp; it is
+// torn down by the caller after the END chunk and param survives for the next message.
+
+// ─── Context struct stored in session param ──────────────────────────────────
+static const size_t GCM_MSG_KEY_MAX = 32; // AES-256 max
+
+struct GcmMsgCtx
+{
+	CK_ULONG keyLen;
+	uint8_t  keyData[GCM_MSG_KEY_MAX];
+};
+
+// ─── IV generation helper ────────────────────────────────────────────────────
+static CK_RV generateGcmIv(CK_GCM_MESSAGE_PARAMS* p)
+{
+	if (p->ivGenerator == CKG_NO_GENERATE)
+		return CKR_OK; // caller provides IV
+
+	// For all generate variants (random, counter, counter-XOR), fill with random bytes.
+	// Counter-mode IV generation (fixed prefix + incrementing counter) can be layered
+	// on top by the application; softhsmv3 generates a fresh random IV unconditionally.
+	if (p->pIv == NULL_PTR || p->ulIvLen == 0)
+		return CKR_ARGUMENTS_BAD;
+
+	RNG* rng = CryptoFactory::i()->getRNG();
+	if (rng == NULL) return CKR_GENERAL_ERROR;
+
+	ByteString iv;
+	if (!rng->generateRandom(iv, p->ulIvLen))
+		return CKR_GENERAL_ERROR;
+
+	memcpy(p->pIv, iv.byte_str(), p->ulIvLen);
+	return CKR_OK;
+}
+
+// ─── One-shot AES-GCM encrypt ───────────────────────────────────────────────
+// Output: pCiphertext receives the encrypted bytes (same length as plaintext).
+//         pParam->pTag receives the authentication tag.
+// Size-query: pass pCiphertext == NULL_PTR; *pulCiphertextLen is set and CKR_OK returned.
+static CK_RV aesgcmEncryptOneShot(
+	const uint8_t* keyData, size_t keyLen,
+	const ByteString& iv, const ByteString& aad, size_t tagBytes,
+	CK_BYTE_PTR pPlain, CK_ULONG ulPlainLen,
+	CK_BYTE_PTR pCipher, CK_ULONG_PTR pulCipherLen,
+	uint8_t* pTag)
+{
+	if (pCipher == NULL_PTR) {
+		*pulCipherLen = ulPlainLen;
+		return CKR_OK;
+	}
+	if (*pulCipherLen < ulPlainLen) {
+		*pulCipherLen = ulPlainLen;
+		return CKR_BUFFER_TOO_SMALL;
+	}
+
+	SymmetricAlgorithm* cipher = CryptoFactory::i()->getSymmetricAlgorithm(SymAlgo::AES);
+	if (cipher == NULL) return CKR_MECHANISM_INVALID;
+
+	SymmetricKey* symKey = new SymmetricKey();
+	symKey->setKeyBits(ByteString(keyData, keyLen));
+	symKey->setBitLen(keyLen * 8);
+
+	if (!cipher->encryptInit(symKey, SymMode::GCM, iv, false, 0, aad, tagBytes)) {
+		cipher->recycleKey(symKey);
+		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
+		return CKR_MECHANISM_INVALID;
+	}
+
+	ByteString plain(pPlain, ulPlainLen);
+	ByteString cipherOut;
+	ByteString finalPart;
+
+	if (!cipher->encryptUpdate(plain, cipherOut)) {
+		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
+		return CKR_GENERAL_ERROR;
+	}
+	if (!cipher->encryptFinal(finalPart)) {
+		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
+		return CKR_GENERAL_ERROR;
+	}
+
+	// GCM: cipherOut has the ciphertext bytes; finalPart has the tag.
+	if (cipherOut.size() != ulPlainLen || finalPart.size() != tagBytes) {
+		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
+		return CKR_GENERAL_ERROR;
+	}
+
+	memcpy(pCipher, cipherOut.byte_str(), cipherOut.size());
+	*pulCipherLen = (CK_ULONG)cipherOut.size();
+	if (pTag) memcpy(pTag, finalPart.byte_str(), tagBytes);
+
+	CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
+	return CKR_OK;
+}
+
+// ─── One-shot AES-GCM decrypt ───────────────────────────────────────────────
+// pTag is the expected authentication tag (from CK_GCM_MESSAGE_PARAMS.pTag on decryption).
+// Size-query: pass pPlain == NULL_PTR.
+static CK_RV aesgcmDecryptOneShot(
+	const uint8_t* keyData, size_t keyLen,
+	const ByteString& iv, const ByteString& aad, size_t tagBytes,
+	const uint8_t* pTag,
+	CK_BYTE_PTR pCipher, CK_ULONG ulCipherLen,
+	CK_BYTE_PTR pPlain, CK_ULONG_PTR pulPlainLen)
+{
+	if (pPlain == NULL_PTR) {
+		*pulPlainLen = ulCipherLen;
+		return CKR_OK;
+	}
+	if (*pulPlainLen < ulCipherLen) {
+		*pulPlainLen = ulCipherLen;
+		return CKR_BUFFER_TOO_SMALL;
+	}
+
+	SymmetricAlgorithm* cipher = CryptoFactory::i()->getSymmetricAlgorithm(SymAlgo::AES);
+	if (cipher == NULL) return CKR_MECHANISM_INVALID;
+
+	SymmetricKey* symKey = new SymmetricKey();
+	symKey->setKeyBits(ByteString(keyData, keyLen));
+	symKey->setBitLen(keyLen * 8);
+
+	if (!cipher->decryptInit(symKey, SymMode::GCM, iv, false, 0, aad, tagBytes)) {
+		cipher->recycleKey(symKey);
+		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
+		return CKR_MECHANISM_INVALID;
+	}
+
+	// The OSSL GCM decrypt layer expects ciphertext + tag concatenated in the input buffer.
+	// Build: aeadBuf = pCipher || pTag
+	ByteString aeadBuf(pCipher, ulCipherLen);
+	aeadBuf += ByteString(pTag, tagBytes);
+
+	ByteString plainOut;
+	ByteString finalPart;
+
+	if (!cipher->decryptUpdate(aeadBuf, plainOut)) {
+		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
+		return CKR_ENCRYPTED_DATA_INVALID;
+	}
+	if (!cipher->decryptFinal(finalPart)) {
+		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
+		return CKR_ENCRYPTED_DATA_INVALID;
+	}
+
+	plainOut += finalPart;
+	if (plainOut.size() > ulCipherLen) plainOut.resize(ulCipherLen);
+
+	memcpy(pPlain, plainOut.byte_str(), plainOut.size());
+	*pulPlainLen = (CK_ULONG)plainOut.size();
+
+	CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
+	return CKR_OK;
+}
+
+// ─── MsgAesGcmInit — shared between C_MessageEncryptInit and C_MessageDecryptInit ──────────
+CK_RV SoftHSM::MsgAesGcmInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism,
+	CK_OBJECT_HANDLE hKey, CK_ATTRIBUTE_TYPE requiredAttr, int opType)
+{
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
+	if (pMechanism->mechanism != CKM_AES_GCM) return CKR_MECHANISM_INVALID;
+
+	std::shared_ptr<Session> sessionGuard;
+	Session* session; Token* token; OSObject* key;
+	CK_RV rv = acquireSessionTokenKey(hSession, hKey, requiredAttr, pMechanism,
+	                                   sessionGuard, session, token, key);
+	if (rv != CKR_OK) return rv;
+
+	if (key->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_AES)
+		return CKR_KEY_TYPE_INCONSISTENT;
+
+	// Extract raw AES key bytes
+	SymmetricKey skey;
+	rv = getSymmetricKey(&skey, token, key);
+	if (rv != CKR_OK) return rv;
+
+	const ByteString& bits = skey.getKeyBits();
+	if (bits.size() == 0 || bits.size() > GCM_MSG_KEY_MAX)
+		return CKR_KEY_SIZE_RANGE;
+
+	GcmMsgCtx ctx;
+	ctx.keyLen = (CK_ULONG)bits.size();
+	memcpy(ctx.keyData, bits.const_byte_str(), bits.size());
+
+	if (!session->setParameters(&ctx, sizeof(ctx)))
+		return CKR_HOST_MEMORY;
+
+	session->setOpType(opType);
+	return CKR_OK;
+}
+
+// ─── C_MessageEncryptInit ────────────────────────────────────────────────────
+CK_RV SoftHSM::C_MessageEncryptInit(CK_SESSION_HANDLE hSession,
+	CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
+{
+	return MsgAesGcmInit(hSession, pMechanism, hKey, CKA_ENCRYPT, SESSION_OP_MESSAGE_ENCRYPT);
+}
+
+// ─── C_EncryptMessage ────────────────────────────────────────────────────────
+// One-shot per-message AES-GCM encrypt. pParameter must be CK_GCM_MESSAGE_PARAMS*.
+// On success the session stays in SESSION_OP_MESSAGE_ENCRYPT.
+CK_RV SoftHSM::C_EncryptMessage(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pAssociatedData, CK_ULONG ulAssociatedDataLen,
+	CK_BYTE_PTR pPlaintext, CK_ULONG ulPlaintextLen,
+	CK_BYTE_PTR pCiphertext, CK_ULONG_PTR pulCiphertextLen)
+{
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	if (pParameter == NULL_PTR || ulParameterLen != sizeof(CK_GCM_MESSAGE_PARAMS))
+		return CKR_ARGUMENTS_BAD;
+	if (pPlaintext == NULL_PTR || pulCiphertextLen == NULL_PTR)
+		return CKR_ARGUMENTS_BAD;
+
+	auto sessionGuard = handleManager->getSessionShared(hSession);
+	Session* session = sessionGuard.get();
+	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	if (session->getOpType() != SESSION_OP_MESSAGE_ENCRYPT)
+		return CKR_OPERATION_NOT_INITIALIZED;
+
+	size_t ctxLen;
+	GcmMsgCtx* ctx = (GcmMsgCtx*)session->getParameters(ctxLen);
+	if (ctx == NULL || ctxLen < sizeof(GcmMsgCtx)) return CKR_OPERATION_NOT_INITIALIZED;
+
+	CK_GCM_MESSAGE_PARAMS* p = (CK_GCM_MESSAGE_PARAMS*)pParameter;
+	if (p->pTag == NULL_PTR || p->ulTagBits == 0 || p->ulTagBits > 128 || p->ulTagBits % 8 != 0)
+		return CKR_MECHANISM_PARAM_INVALID;
+
+	CK_RV rv = generateGcmIv(p);
+	if (rv != CKR_OK) return rv;
+
+	ByteString iv(p->pIv, p->ulIvLen);
+	ByteString aad(pAssociatedData, ulAssociatedDataLen);
+	size_t tagBytes = p->ulTagBits / 8;
+
+	return aesgcmEncryptOneShot(ctx->keyData, (size_t)ctx->keyLen,
+		iv, aad, tagBytes,
+		pPlaintext, ulPlaintextLen,
+		pCiphertext, pulCiphertextLen,
+		(uint8_t*)p->pTag);
+	// session op type stays MESSAGE_ENCRYPT — caller may send more messages
+}
+
+// ─── C_EncryptMessageBegin ───────────────────────────────────────────────────
+// Commits IV and AAD for streaming encrypt; transitions to MESSAGE_ENCRYPT_BEGIN.
+CK_RV SoftHSM::C_EncryptMessageBegin(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pAssociatedData, CK_ULONG ulAssociatedDataLen)
+{
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	if (pParameter == NULL_PTR || ulParameterLen != sizeof(CK_GCM_MESSAGE_PARAMS))
+		return CKR_ARGUMENTS_BAD;
+
+	auto sessionGuard = handleManager->getSessionShared(hSession);
+	Session* session = sessionGuard.get();
+	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	if (session->getOpType() != SESSION_OP_MESSAGE_ENCRYPT)
+		return CKR_OPERATION_NOT_INITIALIZED;
+
+	size_t ctxLen;
+	GcmMsgCtx* ctx = (GcmMsgCtx*)session->getParameters(ctxLen);
+	if (ctx == NULL || ctxLen < sizeof(GcmMsgCtx)) return CKR_OPERATION_NOT_INITIALIZED;
+
+	CK_GCM_MESSAGE_PARAMS* p = (CK_GCM_MESSAGE_PARAMS*)pParameter;
+	if (p->pTag == NULL_PTR || p->ulTagBits == 0 || p->ulTagBits > 128 || p->ulTagBits % 8 != 0)
+		return CKR_MECHANISM_PARAM_INVALID;
+
+	CK_RV rv = generateGcmIv(p);
+	if (rv != CKR_OK) return rv;
+
+	SymmetricAlgorithm* cipher = CryptoFactory::i()->getSymmetricAlgorithm(SymAlgo::AES);
+	if (cipher == NULL) return CKR_MECHANISM_INVALID;
+
+	SymmetricKey* symKey = new SymmetricKey();
+	symKey->setKeyBits(ByteString(ctx->keyData, ctx->keyLen));
+	symKey->setBitLen((size_t)ctx->keyLen * 8);
+
+	ByteString iv(p->pIv, p->ulIvLen);
+	ByteString aad(pAssociatedData, ulAssociatedDataLen);
+	size_t tagBytes = p->ulTagBits / 8;
+
+	if (!cipher->encryptInit(symKey, SymMode::GCM, iv, false, 0, aad, tagBytes)) {
+		cipher->recycleKey(symKey);
+		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
+		return CKR_MECHANISM_INVALID;
+	}
+
+	// Store cipher + key in session (without touching param / GcmMsgCtx)
+	// setSymmetricCryptoOp takes ownership of cipher; setSymmetricKey transfers ownership to cipher.
+	session->setSymmetricCryptoOp(cipher);
+	session->setSymmetricKey(symKey);
+	session->setAllowMultiPartOp(true);
+	session->setAllowSinglePartOp(false);
+	session->setOpType(SESSION_OP_MESSAGE_ENCRYPT_BEGIN);
+	return CKR_OK;
+}
+
+// ─── C_EncryptMessageNext ────────────────────────────────────────────────────
+// Intermediate call (pParameter == NULL, !(flags & CKF_END_OF_MESSAGE)): feed a chunk.
+// Final call (flags & CKF_END_OF_MESSAGE): finalize encryption and write tag to pParameter.
+CK_RV SoftHSM::C_EncryptMessageNext(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pPlaintextPart, CK_ULONG ulPlaintextPartLen,
+	CK_BYTE_PTR pCiphertextPart, CK_ULONG_PTR pulCiphertextPartLen,
+	CK_FLAGS flags)
+{
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	if (pPlaintextPart == NULL_PTR || pulCiphertextPartLen == NULL_PTR)
+		return CKR_ARGUMENTS_BAD;
+
+	auto sessionGuard = handleManager->getSessionShared(hSession);
+	Session* session = sessionGuard.get();
+	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	if (session->getOpType() != SESSION_OP_MESSAGE_ENCRYPT_BEGIN)
+		return CKR_OPERATION_NOT_INITIALIZED;
+
+	SymmetricAlgorithm* cipher = session->getSymmetricCryptoOp();
+	if (cipher == NULL) return CKR_OPERATION_NOT_INITIALIZED;
+
+	bool isLast = (flags & CKF_END_OF_MESSAGE) != 0;
+
+	if (!isLast) {
+		// Intermediate chunk: pass to encryptUpdate
+		if (pCiphertextPart == NULL_PTR) {
+			*pulCiphertextPartLen = ulPlaintextPartLen;
+			return CKR_OK;
+		}
+		if (*pulCiphertextPartLen < ulPlaintextPartLen) {
+			*pulCiphertextPartLen = ulPlaintextPartLen;
+			return CKR_BUFFER_TOO_SMALL;
+		}
+		ByteString plain(pPlaintextPart, ulPlaintextPartLen);
+		ByteString cipherOut;
+		if (!cipher->encryptUpdate(plain, cipherOut)) {
+			session->resetOp();
+			return CKR_GENERAL_ERROR;
+		}
+		if (cipherOut.size() > 0) memcpy(pCiphertextPart, cipherOut.byte_str(), cipherOut.size());
+		*pulCiphertextPartLen = (CK_ULONG)cipherOut.size();
+		return CKR_OK;
+	}
+
+	// Final chunk: pParameter must be CK_GCM_MESSAGE_PARAMS* (for pTag output)
+	if (pParameter == NULL_PTR || ulParameterLen != sizeof(CK_GCM_MESSAGE_PARAMS))
+		return CKR_ARGUMENTS_BAD;
+	CK_GCM_MESSAGE_PARAMS* p = (CK_GCM_MESSAGE_PARAMS*)pParameter;
+	if (p->pTag == NULL_PTR) return CKR_ARGUMENTS_BAD;
+
+	size_t tagBytes = cipher->getTagBytes();
+
+	ByteString plain(pPlaintextPart, ulPlaintextPartLen);
+	ByteString cipherOut;
+	ByteString finalPart;
+
+	if (!cipher->encryptUpdate(plain, cipherOut)) {
+		session->resetOp();
+		return CKR_GENERAL_ERROR;
+	}
+	if (!cipher->encryptFinal(finalPart)) {
+		session->resetOp();
+		return CKR_GENERAL_ERROR;
+	}
+
+	// finalPart = tag (for GCM); write cipherOut to caller
+	CK_ULONG needLen = (CK_ULONG)cipherOut.size();
+	if (pCiphertextPart == NULL_PTR) {
+		*pulCiphertextPartLen = needLen;
+		// Note: cipher is now consumed (encryptFinal called). Reset to recover.
+		session->setSymmetricCryptoOp(NULL); // recycles cipher + key
+		session->setOpType(SESSION_OP_MESSAGE_ENCRYPT);
+		return CKR_OK;
+	}
+	if (*pulCiphertextPartLen < needLen) {
+		*pulCiphertextPartLen = needLen;
+		session->setSymmetricCryptoOp(NULL);
+		session->setOpType(SESSION_OP_MESSAGE_ENCRYPT);
+		return CKR_BUFFER_TOO_SMALL;
+	}
+
+	if (cipherOut.size() > 0) memcpy(pCiphertextPart, cipherOut.byte_str(), cipherOut.size());
+	*pulCiphertextPartLen = (CK_ULONG)cipherOut.size();
+
+	if (finalPart.size() >= tagBytes)
+		memcpy(p->pTag, finalPart.byte_str(), tagBytes);
+
+	// Tear down streaming cipher; GcmMsgCtx in param survives for the next message
+	session->setSymmetricCryptoOp(NULL); // recycles cipher + key
+	session->setOpType(SESSION_OP_MESSAGE_ENCRYPT);
+	return CKR_OK;
+}
+
+// ─── C_MessageEncryptFinal ───────────────────────────────────────────────────
+CK_RV SoftHSM::C_MessageEncryptFinal(CK_SESSION_HANDLE hSession)
+{
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	auto sessionGuard = handleManager->getSessionShared(hSession);
+	Session* session = sessionGuard.get();
+	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	if (session->getOpType() != SESSION_OP_MESSAGE_ENCRYPT)
+		return CKR_OPERATION_NOT_INITIALIZED;
+	session->resetOp(); // frees GcmMsgCtx param + any leftover cipher
+	return CKR_OK;
+}
+
+// ─── C_MessageDecryptInit ────────────────────────────────────────────────────
+CK_RV SoftHSM::C_MessageDecryptInit(CK_SESSION_HANDLE hSession,
+	CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
+{
+	return MsgAesGcmInit(hSession, pMechanism, hKey, CKA_DECRYPT, SESSION_OP_MESSAGE_DECRYPT);
+}
+
+// ─── C_DecryptMessage ────────────────────────────────────────────────────────
+// One-shot per-message AES-GCM decrypt. pParameter must be CK_GCM_MESSAGE_PARAMS*.
+// pParameter->pTag holds the authentication tag to verify.
+CK_RV SoftHSM::C_DecryptMessage(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pAssociatedData, CK_ULONG ulAssociatedDataLen,
+	CK_BYTE_PTR pCiphertext, CK_ULONG ulCiphertextLen,
+	CK_BYTE_PTR pPlaintext, CK_ULONG_PTR pulPlaintextLen)
+{
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	if (pParameter == NULL_PTR || ulParameterLen != sizeof(CK_GCM_MESSAGE_PARAMS))
+		return CKR_ARGUMENTS_BAD;
+	if (pCiphertext == NULL_PTR || pulPlaintextLen == NULL_PTR)
+		return CKR_ARGUMENTS_BAD;
+
+	auto sessionGuard = handleManager->getSessionShared(hSession);
+	Session* session = sessionGuard.get();
+	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	if (session->getOpType() != SESSION_OP_MESSAGE_DECRYPT)
+		return CKR_OPERATION_NOT_INITIALIZED;
+
+	size_t ctxLen;
+	GcmMsgCtx* ctx = (GcmMsgCtx*)session->getParameters(ctxLen);
+	if (ctx == NULL || ctxLen < sizeof(GcmMsgCtx)) return CKR_OPERATION_NOT_INITIALIZED;
+
+	CK_GCM_MESSAGE_PARAMS* p = (CK_GCM_MESSAGE_PARAMS*)pParameter;
+	if (p->pIv == NULL_PTR || p->ulIvLen == 0)
+		return CKR_MECHANISM_PARAM_INVALID;
+	if (p->pTag == NULL_PTR || p->ulTagBits == 0 || p->ulTagBits > 128 || p->ulTagBits % 8 != 0)
+		return CKR_MECHANISM_PARAM_INVALID;
+
+	ByteString iv(p->pIv, p->ulIvLen);
+	ByteString aad(pAssociatedData, ulAssociatedDataLen);
+	size_t tagBytes = p->ulTagBits / 8;
+
+	return aesgcmDecryptOneShot(ctx->keyData, (size_t)ctx->keyLen,
+		iv, aad, tagBytes,
+		(const uint8_t*)p->pTag,
+		pCiphertext, ulCiphertextLen,
+		pPlaintext, pulPlaintextLen);
+	// session op type stays MESSAGE_DECRYPT — caller may send more messages
+}
+
+// ─── C_DecryptMessageBegin ───────────────────────────────────────────────────
+// Commits IV and AAD for streaming decrypt; transitions to MESSAGE_DECRYPT_BEGIN.
+// pParameter->pTag is not used at Begin time; it is provided at the final Next call.
+CK_RV SoftHSM::C_DecryptMessageBegin(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pAssociatedData, CK_ULONG ulAssociatedDataLen)
+{
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	if (pParameter == NULL_PTR || ulParameterLen != sizeof(CK_GCM_MESSAGE_PARAMS))
+		return CKR_ARGUMENTS_BAD;
+
+	auto sessionGuard = handleManager->getSessionShared(hSession);
+	Session* session = sessionGuard.get();
+	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	if (session->getOpType() != SESSION_OP_MESSAGE_DECRYPT)
+		return CKR_OPERATION_NOT_INITIALIZED;
+
+	size_t ctxLen;
+	GcmMsgCtx* ctx = (GcmMsgCtx*)session->getParameters(ctxLen);
+	if (ctx == NULL || ctxLen < sizeof(GcmMsgCtx)) return CKR_OPERATION_NOT_INITIALIZED;
+
+	CK_GCM_MESSAGE_PARAMS* p = (CK_GCM_MESSAGE_PARAMS*)pParameter;
+	if (p->pIv == NULL_PTR || p->ulIvLen == 0)
+		return CKR_MECHANISM_PARAM_INVALID;
+	if (p->ulTagBits == 0 || p->ulTagBits > 128 || p->ulTagBits % 8 != 0)
+		return CKR_MECHANISM_PARAM_INVALID;
+
+	SymmetricAlgorithm* cipher = CryptoFactory::i()->getSymmetricAlgorithm(SymAlgo::AES);
+	if (cipher == NULL) return CKR_MECHANISM_INVALID;
+
+	SymmetricKey* symKey = new SymmetricKey();
+	symKey->setKeyBits(ByteString(ctx->keyData, ctx->keyLen));
+	symKey->setBitLen((size_t)ctx->keyLen * 8);
+
+	ByteString iv(p->pIv, p->ulIvLen);
+	ByteString aad(pAssociatedData, ulAssociatedDataLen);
+	size_t tagBytes = p->ulTagBits / 8;
+
+	if (!cipher->decryptInit(symKey, SymMode::GCM, iv, false, 0, aad, tagBytes)) {
+		cipher->recycleKey(symKey);
+		CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
+		return CKR_MECHANISM_INVALID;
+	}
+
+	session->setSymmetricCryptoOp(cipher);
+	session->setSymmetricKey(symKey);
+	session->setAllowMultiPartOp(true);
+	session->setAllowSinglePartOp(false);
+	session->setOpType(SESSION_OP_MESSAGE_DECRYPT_BEGIN);
+	return CKR_OK;
+}
+
+// ─── C_DecryptMessageNext ────────────────────────────────────────────────────
+// Intermediate call (!(flags & CKF_END_OF_MESSAGE)): accumulate ciphertext chunk.
+// GCM requires all ciphertext + tag before plaintext can be released (AEAD guarantee).
+// The OSSL layer buffers internally; decryptUpdate returns nothing for GCM.
+// Final call (flags & CKF_END_OF_MESSAGE): pParameter must supply the auth tag in pTag.
+//   Internally this call feeds the tag concatenated with remaining ciphertext and finalises.
+CK_RV SoftHSM::C_DecryptMessageNext(CK_SESSION_HANDLE hSession,
+	CK_VOID_PTR pParameter, CK_ULONG ulParameterLen,
+	CK_BYTE_PTR pCiphertextPart, CK_ULONG ulCiphertextPartLen,
+	CK_BYTE_PTR pPlaintextPart, CK_ULONG_PTR pulPlaintextPartLen,
+	CK_FLAGS flags)
+{
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	if (pulPlaintextPartLen == NULL_PTR) return CKR_ARGUMENTS_BAD;
+
+	auto sessionGuard = handleManager->getSessionShared(hSession);
+	Session* session = sessionGuard.get();
+	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	if (session->getOpType() != SESSION_OP_MESSAGE_DECRYPT_BEGIN)
+		return CKR_OPERATION_NOT_INITIALIZED;
+
+	SymmetricAlgorithm* cipher = session->getSymmetricCryptoOp();
+	if (cipher == NULL) return CKR_OPERATION_NOT_INITIALIZED;
+
+	bool isLast = (flags & CKF_END_OF_MESSAGE) != 0;
+
+	if (!isLast) {
+		// Intermediate chunk: feed to decryptUpdate.
+		// GCM buffers all data internally; plaintext is not available until the final call.
+		if (pCiphertextPart != NULL_PTR && ulCiphertextPartLen > 0) {
+			ByteString cipherChunk(pCiphertextPart, ulCiphertextPartLen);
+			ByteString dummy;
+			if (!cipher->decryptUpdate(cipherChunk, dummy)) {
+				session->resetOp();
+				return CKR_ENCRYPTED_DATA_INVALID;
+			}
+		}
+		*pulPlaintextPartLen = 0;
+		return CKR_OK;
+	}
+
+	// Final: pParameter must be CK_GCM_MESSAGE_PARAMS* with pTag set
+	if (pParameter == NULL_PTR || ulParameterLen != sizeof(CK_GCM_MESSAGE_PARAMS))
+		return CKR_ARGUMENTS_BAD;
+	CK_GCM_MESSAGE_PARAMS* p = (CK_GCM_MESSAGE_PARAMS*)pParameter;
+	if (p->pTag == NULL_PTR) return CKR_ARGUMENTS_BAD;
+
+	size_t tagBytes = cipher->getTagBytes();
+
+	// Feed any final ciphertext chunk; then append tag so OSSL can verify it.
+	// OSSL GCM decryptFinal reads the last tagBytes from the AEAD buffer as the tag.
+	ByteString tagAndFinal;
+	if (pCiphertextPart != NULL_PTR && ulCiphertextPartLen > 0) {
+		ByteString cipherChunk(pCiphertextPart, ulCiphertextPartLen);
+		ByteString dummy;
+		if (!cipher->decryptUpdate(cipherChunk, dummy)) {
+			session->resetOp();
+			return CKR_ENCRYPTED_DATA_INVALID;
+		}
+	}
+	// Feed tag as the final input so OSSL can extract and verify it via decryptFinal
+	ByteString tagBuf((const uint8_t*)p->pTag, tagBytes);
+	ByteString dummy2;
+	if (!cipher->decryptUpdate(tagBuf, dummy2)) {
+		session->resetOp();
+		return CKR_ENCRYPTED_DATA_INVALID;
+	}
+
+	ByteString plainOut;
+	if (!cipher->decryptFinal(plainOut)) {
+		session->resetOp();
+		return CKR_ENCRYPTED_DATA_INVALID;
+	}
+
+	CK_ULONG plainLen = (CK_ULONG)plainOut.size();
+	if (pPlaintextPart == NULL_PTR) {
+		*pulPlaintextPartLen = plainLen;
+		session->setSymmetricCryptoOp(NULL);
+		session->setOpType(SESSION_OP_MESSAGE_DECRYPT);
+		return CKR_OK;
+	}
+	if (*pulPlaintextPartLen < plainLen) {
+		*pulPlaintextPartLen = plainLen;
+		session->setSymmetricCryptoOp(NULL);
+		session->setOpType(SESSION_OP_MESSAGE_DECRYPT);
+		return CKR_BUFFER_TOO_SMALL;
+	}
+
+	if (plainLen > 0) memcpy(pPlaintextPart, plainOut.byte_str(), plainLen);
+	*pulPlaintextPartLen = plainLen;
+
+	session->setSymmetricCryptoOp(NULL);
+	session->setOpType(SESSION_OP_MESSAGE_DECRYPT);
+	return CKR_OK;
+}
+
+// ─── C_MessageDecryptFinal ───────────────────────────────────────────────────
+CK_RV SoftHSM::C_MessageDecryptFinal(CK_SESSION_HANDLE hSession)
+{
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	auto sessionGuard = handleManager->getSessionShared(hSession);
+	Session* session = sessionGuard.get();
+	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	if (session->getOpType() != SESSION_OP_MESSAGE_DECRYPT)
+		return CKR_OPERATION_NOT_INITIALIZED;
+	session->resetOp(); // frees GcmMsgCtx param + any leftover cipher
+	return CKR_OK;
+}
+
 
