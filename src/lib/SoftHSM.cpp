@@ -3862,8 +3862,10 @@ static CK_RV parseMLDSASignContext(CK_MECHANISM_PTR pMechanism, MLDSA_SIGN_PARAM
 		return CKR_OK;
 	}
 
-	// Determine struct type from mechanism
-	bool isHashMech = (pMechanism->mechanism != CKM_ML_DSA);
+	// Only CKM_HASH_ML_DSA (generic) uses CK_HASH_SIGN_ADDITIONAL_CONTEXT (16 bytes).
+	// The specific CKM_HASH_ML_DSA_SHA256 etc. use CK_SIGN_ADDITIONAL_CONTEXT (12 bytes)
+	// — the hash algorithm is implicit in the mechanism constant.
+	bool isHashMech = (pMechanism->mechanism == CKM_HASH_ML_DSA);
 
 	if (!isHashMech)
 	{
