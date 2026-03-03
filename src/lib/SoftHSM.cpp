@@ -125,6 +125,90 @@ static constexpr CK_ULONG AES_KEY_BYTES_256         = 32UL;  ///< AES-256
 
 } // anonymous namespace
 
+// ---------------------------------------------------------------------------
+// Session acquisition helpers (H2)
+// ---------------------------------------------------------------------------
+
+CK_RV SoftHSM::acquireSession(CK_SESSION_HANDLE hSession,
+                               std::shared_ptr<Session>& outGuard,
+                               Session*& outSession)
+{
+	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	outGuard   = handleManager->getSessionShared(hSession);
+	outSession = outGuard.get();
+	if (outSession == NULL) return CKR_SESSION_HANDLE_INVALID;
+	if (outSession->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
+	return CKR_OK;
+}
+
+CK_RV SoftHSM::acquireSessionToken(CK_SESSION_HANDLE hSession,
+                                    std::shared_ptr<Session>& outGuard,
+                                    Session*& outSession,
+                                    Token*& outToken)
+{
+	CK_RV rv = acquireSession(hSession, outGuard, outSession);
+	if (rv != CKR_OK) return rv;
+	outToken = outSession->getToken();
+	if (outToken == NULL) return CKR_GENERAL_ERROR;
+	return CKR_OK;
+}
+
+CK_RV SoftHSM::acquireSessionTokenKey(CK_SESSION_HANDLE hSession,
+                                       CK_OBJECT_HANDLE hKey,
+                                       CK_ATTRIBUTE_TYPE usageAttr,
+                                       CK_MECHANISM_PTR pMechanism,
+                                       std::shared_ptr<Session>& outGuard,
+                                       Session*& outSession,
+                                       Token*& outToken,
+                                       OSObject*& outKey)
+{
+	CK_RV rv = acquireSessionToken(hSession, outGuard, outSession, outToken);
+	if (rv != CKR_OK) return rv;
+	outKey = (OSObject*)handleManager->getObject(hKey);
+	if (outKey == NULL_PTR || !outKey->isValid()) return CKR_OBJECT_HANDLE_INVALID;
+	CK_BBOOL isOnToken = outKey->getBooleanValue(CKA_TOKEN,   false);
+	CK_BBOOL isPrivate = outKey->getBooleanValue(CKA_PRIVATE, true);
+	rv = haveRead(outSession->getState(), isOnToken, isPrivate);
+	if (rv != CKR_OK)
+	{
+		if (rv == CKR_USER_NOT_LOGGED_IN)
+			INFO_MSG("User is not authorized");
+		return rv;
+	}
+	if (!outKey->getBooleanValue(usageAttr, false)) return CKR_KEY_FUNCTION_NOT_PERMITTED;
+	if (pMechanism != NULL_PTR && !isMechanismPermitted(outKey, pMechanism->mechanism))
+		return CKR_MECHANISM_INVALID;
+	return CKR_OK;
+}
+
+void SoftHSM::cleanupKeyPair(AsymmetricAlgorithm* algo,
+                              AsymmetricKeyPair* kp,
+                              Token* /*token*/,
+                              CK_OBJECT_HANDLE_PTR phPublicKey,
+                              CK_OBJECT_HANDLE_PTR phPrivateKey,
+                              CK_RV rv)
+{
+	algo->recycleKeyPair(kp);
+	CryptoFactory::i()->recycleAsymmetricAlgorithm(algo);
+
+	if (rv != CKR_OK)
+	{
+		if (*phPrivateKey != CK_INVALID_HANDLE)
+		{
+			OSObject* ospriv = (OSObject*)handleManager->getObject(*phPrivateKey);
+			handleManager->destroyObject(*phPrivateKey);
+			if (ospriv) ospriv->destroyObject();
+			*phPrivateKey = CK_INVALID_HANDLE;
+		}
+		if (*phPublicKey != CK_INVALID_HANDLE)
+		{
+			OSObject* ospub = (OSObject*)handleManager->getObject(*phPublicKey);
+			handleManager->destroyObject(*phPublicKey);
+			if (ospub) ospub->destroyObject();
+			*phPublicKey = CK_INVALID_HANDLE;
+		}
+	}
+}
 
 // Initialise the one-and-only instance
 
@@ -2110,42 +2194,13 @@ CK_RV SoftHSM::SymEncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	// Get the session
-	auto sessionGuard = handleManager->getSessionShared(hSession);
-	Session* session = sessionGuard.get();
-	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	std::shared_ptr<Session> sessionGuard;
+	Session* session; Token* token; OSObject* key;
+	CK_RV rv = acquireSessionTokenKey(hSession, hKey, CKA_ENCRYPT, pMechanism,
+	                                   sessionGuard, session, token, key);
+	if (rv != CKR_OK) return rv;
 
-	// Check if we have another operation
-	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
-
-	// Get the token
-	Token* token = session->getToken();
-	if (token == NULL) return CKR_GENERAL_ERROR;
-
-	// Check the key handle.
-	OSObject *key = (OSObject *)handleManager->getObject(hKey);
-	if (key == NULL_PTR || !key->isValid()) return CKR_OBJECT_HANDLE_INVALID;
-
-	CK_BBOOL isOnToken = key->getBooleanValue(CKA_TOKEN, false);
-	CK_BBOOL isPrivate = key->getBooleanValue(CKA_PRIVATE, true);
-
-	// Check read user credentials
-	CK_RV rv = haveRead(session->getState(), isOnToken, isPrivate);
-	if (rv != CKR_OK)
-	{
-		if (rv == CKR_USER_NOT_LOGGED_IN)
-			INFO_MSG("User is not authorized");
-
-		return rv;
-	}
-
-	// Check if key can be used for encryption
-	if (!key->getBooleanValue(CKA_ENCRYPT, false))
-		return CKR_KEY_FUNCTION_NOT_PERMITTED;
-
-	// Check if the specified mechanism is allowed for the key
-	if (!isMechanismPermitted(key, pMechanism->mechanism))
-		return CKR_MECHANISM_INVALID;
+	// Get key info
 
 	// Get key info
 	CK_KEY_TYPE keyType = key->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED);
@@ -2281,42 +2336,13 @@ CK_RV SoftHSM::AsymEncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMec
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	// Get the session
-	auto sessionGuard = handleManager->getSessionShared(hSession);
-	Session* session = sessionGuard.get();
-	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	std::shared_ptr<Session> sessionGuard;
+	Session* session; Token* token; OSObject* key;
+	CK_RV rv = acquireSessionTokenKey(hSession, hKey, CKA_ENCRYPT, pMechanism,
+	                                   sessionGuard, session, token, key);
+	if (rv != CKR_OK) return rv;
 
-	// Check if we have another operation
-	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
-
-	// Get the token
-	Token* token = session->getToken();
-	if (token == NULL) return CKR_GENERAL_ERROR;
-
-	// Check the key handle.
-	OSObject *key = (OSObject *)handleManager->getObject(hKey);
-	if (key == NULL_PTR || !key->isValid()) return CKR_OBJECT_HANDLE_INVALID;
-
-	CK_BBOOL isOnToken = key->getBooleanValue(CKA_TOKEN, false);
-	CK_BBOOL isPrivate = key->getBooleanValue(CKA_PRIVATE, true);
-
-	// Check read user credentials
-	CK_RV rv = haveRead(session->getState(), isOnToken, isPrivate);
-	if (rv != CKR_OK)
-	{
-		if (rv == CKR_USER_NOT_LOGGED_IN)
-			INFO_MSG("User is not authorized");
-
-		return rv;
-	}
-
-	// Check if key can be used for encryption
-	if (!key->getBooleanValue(CKA_ENCRYPT, false))
-		return CKR_KEY_FUNCTION_NOT_PERMITTED;
-
-	// Check if the specified mechanism is allowed for the key
-	if (!isMechanismPermitted(key, pMechanism->mechanism))
-		return CKR_MECHANISM_INVALID;
+	// Get key info
 
 	// Get key info
 	CK_KEY_TYPE keyType = key->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED);
@@ -2784,43 +2810,13 @@ CK_RV SoftHSM::SymDecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	// Get the session
-	auto sessionGuard = handleManager->getSessionShared(hSession);
-	Session* session = sessionGuard.get();
-	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	std::shared_ptr<Session> sessionGuard;
+	Session* session; Token* token; OSObject* key;
+	CK_RV rv = acquireSessionTokenKey(hSession, hKey, CKA_DECRYPT, pMechanism,
+	                                   sessionGuard, session, token, key);
+	if (rv != CKR_OK) return rv;
 
-	// Get the token
-	Token* token = session->getToken();
-	if (token == NULL) return CKR_GENERAL_ERROR;
-
-	// Check if we have another operation
-	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
-
-	// Check the key handle.
-	OSObject *key = (OSObject *)handleManager->getObject(hKey);
-	if (key == NULL_PTR || !key->isValid()) return CKR_OBJECT_HANDLE_INVALID;
-
-	CK_BBOOL isOnToken = key->getBooleanValue(CKA_TOKEN, false);
-	CK_BBOOL isPrivate = key->getBooleanValue(CKA_PRIVATE, true);
-
-	// Check read user credentials
-	CK_RV rv = haveRead(session->getState(), isOnToken, isPrivate);
-	if (rv != CKR_OK)
-	{
-		if (rv == CKR_USER_NOT_LOGGED_IN)
-			INFO_MSG("User is not authorized");
-
-		return rv;
-	}
-
-	// Check if key can be used for decryption
-	if (!key->getBooleanValue(CKA_DECRYPT, false))
-		return CKR_KEY_FUNCTION_NOT_PERMITTED;
-
-
-	// Check if the specified mechanism is allowed for the key
-	if (!isMechanismPermitted(key, pMechanism->mechanism))
-		return CKR_MECHANISM_INVALID;
+	// Get key info
 
 	// Get key info
 	CK_KEY_TYPE keyType = key->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED);
@@ -2956,42 +2952,13 @@ CK_RV SoftHSM::AsymDecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMec
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	// Get the session
-	auto sessionGuard = handleManager->getSessionShared(hSession);
-	Session* session = sessionGuard.get();
-	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	std::shared_ptr<Session> sessionGuard;
+	Session* session; Token* token; OSObject* key;
+	CK_RV rv = acquireSessionTokenKey(hSession, hKey, CKA_DECRYPT, pMechanism,
+	                                   sessionGuard, session, token, key);
+	if (rv != CKR_OK) return rv;
 
-	// Get the token
-	Token* token = session->getToken();
-	if (token == NULL) return CKR_GENERAL_ERROR;
-
-	// Check if we have another operation
-	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
-
-	// Check the key handle.
-	OSObject *key = (OSObject *)handleManager->getObject(hKey);
-	if (key == NULL_PTR || !key->isValid()) return CKR_OBJECT_HANDLE_INVALID;
-
-	CK_BBOOL isOnToken = key->getBooleanValue(CKA_TOKEN, false);
-	CK_BBOOL isPrivate = key->getBooleanValue(CKA_PRIVATE, true);
-
-	// Check read user credentials
-	CK_RV rv = haveRead(session->getState(), isOnToken, isPrivate);
-	if (rv != CKR_OK)
-	{
-		if (rv == CKR_USER_NOT_LOGGED_IN)
-			INFO_MSG("User is not authorized");
-
-		return rv;
-	}
-
-	// Check if key can be used for decryption
-	if (!key->getBooleanValue(CKA_DECRYPT, false))
-		return CKR_KEY_FUNCTION_NOT_PERMITTED;
-
-	// Check if the specified mechanism is allowed for the key
-	if (!isMechanismPermitted(key, pMechanism->mechanism))
-		return CKR_MECHANISM_INVALID;
+	// Get key info
 
 	// Get key info
 	CK_KEY_TYPE keyType = key->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED);
@@ -3456,13 +3423,9 @@ CK_RV SoftHSM::C_DigestInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	// Get the session
-	auto sessionGuard = handleManager->getSessionShared(hSession);
-	Session* session = sessionGuard.get();
-	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
-
-	// Check if we have another operation
-	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
+	std::shared_ptr<Session> sessionGuard; Session* session;
+	CK_RV rv = acquireSession(hSession, sessionGuard, session);
+	if (rv != CKR_OK) return rv;
 
 	// Get the mechanism
 	HashAlgo::Type algo = HashAlgo::Unknown;
@@ -3842,42 +3805,13 @@ CK_RV SoftHSM::MacSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechani
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	// Get the session
-	auto sessionGuard = handleManager->getSessionShared(hSession);
-	Session* session = sessionGuard.get();
-	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	std::shared_ptr<Session> sessionGuard;
+	Session* session; Token* token; OSObject* key;
+	CK_RV rv = acquireSessionTokenKey(hSession, hKey, CKA_SIGN, pMechanism,
+	                                   sessionGuard, session, token, key);
+	if (rv != CKR_OK) return rv;
 
-	// Check if we have another operation
-	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
-
-	// Get the token
-	Token* token = session->getToken();
-	if (token == NULL) return CKR_GENERAL_ERROR;
-
-	// Check the key handle.
-	OSObject *key = (OSObject *)handleManager->getObject(hKey);
-	if (key == NULL_PTR || !key->isValid()) return CKR_OBJECT_HANDLE_INVALID;
-
-	CK_BBOOL isOnToken = key->getBooleanValue(CKA_TOKEN, false);
-	CK_BBOOL isPrivate = key->getBooleanValue(CKA_PRIVATE, true);
-
-	// Check read user credentials
-	CK_RV rv = haveRead(session->getState(), isOnToken, isPrivate);
-	if (rv != CKR_OK)
-	{
-		if (rv == CKR_USER_NOT_LOGGED_IN)
-			INFO_MSG("User is not authorized");
-
-		return rv;
-	}
-
-	// Check if key can be used for signing
-	if (!key->getBooleanValue(CKA_SIGN, false))
-		return CKR_KEY_FUNCTION_NOT_PERMITTED;
-
-	// Check if the specified mechanism is allowed for the key
-	if (!isMechanismPermitted(key, pMechanism->mechanism))
-		return CKR_MECHANISM_INVALID;
+	// Get key info
 
 	// Get key info
 	CK_KEY_TYPE keyType = key->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED);
@@ -4048,42 +3982,13 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	// Get the session
-	auto sessionGuard = handleManager->getSessionShared(hSession);
-	Session* session = sessionGuard.get();
-	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	std::shared_ptr<Session> sessionGuard;
+	Session* session; Token* token; OSObject* key;
+	CK_RV rv = acquireSessionTokenKey(hSession, hKey, CKA_SIGN, pMechanism,
+	                                   sessionGuard, session, token, key);
+	if (rv != CKR_OK) return rv;
 
-	// Check if we have another operation
-	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
-
-	// Get the token
-	Token* token = session->getToken();
-	if (token == NULL) return CKR_GENERAL_ERROR;
-
-	// Check the key handle.
-	OSObject *key = (OSObject *)handleManager->getObject(hKey);
-	if (key == NULL_PTR || !key->isValid()) return CKR_OBJECT_HANDLE_INVALID;
-
-	CK_BBOOL isOnToken = key->getBooleanValue(CKA_TOKEN, false);
-	CK_BBOOL isPrivate = key->getBooleanValue(CKA_PRIVATE, true);
-
-	// Check read user credentials
-	CK_RV rv = haveRead(session->getState(), isOnToken, isPrivate);
-	if (rv != CKR_OK)
-	{
-		if (rv == CKR_USER_NOT_LOGGED_IN)
-			INFO_MSG("User is not authorized");
-
-		return rv;
-	}
-
-	// Check if key can be used for signing
-	if (!key->getBooleanValue(CKA_SIGN, false))
-		return CKR_KEY_FUNCTION_NOT_PERMITTED;
-
-	// Check if the specified mechanism is allowed for the key
-	if (!isMechanismPermitted(key, pMechanism->mechanism))
-		return CKR_MECHANISM_INVALID;
+	// Get key info
 
 	// Get the asymmetric algorithm matching the mechanism
 	AsymMech::Type mechanism = AsymMech::Unknown;
@@ -4917,13 +4822,8 @@ CK_RV SoftHSM::C_SignRecoverInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR /*
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
-	// Get the session
-	auto sessionGuard = handleManager->getSessionShared(hSession);
-	Session* session = sessionGuard.get();
-	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
-
-	// Check if we have another operation
-	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
+	std::shared_ptr<Session> sessionGuard; Session* session;
+	{ CK_RV rv = acquireSession(hSession, sessionGuard, session); if (rv != CKR_OK) return rv; }
 
 	// CKM_RSA_X_509 recovery is not planned in the current Phase 0â6 roadmap.
 	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
@@ -4952,42 +4852,13 @@ CK_RV SoftHSM::MacVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	// Get the session
-	auto sessionGuard = handleManager->getSessionShared(hSession);
-	Session* session = sessionGuard.get();
-	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	std::shared_ptr<Session> sessionGuard;
+	Session* session; Token* token; OSObject* key;
+	CK_RV rv = acquireSessionTokenKey(hSession, hKey, CKA_VERIFY, pMechanism,
+	                                   sessionGuard, session, token, key);
+	if (rv != CKR_OK) return rv;
 
-	// Check if we have another operation
-	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
-
-	// Get the token
-	Token* token = session->getToken();
-	if (token == NULL) return CKR_GENERAL_ERROR;
-
-	// Check the key handle.
-	OSObject *key = (OSObject *)handleManager->getObject(hKey);
-	if (key == NULL_PTR || !key->isValid()) return CKR_OBJECT_HANDLE_INVALID;
-
-	CK_BBOOL isOnToken = key->getBooleanValue(CKA_TOKEN, false);
-	CK_BBOOL isPrivate = key->getBooleanValue(CKA_PRIVATE, true);
-
-	// Check read user credentials
-	CK_RV rv = haveRead(session->getState(), isOnToken, isPrivate);
-	if (rv != CKR_OK)
-	{
-		if (rv == CKR_USER_NOT_LOGGED_IN)
-			INFO_MSG("User is not authorized");
-
-		return rv;
-	}
-
-	// Check if key can be used for verifying
-	if (!key->getBooleanValue(CKA_VERIFY, false))
-		return CKR_KEY_FUNCTION_NOT_PERMITTED;
-
-	// Check if the specified mechanism is allowed for the key
-	if (!isMechanismPermitted(key, pMechanism->mechanism))
-		return CKR_MECHANISM_INVALID;
+	// Get key info
 
 	// Get key info
 	CK_KEY_TYPE keyType = key->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED);
@@ -5044,42 +4915,13 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 
 	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	// Get the session
-	auto sessionGuard = handleManager->getSessionShared(hSession);
-	Session* session = sessionGuard.get();
-	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+	std::shared_ptr<Session> sessionGuard;
+	Session* session; Token* token; OSObject* key;
+	CK_RV rv = acquireSessionTokenKey(hSession, hKey, CKA_VERIFY, pMechanism,
+	                                   sessionGuard, session, token, key);
+	if (rv != CKR_OK) return rv;
 
-	// Check if we have another operation
-	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
-
-	// Get the token
-	Token* token = session->getToken();
-	if (token == NULL) return CKR_GENERAL_ERROR;
-
-	// Check the key handle.
-	OSObject *key = (OSObject *)handleManager->getObject(hKey);
-	if (key == NULL_PTR || !key->isValid()) return CKR_OBJECT_HANDLE_INVALID;
-
-	CK_BBOOL isOnToken = key->getBooleanValue(CKA_TOKEN, false);
-	CK_BBOOL isPrivate = key->getBooleanValue(CKA_PRIVATE, true);
-
-	// Check read user credentials
-	CK_RV rv = haveRead(session->getState(), isOnToken, isPrivate);
-	if (rv != CKR_OK)
-	{
-		if (rv == CKR_USER_NOT_LOGGED_IN)
-			INFO_MSG("User is not authorized");
-
-		return rv;
-	}
-
-	// Check if key can be used for verifying
-	if (!key->getBooleanValue(CKA_VERIFY, false))
-		return CKR_KEY_FUNCTION_NOT_PERMITTED;
-
-	// Check if the specified mechanism is allowed for the key
-	if (!isMechanismPermitted(key, pMechanism->mechanism))
-		return CKR_MECHANISM_INVALID;
+	// Get key info
 
 	// Get the asymmetric algorithm matching the mechanism
 	AsymMech::Type mechanism = AsymMech::Unknown;
@@ -6009,13 +5851,8 @@ CK_RV SoftHSM::C_VerifyRecoverInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR 
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
 
-	// Get the session
-	auto sessionGuard = handleManager->getSessionShared(hSession);
-	Session* session = sessionGuard.get();
-	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
-
-	// Check if we have another operation
-	if (session->getOpType() != SESSION_OP_NONE) return CKR_OPERATION_ACTIVE;
+	std::shared_ptr<Session> sessionGuard; Session* session;
+	{ CK_RV rv = acquireSession(hSession, sessionGuard, session); if (rv != CKR_OK) return rv; }
 
 	// CKM_RSA_X_509 recovery is not planned in the current Phase 0â6 roadmap.
 	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
@@ -8448,29 +8285,7 @@ CK_RV SoftHSM::generateRSA
 		}
 	}
 
-	// Clean up
-	rsa->recycleKeyPair(kp);
-	CryptoFactory::i()->recycleAsymmetricAlgorithm(rsa);
-
-	// Remove keys that may have been created already when the function fails.
-	if (rv != CKR_OK)
-	{
-		if (*phPrivateKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospriv = (OSObject*)handleManager->getObject(*phPrivateKey);
-			handleManager->destroyObject(*phPrivateKey);
-			if (ospriv) ospriv->destroyObject();
-			*phPrivateKey = CK_INVALID_HANDLE;
-		}
-
-		if (*phPublicKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospub = (OSObject*)handleManager->getObject(*phPublicKey);
-			handleManager->destroyObject(*phPublicKey);
-			if (ospub) ospub->destroyObject();
-			*phPublicKey = CK_INVALID_HANDLE;
-		}
-	}
+	cleanupKeyPair(rsa, kp, NULL, phPublicKey, phPrivateKey, rv);
 
 	return rv;
 }
@@ -8695,29 +8510,7 @@ CK_RV SoftHSM::generateEC
 		}
 	}
 
-	// Clean up
-	ec->recycleKeyPair(kp);
-	CryptoFactory::i()->recycleAsymmetricAlgorithm(ec);
-
-	// Remove keys that may have been created already when the function fails.
-	if (rv != CKR_OK)
-	{
-		if (*phPrivateKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospriv = (OSObject*)handleManager->getObject(*phPrivateKey);
-			handleManager->destroyObject(*phPrivateKey);
-			if (ospriv) ospriv->destroyObject();
-			*phPrivateKey = CK_INVALID_HANDLE;
-		}
-
-		if (*phPublicKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospub = (OSObject*)handleManager->getObject(*phPublicKey);
-			handleManager->destroyObject(*phPublicKey);
-			if (ospub) ospub->destroyObject();
-			*phPublicKey = CK_INVALID_HANDLE;
-		}
-	}
+	cleanupKeyPair(ec, kp, NULL, phPublicKey, phPrivateKey, rv);
 
 	return rv;
 }
@@ -8954,29 +8747,7 @@ CK_RV SoftHSM::generateED
 		}
 	}
 
-	// Clean up
-	ec->recycleKeyPair(kp);
-	CryptoFactory::i()->recycleAsymmetricAlgorithm(ec);
-
-	// Remove keys that may have been created already when the function fails.
-	if (rv != CKR_OK)
-	{
-		if (*phPrivateKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospriv = (OSObject*)handleManager->getObject(*phPrivateKey);
-			handleManager->destroyObject(*phPrivateKey);
-			if (ospriv) ospriv->destroyObject();
-			*phPrivateKey = CK_INVALID_HANDLE;
-		}
-
-		if (*phPublicKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospub = (OSObject*)handleManager->getObject(*phPublicKey);
-			handleManager->destroyObject(*phPublicKey);
-			if (ospub) ospub->destroyObject();
-			*phPublicKey = CK_INVALID_HANDLE;
-		}
-	}
+	cleanupKeyPair(ec, kp, NULL, phPublicKey, phPrivateKey, rv);
 
 	return rv;
 }
@@ -9178,28 +8949,7 @@ CK_RV SoftHSM::generateMLDSA
 		}
 	}
 
-	// Clean up
-	mldsa->recycleKeyPair(kp);
-	CryptoFactory::i()->recycleAsymmetricAlgorithm(mldsa);
-
-	// Remove keys that may have been created already when the function fails.
-	if (rv != CKR_OK)
-	{
-		if (*phPrivateKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospriv = (OSObject*)handleManager->getObject(*phPrivateKey);
-			handleManager->destroyObject(*phPrivateKey);
-			if (ospriv) ospriv->destroyObject();
-			*phPrivateKey = CK_INVALID_HANDLE;
-		}
-		if (*phPublicKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospub = (OSObject*)handleManager->getObject(*phPublicKey);
-			handleManager->destroyObject(*phPublicKey);
-			if (ospub) ospub->destroyObject();
-			*phPublicKey = CK_INVALID_HANDLE;
-		}
-	}
+	cleanupKeyPair(mldsa, kp, NULL, phPublicKey, phPrivateKey, rv);
 
 	return rv;
 }
@@ -9401,28 +9151,7 @@ CK_RV SoftHSM::generateSLHDSA
 		}
 	}
 
-	// Clean up
-	slhdsa->recycleKeyPair(kp);
-	CryptoFactory::i()->recycleAsymmetricAlgorithm(slhdsa);
-
-	// Remove keys that may have been created already when the function fails.
-	if (rv != CKR_OK)
-	{
-		if (*phPrivateKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospriv = (OSObject*)handleManager->getObject(*phPrivateKey);
-			handleManager->destroyObject(*phPrivateKey);
-			if (ospriv) ospriv->destroyObject();
-			*phPrivateKey = CK_INVALID_HANDLE;
-		}
-		if (*phPublicKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospub = (OSObject*)handleManager->getObject(*phPublicKey);
-			handleManager->destroyObject(*phPublicKey);
-			if (ospub) ospub->destroyObject();
-			*phPublicKey = CK_INVALID_HANDLE;
-		}
-	}
+	cleanupKeyPair(slhdsa, kp, NULL, phPublicKey, phPrivateKey, rv);
 
 	return rv;
 }
@@ -11292,28 +11021,7 @@ CK_RV SoftHSM::generateMLKEM
 		}
 	}
 
-	// Clean up
-	mlkem->recycleKeyPair(kp);
-	CryptoFactory::i()->recycleAsymmetricAlgorithm(mlkem);
-
-	// Remove keys that may have been created already when the function fails.
-	if (rv != CKR_OK)
-	{
-		if (*phPrivateKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospriv = (OSObject*)handleManager->getObject(*phPrivateKey);
-			handleManager->destroyObject(*phPrivateKey);
-			if (ospriv) ospriv->destroyObject();
-			*phPrivateKey = CK_INVALID_HANDLE;
-		}
-		if (*phPublicKey != CK_INVALID_HANDLE)
-		{
-			OSObject* ospub = (OSObject*)handleManager->getObject(*phPublicKey);
-			handleManager->destroyObject(*phPublicKey);
-			if (ospub) ospub->destroyObject();
-			*phPublicKey = CK_INVALID_HANDLE;
-		}
-	}
+	cleanupKeyPair(mlkem, kp, NULL, phPublicKey, phPrivateKey, rv);
 
 	return rv;
 }

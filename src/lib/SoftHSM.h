@@ -486,5 +486,40 @@ private:
 	bool isMechanismPermitted(OSObject* key, CK_MECHANISM_TYPE mechanism);
 	void prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE> &t);
 	bool detectFork(void);
+
+	// -------------------------------------------------------------------------
+	// Session acquisition helpers — eliminate the 5-step boilerplate repeated
+	// across ~76 C_* functions.  outGuard must outlive the raw pointer it guards;
+	// always declare it before outSession/outToken/outKey at each call site.
+	// -------------------------------------------------------------------------
+	CK_RV acquireSession(
+		CK_SESSION_HANDLE           hSession,
+		std::shared_ptr<Session>&   outGuard,
+		Session*&                   outSession);
+
+	CK_RV acquireSessionToken(
+		CK_SESSION_HANDLE           hSession,
+		std::shared_ptr<Session>&   outGuard,
+		Session*&                   outSession,
+		Token*&                     outToken);
+
+	CK_RV acquireSessionTokenKey(
+		CK_SESSION_HANDLE           hSession,
+		CK_OBJECT_HANDLE            hKey,
+		CK_ATTRIBUTE_TYPE           usageAttr,
+		CK_MECHANISM_PTR            pMechanism,
+		std::shared_ptr<Session>&   outGuard,
+		Session*&                   outSession,
+		Token*&                     outToken,
+		OSObject*&                  outKey);
+
+	/// Recycles algorithm/key-pair objects and destroys both key handles if rv != CKR_OK.
+	void cleanupKeyPair(
+		AsymmetricAlgorithm*        algo,
+		AsymmetricKeyPair*          kp,
+		Token*                      token,
+		CK_OBJECT_HANDLE_PTR        phPublicKey,
+		CK_OBJECT_HANDLE_PTR        phPrivateKey,
+		CK_RV                       rv);
 };
 
