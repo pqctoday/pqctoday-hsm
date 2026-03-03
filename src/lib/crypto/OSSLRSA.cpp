@@ -1086,13 +1086,13 @@ bool OSSLRSA::encrypt(PublicKey* publicKey, const ByteString& data,
 		}
 		osslPadding = RSA_PKCS1_PADDING;
 	}
-	else if (padding == AsymMech::RSA_PKCS_OAEP)
+	else if (padding == AsymMech::RSA_PKCS_OAEP ||
+	         padding == AsymMech::RSA_PKCS_OAEP_SHA224 ||
+	         padding == AsymMech::RSA_PKCS_OAEP_SHA256 ||
+	         padding == AsymMech::RSA_PKCS_OAEP_SHA384 ||
+	         padding == AsymMech::RSA_PKCS_OAEP_SHA512)
 	{
-		if (data.size() > nSize - 41)
-		{
-			ERROR_MSG("Too much data supplied for RSA OAEP encryption");
-			return false;
-		}
+		// OAEP overhead: 2*hashLen + 2; SHA-1=42, SHA-256=66, SHA-384=98, SHA-512=130
 		osslPadding = RSA_PKCS1_OAEP_PADDING;
 	}
 	else if (padding == AsymMech::RSA)
@@ -1117,6 +1117,29 @@ bool OSSLRSA::encrypt(PublicKey* publicKey, const ByteString& data,
 		ERROR_MSG("RSA encrypt init failed (0x%08X)", ERR_get_error());
 		EVP_PKEY_CTX_free(ctx);
 		return false;
+	}
+
+	// Set OAEP hash and MGF if not default SHA-1
+	if (padding == AsymMech::RSA_PKCS_OAEP_SHA224 ||
+	    padding == AsymMech::RSA_PKCS_OAEP_SHA256 ||
+	    padding == AsymMech::RSA_PKCS_OAEP_SHA384 ||
+	    padding == AsymMech::RSA_PKCS_OAEP_SHA512)
+	{
+		const EVP_MD* md = NULL;
+		switch (padding) {
+			case AsymMech::RSA_PKCS_OAEP_SHA224: md = EVP_sha224(); break;
+			case AsymMech::RSA_PKCS_OAEP_SHA256: md = EVP_sha256(); break;
+			case AsymMech::RSA_PKCS_OAEP_SHA384: md = EVP_sha384(); break;
+			case AsymMech::RSA_PKCS_OAEP_SHA512: md = EVP_sha512(); break;
+			default: break;
+		}
+		if (EVP_PKEY_CTX_set_rsa_oaep_md(ctx, md) <= 0 ||
+		    EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, md) <= 0)
+		{
+			ERROR_MSG("Failed to set OAEP hash (0x%08X)", ERR_get_error());
+			EVP_PKEY_CTX_free(ctx);
+			return false;
+		}
 	}
 
 	// Query output size, then encrypt
@@ -1174,9 +1197,13 @@ bool OSSLRSA::decrypt(PrivateKey* privateKey, const ByteString& encryptedData,
 
 	switch (padding)
 	{
-		case AsymMech::RSA_PKCS:      osslPadding = RSA_PKCS1_PADDING;      break;
-		case AsymMech::RSA_PKCS_OAEP: osslPadding = RSA_PKCS1_OAEP_PADDING; break;
-		case AsymMech::RSA:           osslPadding = RSA_NO_PADDING;          break;
+		case AsymMech::RSA_PKCS:             osslPadding = RSA_PKCS1_PADDING;      break;
+		case AsymMech::RSA_PKCS_OAEP:
+		case AsymMech::RSA_PKCS_OAEP_SHA224:
+		case AsymMech::RSA_PKCS_OAEP_SHA256:
+		case AsymMech::RSA_PKCS_OAEP_SHA384:
+		case AsymMech::RSA_PKCS_OAEP_SHA512: osslPadding = RSA_PKCS1_OAEP_PADDING; break;
+		case AsymMech::RSA:                  osslPadding = RSA_NO_PADDING;          break;
 		default:
 			ERROR_MSG("Invalid padding mechanism supplied (%i)", padding);
 			return false;
@@ -1189,6 +1216,29 @@ bool OSSLRSA::decrypt(PrivateKey* privateKey, const ByteString& encryptedData,
 		ERROR_MSG("RSA decrypt init failed (0x%08X)", ERR_get_error());
 		EVP_PKEY_CTX_free(ctx);
 		return false;
+	}
+
+	// Set OAEP hash and MGF if not default SHA-1
+	if (padding == AsymMech::RSA_PKCS_OAEP_SHA224 ||
+	    padding == AsymMech::RSA_PKCS_OAEP_SHA256 ||
+	    padding == AsymMech::RSA_PKCS_OAEP_SHA384 ||
+	    padding == AsymMech::RSA_PKCS_OAEP_SHA512)
+	{
+		const EVP_MD* md = NULL;
+		switch (padding) {
+			case AsymMech::RSA_PKCS_OAEP_SHA224: md = EVP_sha224(); break;
+			case AsymMech::RSA_PKCS_OAEP_SHA256: md = EVP_sha256(); break;
+			case AsymMech::RSA_PKCS_OAEP_SHA384: md = EVP_sha384(); break;
+			case AsymMech::RSA_PKCS_OAEP_SHA512: md = EVP_sha512(); break;
+			default: break;
+		}
+		if (EVP_PKEY_CTX_set_rsa_oaep_md(ctx, md) <= 0 ||
+		    EVP_PKEY_CTX_set_rsa_mgf1_md(ctx, md) <= 0)
+		{
+			ERROR_MSG("Failed to set OAEP hash (0x%08X)", ERR_get_error());
+			EVP_PKEY_CTX_free(ctx);
+			return false;
+		}
 	}
 
 	// Query output size, then decrypt

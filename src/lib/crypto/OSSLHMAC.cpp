@@ -32,9 +32,6 @@
 
 #include "config.h"
 #include "OSSLHMAC.h"
-#ifdef WITH_GOST
-#include "OSSLCryptoFactory.h"
-#endif
 
 const EVP_MD* OSSLHMACMD5::getEVPHash() const
 {
@@ -96,14 +93,44 @@ size_t OSSLHMACSHA512::getMacSize() const
 	return 64;
 }
 
-#ifdef WITH_GOST
-const EVP_MD* OSSLHMACGOSTR3411::getEVPHash() const
+// SHA-3 HMAC variants
+
+const EVP_MD* OSSLHMACSHA3_224::getEVPHash() const
 {
-	return OSSLCryptoFactory::i()->EVP_GOST_34_11;
+	return EVP_sha3_224();
 }
 
-size_t OSSLHMACGOSTR3411::getMacSize() const
+size_t OSSLHMACSHA3_224::getMacSize() const
+{
+	return 28;
+}
+
+const EVP_MD* OSSLHMACSHA3_256::getEVPHash() const
+{
+	return EVP_sha3_256();
+}
+
+size_t OSSLHMACSHA3_256::getMacSize() const
 {
 	return 32;
 }
-#endif
+
+const EVP_MD* OSSLHMACSHA3_384::getEVPHash() const
+{
+	return EVP_sha3_384();
+}
+
+size_t OSSLHMACSHA3_384::getMacSize() const
+{
+	return 48;
+}
+
+const EVP_MD* OSSLHMACSHA3_512::getEVPHash() const
+{
+	return EVP_sha3_512();
+}
+
+size_t OSSLHMACSHA3_512::getMacSize() const
+{
+	return 64;
+}

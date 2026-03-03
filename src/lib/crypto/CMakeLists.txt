@@ -86,6 +86,7 @@ set(SOURCES
     OSSLSHA256.cpp
     OSSLSHA384.cpp
     OSSLSHA512.cpp
+    OSSLSHA3.cpp
     OSSLUtil.cpp
     )
 

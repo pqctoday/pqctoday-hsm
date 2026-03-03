@@ -28,8 +28,9 @@
  OSSLCryptoFactory.cpp
 
  OpenSSL 3.x EVP-only cryptographic algorithm factory.
- Legacy algorithms (DES, DSA, DH, GOST, MD5) and ENGINE-based code have been
- removed. Remaining: RSA, ECDSA, ECDH, EdDSA, AES, SHA family, HMAC, CMAC.
+ OpenSSL 3.x EVP-only. Legacy algorithms (DES, DSA, DH, GOST, MD5) removed from this fork.
+ Retained: RSA, ECDSA, ECDH, EdDSA, AES, SHA-2, SHA-3, HMAC, CMAC,
+ ML-DSA, SLH-DSA, ML-KEM.
  *****************************************************************************/
 
 #include "config.h"
@@ -42,6 +43,7 @@
 #include "OSSLSHA256.h"
 #include "OSSLSHA384.h"
 #include "OSSLSHA512.h"
+#include "OSSLSHA3.h"
 #include "OSSLCMAC.h"
 #include "OSSLHMAC.h"
 #include "OSSLRSA.h"
@@ -148,6 +150,14 @@ HashAlgorithm* OSSLCryptoFactory::getHashAlgorithm(HashAlgo::Type algorithm)
 			return new OSSLSHA384();
 		case HashAlgo::SHA512:
 			return new OSSLSHA512();
+		case HashAlgo::SHA3_224:
+			return new OSSLSHA3_224();
+		case HashAlgo::SHA3_256:
+			return new OSSLSHA3_256();
+		case HashAlgo::SHA3_384:
+			return new OSSLSHA3_384();
+		case HashAlgo::SHA3_512:
+			return new OSSLSHA3_512();
 		default:
 			break;
 	}
@@ -172,6 +182,14 @@ MacAlgorithm* OSSLCryptoFactory::getMacAlgorithm(MacAlgo::Type algorithm)
 			return new OSSLHMACSHA384();
 		case MacAlgo::HMAC_SHA512:
 			return new OSSLHMACSHA512();
+		case MacAlgo::HMAC_SHA3_224:
+			return new OSSLHMACSHA3_224();
+		case MacAlgo::HMAC_SHA3_256:
+			return new OSSLHMACSHA3_256();
+		case MacAlgo::HMAC_SHA3_384:
+			return new OSSLHMACSHA3_384();
+		case MacAlgo::HMAC_SHA3_512:
+			return new OSSLHMACSHA3_512();
 		case MacAlgo::CMAC_AES:
 			return new OSSLCMACAES();
 		default:

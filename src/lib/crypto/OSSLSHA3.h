@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 .SE (The Internet Infrastructure Foundation)
+ * Copyright (c) 2025 PQC Today
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,87 +25,44 @@
  */
 
 /*****************************************************************************
- OSSLHMAC.h
+ OSSLSHA3.h
 
- OpenSSL HMAC implementation
+ OpenSSL SHA-3 implementation (SHA3-224, SHA3-256, SHA3-384, SHA3-512)
  *****************************************************************************/
 
-#ifndef _SOFTHSM_V2_OSSLHMAC_H
-#define _SOFTHSM_V2_OSSLHMAC_H
+#ifndef _SOFTHSM_V2_OSSLSHA3_H
+#define _SOFTHSM_V2_OSSLSHA3_H
 
 #include "config.h"
-#include "OSSLEVPMacAlgorithm.h"
+#include "OSSLEVPHashAlgorithm.h"
 #include <openssl/evp.h>
 
-class OSSLHMACMD5 : public OSSLEVPMacAlgorithm
+class OSSLSHA3_224 : public OSSLEVPHashAlgorithm
 {
+	virtual int getHashSize();
 protected:
 	virtual const EVP_MD* getEVPHash() const;
-	virtual size_t getMacSize() const;
 };
 
-class OSSLHMACSHA1 : public OSSLEVPMacAlgorithm
+class OSSLSHA3_256 : public OSSLEVPHashAlgorithm
 {
+	virtual int getHashSize();
 protected:
 	virtual const EVP_MD* getEVPHash() const;
-	virtual size_t getMacSize() const;
 };
 
-class OSSLHMACSHA224 : public OSSLEVPMacAlgorithm
+class OSSLSHA3_384 : public OSSLEVPHashAlgorithm
 {
+	virtual int getHashSize();
 protected:
 	virtual const EVP_MD* getEVPHash() const;
-	virtual size_t getMacSize() const;
 };
 
-class OSSLHMACSHA256 : public OSSLEVPMacAlgorithm
+class OSSLSHA3_512 : public OSSLEVPHashAlgorithm
 {
+	virtual int getHashSize();
 protected:
 	virtual const EVP_MD* getEVPHash() const;
-	virtual size_t getMacSize() const;
 };
 
-class OSSLHMACSHA384 : public OSSLEVPMacAlgorithm
-{
-protected:
-	virtual const EVP_MD* getEVPHash() const;
-	virtual size_t getMacSize() const;
-};
-
-class OSSLHMACSHA512 : public OSSLEVPMacAlgorithm
-{
-protected:
-	virtual const EVP_MD* getEVPHash() const;
-	virtual size_t getMacSize() const;
-};
-
-class OSSLHMACSHA3_224 : public OSSLEVPMacAlgorithm
-{
-protected:
-	virtual const EVP_MD* getEVPHash() const;
-	virtual size_t getMacSize() const;
-};
-
-class OSSLHMACSHA3_256 : public OSSLEVPMacAlgorithm
-{
-protected:
-	virtual const EVP_MD* getEVPHash() const;
-	virtual size_t getMacSize() const;
-};
-
-class OSSLHMACSHA3_384 : public OSSLEVPMacAlgorithm
-{
-protected:
-	virtual const EVP_MD* getEVPHash() const;
-	virtual size_t getMacSize() const;
-};
-
-class OSSLHMACSHA3_512 : public OSSLEVPMacAlgorithm
-{
-protected:
-	virtual const EVP_MD* getEVPHash() const;
-	virtual size_t getMacSize() const;
-};
-
-#endif // !_SOFTHSM_V2_OSSLHMAC_H
-
+#endif // !_SOFTHSM_V2_OSSLSHA3_H

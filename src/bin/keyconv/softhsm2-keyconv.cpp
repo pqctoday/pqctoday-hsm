@@ -317,7 +317,6 @@ int to_pkcs8(char* in_path, char* out_path, char* file_pin)
 			error = save_dsa_pkcs8(out_path, file_pin, pkey);
 			break;
 		case DNS_KEYALG_ECC:
-		case DNS_KEYALG_ECC_GOST:
 		default:
 			fprintf(stderr, "ERROR: The algorithm %i is not supported.\n",
 					algorithm);

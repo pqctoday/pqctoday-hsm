@@ -1,0 +1,47 @@
+# Build outputs
+build/
+*.o
+*.a
+*.so
+*.dylib
+*.dSYM/
+
+# Test binaries and result files
+pqc_validate
+pqc_validate_asan
+pqc_validate_dbg
+pqc_validate_*.json
+
+# Backup files
+*.bak
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+CTestTestfile.cmake
+_CPack_Packages/
+
+# Autotools generated
+aclocal.m4
+autom4te.cache/
+config.h
+config.log
+config.status
+configure
+libtool
+stamp-h1
+Makefile.in
+*.la
+*.lo
+.deps/
+.libs/
+
+# Editor
+.DS_Store
+*.swp
+*~
+.vscode/
+.idea/

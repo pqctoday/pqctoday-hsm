@@ -1039,53 +1039,6 @@ CK_RV SymmetricAlgorithmTests::generateEDPrivateKey(CK_SESSION_HANDLE hSession, 
 
 #endif
 
-#ifdef WITH_GOST
-CK_RV SymmetricAlgorithmTests::generateGostPrivateKey(CK_SESSION_HANDLE hSession, CK_BBOOL bToken, CK_BBOOL bPrivate, CK_OBJECT_HANDLE &hKey)
-{
-	CK_MECHANISM mechanism = { CKM_GOSTR3410_KEY_PAIR_GEN, NULL_PTR, 0 };
-	CK_BYTE param_a[] = { 0x06, 0x07, 0x2a, 0x85, 0x03, 0x02, 0x02, 0x23, 0x01 };
-	CK_BYTE param_b[] = { 0x06, 0x07, 0x2a, 0x85, 0x03, 0x02, 0x02, 0x1e, 0x01 };
-	CK_BYTE subject[] = { 0x12, 0x34 }; // dummy
-	CK_BYTE id[] = { 123 } ; // dummy
-	CK_BBOOL bFalse = CK_FALSE;
-	CK_BBOOL bTrue = CK_TRUE;
-	CK_ATTRIBUTE pubAttribs[] = {
-		{ CKA_TOKEN, &bToken, sizeof(bToken) },
-		{ CKA_PRIVATE, &bPrivate, sizeof(bPrivate) },
-		{ CKA_ENCRYPT, &bFalse, sizeof(bFalse) },
-		{ CKA_VERIFY, &bTrue, sizeof(bTrue) },
-		{ CKA_WRAP, &bFalse, sizeof(bFalse) },
-		{ CKA_GOSTR3410_PARAMS, &param_a[0], sizeof(param_a) },
-		{ CKA_GOSTR3411_PARAMS, &param_b[0], sizeof(param_b) }
-	};
-	CK_ATTRIBUTE privAttribs[] = {
-		{ CKA_TOKEN, &bToken, sizeof(bToken) },
-		{ CKA_PRIVATE, &bPrivate, sizeof(bPrivate) },
-		{ CKA_SUBJECT, &subject[0], sizeof(subject) },
-		{ CKA_ID, &id[0], sizeof(id) },
-		{ CKA_SENSITIVE, &bTrue, sizeof(bTrue) },
-		{ CKA_DECRYPT, &bFalse, sizeof(bFalse) },
-		{ CKA_SIGN, &bTrue, sizeof(bTrue) },
-		{ CKA_UNWRAP, &bFalse, sizeof(bFalse) },
-		{ CKA_SENSITIVE, &bFalse, sizeof(bFalse) },
-		{ CKA_EXTRACTABLE, &bTrue, sizeof(bTrue) }
-	};
-
-	CK_OBJECT_HANDLE hPub = CK_INVALID_HANDLE;
-	hKey = CK_INVALID_HANDLE;
-	CK_RV rv;
-	rv = CRYPTOKI_F_PTR( C_GenerateKeyPair(hSession, &mechanism,
-			       pubAttribs, sizeof(pubAttribs)/sizeof(CK_ATTRIBUTE),
-			       privAttribs, sizeof(privAttribs)/sizeof(CK_ATTRIBUTE),
-			       &hPub, &hKey) );
-	if (hPub != CK_INVALID_HANDLE)
-	{
-		CRYPTOKI_F_PTR( C_DestroyObject(hSession, hPub) );
-	}
-	return rv;
-}
-#endif
-
 void SymmetricAlgorithmTests::aesWrapUnwrapGeneric(CK_MECHANISM_TYPE mechanismType, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hKey)
 {
 	CK_MECHANISM mechanism = { mechanismType, NULL_PTR, 0 };
@@ -1444,92 +1397,6 @@ void SymmetricAlgorithmTests::unwrapKnownKey(const CK_SESSION_HANDLE hSession, W
 }
 
 
-#ifdef WITH_GOST
-void SymmetricAlgorithmTests::aesWrapUnwrapGost(CK_MECHANISM_TYPE mechanismType, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hKey)
-{
-	CK_MECHANISM mechanism = { mechanismType, NULL_PTR, 0 };
-	CK_BBOOL bFalse = CK_FALSE;
-	CK_BBOOL bTrue = CK_TRUE;
-	CK_OBJECT_HANDLE hPrk = CK_INVALID_HANDLE;
-	CK_RV rv = generateGostPrivateKey(hSession, CK_TRUE, CK_TRUE, hPrk);
-	CPPUNIT_ASSERT(rv == CKR_OK);
-	CPPUNIT_ASSERT(hPrk != CK_INVALID_HANDLE);
-
-	CK_OBJECT_CLASS privateClass = CKO_PRIVATE_KEY;
-	CK_KEY_TYPE keyType = CKK_GOSTR3410;
-	CK_BYTE_PTR prkAttrPtr = NULL_PTR;
-	CK_ULONG prkAttrLen = 0UL;
-	CK_ATTRIBUTE prkAttribs[] = {
-		{ CKA_CLASS, &privateClass, sizeof(privateClass) },
-		{ CKA_KEY_TYPE, &keyType, sizeof(keyType) },
-		{ CKA_VALUE, NULL_PTR, 0UL }
-	};
-
-	rv = CRYPTOKI_F_PTR( C_GetAttributeValue(hSession, hPrk, prkAttribs, sizeof(prkAttribs)/sizeof(CK_ATTRIBUTE)) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
-
-	CPPUNIT_ASSERT(prkAttribs[0].ulValueLen == sizeof(CK_OBJECT_CLASS));
-	CPPUNIT_ASSERT(*(CK_OBJECT_CLASS*)prkAttribs[0].pValue == CKO_PRIVATE_KEY);
-	CPPUNIT_ASSERT(prkAttribs[1].ulValueLen == sizeof(CK_KEY_TYPE));
-	CPPUNIT_ASSERT(*(CK_KEY_TYPE*)prkAttribs[1].pValue == CKK_GOSTR3410);
-
-	prkAttrLen = prkAttribs[2].ulValueLen;
-	prkAttrPtr = (CK_BYTE_PTR) malloc(2 * prkAttrLen);
-	CPPUNIT_ASSERT(prkAttrPtr != NULL_PTR);
-	prkAttribs[2].pValue = prkAttrPtr;
-	prkAttribs[2].ulValueLen = prkAttrLen;
-
-	rv = CRYPTOKI_F_PTR( C_GetAttributeValue(hSession, hPrk, prkAttribs, sizeof(prkAttribs)/sizeof(CK_ATTRIBUTE)) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
-	CPPUNIT_ASSERT(prkAttribs[2].ulValueLen == prkAttrLen);
-
-	CK_BYTE_PTR wrappedPtr = NULL_PTR;
-	CK_ULONG wrappedLen = 0UL;
-	rv = CRYPTOKI_F_PTR( C_WrapKey(hSession, &mechanism, hKey, hPrk, wrappedPtr, &wrappedLen) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
-	wrappedPtr = (CK_BYTE_PTR) malloc(wrappedLen);
-	CPPUNIT_ASSERT(wrappedPtr != NULL_PTR);
-	rv = CRYPTOKI_F_PTR( C_WrapKey(hSession, &mechanism, hKey, hPrk, wrappedPtr, &wrappedLen) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
-
-	rv = CRYPTOKI_F_PTR( C_DestroyObject(hSession, hPrk) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
-
-	CK_ATTRIBUTE nPrkAttribs[] = {
-		{ CKA_CLASS, &privateClass, sizeof(privateClass) },
-		{ CKA_KEY_TYPE, &keyType, sizeof(keyType) },
-		{ CKA_TOKEN, &bFalse, sizeof(bFalse) },
-		{ CKA_PRIVATE, &bTrue, sizeof(bTrue) },
-		{ CKA_DECRYPT, &bTrue, sizeof(bTrue) },
-		{ CKA_SIGN, &bFalse,sizeof(bFalse) },
-		{ CKA_UNWRAP, &bTrue, sizeof(bTrue) },
-		{ CKA_SENSITIVE, &bFalse, sizeof(bFalse) },
-		{ CKA_EXTRACTABLE, &bTrue, sizeof(bTrue) }
-	};
-
-	hPrk = CK_INVALID_HANDLE;
-	rv = CRYPTOKI_F_PTR( C_UnwrapKey(hSession, &mechanism, hKey, wrappedPtr, wrappedLen, nPrkAttribs, sizeof(nPrkAttribs)/sizeof(CK_ATTRIBUTE), &hPrk) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
-	CPPUNIT_ASSERT(hPrk != CK_INVALID_HANDLE);
-
-	prkAttribs[2].pValue = prkAttrPtr + prkAttrLen;
-	rv = CRYPTOKI_F_PTR( C_GetAttributeValue(hSession, hPrk, prkAttribs, sizeof(prkAttribs)/sizeof(CK_ATTRIBUTE)) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
-
-	CPPUNIT_ASSERT(prkAttribs[0].ulValueLen == sizeof(CK_OBJECT_CLASS));
-	CPPUNIT_ASSERT(*(CK_OBJECT_CLASS*)prkAttribs[0].pValue == CKO_PRIVATE_KEY);
-	CPPUNIT_ASSERT(prkAttribs[1].ulValueLen == sizeof(CK_KEY_TYPE));
-	CPPUNIT_ASSERT(*(CK_KEY_TYPE*)prkAttribs[1].pValue == CKK_GOSTR3410);
-	CPPUNIT_ASSERT(prkAttribs[2].ulValueLen == prkAttrLen);
-	CPPUNIT_ASSERT(memcmp(prkAttrPtr, prkAttrPtr + prkAttrLen, prkAttrLen) == 0);
-
-	free(wrappedPtr);
-	free(prkAttrPtr);
-	rv = CRYPTOKI_F_PTR( C_DestroyObject(hSession, hPrk) );
-	CPPUNIT_ASSERT(rv == CKR_OK);
-}
-#endif
-
 #ifdef WITH_EDDSA
 void SymmetricAlgorithmTests::aesWrapUnwrapED(CK_MECHANISM_TYPE mechanismType, CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hKey)
 {
@@ -1761,16 +1628,9 @@ void SymmetricAlgorithmTests::testAesWrapUnwrap()
 	aesWrapUnwrapRsa(CKM_AES_KEY_WRAP, hSession, hKey);
 	aesWrapUnwrapRsa(CKM_AES_CBC_PAD, hSession, hKey);
 
-#ifdef WITH_GOST
-	aesWrapUnwrapGost(CKM_AES_KEY_WRAP, hSession, hKey);
-#endif
-
 #ifdef HAVE_AES_KEY_WRAP_PAD
 	aesWrapUnwrapGeneric(CKM_AES_KEY_WRAP_PAD, hSession, hKey);
 	aesWrapUnwrapRsa(CKM_AES_KEY_WRAP_PAD, hSession, hKey);
-#ifdef WITH_GOST
-	aesWrapUnwrapGost(CKM_AES_KEY_WRAP_PAD, hSession, hKey);
-#endif
 #ifdef WITH_EDDSA
 	aesWrapUnwrapED(CKM_AES_KEY_WRAP_PAD, hSession, hKey);
 #endif

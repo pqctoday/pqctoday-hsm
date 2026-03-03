@@ -903,9 +903,13 @@ bool P11EDPublicKeyObj::init(OSObject *inobject)
 	if (initialized) return true;
 	if (inobject == NULL) return false;
 
-	if (!inobject->attributeExists(CKA_KEY_TYPE) || inobject->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_EC_EDWARDS) {
-		OSAttribute setKeyType((unsigned long)CKK_EC_EDWARDS);
-		inobject->setAttribute(CKA_KEY_TYPE, setKeyType);
+	{
+		CK_ULONG kt = inobject->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED);
+		if (!inobject->attributeExists(CKA_KEY_TYPE) ||
+		    (kt != CKK_EC_EDWARDS && kt != CKK_EC_MONTGOMERY)) {
+			OSAttribute setKeyType((unsigned long)CKK_EC_EDWARDS);
+			inobject->setAttribute(CKA_KEY_TYPE, setKeyType);
+		}
 	}
 
 	// Create parent
@@ -980,59 +984,6 @@ bool P11DHPublicKeyObj::init(OSObject *inobject)
 	attributes[attrPrime->getType()] = attrPrime;
 	attributes[attrBase->getType()] = attrBase;
 	attributes[attrValue->getType()] = attrValue;
-
-	initialized = true;
-	return true;
-}
-
-// Constructor
-P11GOSTPublicKeyObj::P11GOSTPublicKeyObj()
-{
-	initialized = false;
-}
-
-// Add attributes
-bool P11GOSTPublicKeyObj::init(OSObject *inobject)
-{
-	if (initialized) return true;
-	if (inobject == NULL) return false;
-
-	if (!inobject->attributeExists(CKA_KEY_TYPE) || inobject->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_GOSTR3410) {
-		OSAttribute setKeyType((unsigned long)CKK_GOSTR3410);
-		inobject->setAttribute(CKA_KEY_TYPE, setKeyType);
-	}
-
-	// Create parent
-	if (!P11PublicKeyObj::init(inobject)) return false;
-
-	// Create attributes
-	P11Attribute* attrValue = new P11AttrValue(osobject,P11Attribute::ck1|P11Attribute::ck4);
-	P11Attribute* attrGostR3410Params = new P11AttrGostR3410Params(osobject,P11Attribute::ck3);
-	P11Attribute* attrGostR3411Params = new P11AttrGostR3411Params(osobject,P11Attribute::ck3);
-	P11Attribute* attrGost28147Params = new P11AttrGost28147Params(osobject,P11Attribute::ck8);
-
-	// Initialize the attributes
-	if
-	(
-		!attrValue->init() ||
-		!attrGostR3410Params->init() ||
-		!attrGostR3411Params->init() ||
-		!attrGost28147Params->init()
-	)
-	{
-		ERROR_MSG("Could not initialize the attribute");
-		delete attrValue;
-		delete attrGostR3410Params;
-		delete attrGostR3411Params;
-		delete attrGost28147Params;
-		return false;
-	}
-
-	// Add them to the map
-	attributes[attrValue->getType()] = attrValue;
-	attributes[attrGostR3410Params->getType()] = attrGostR3410Params;
-	attributes[attrGostR3411Params->getType()] = attrGostR3411Params;
-	attributes[attrGost28147Params->getType()] = attrGost28147Params;
 
 	initialized = true;
 	return true;
@@ -1308,9 +1259,13 @@ bool P11EDPrivateKeyObj::init(OSObject *inobject)
 	if (initialized) return true;
 	if (inobject == NULL) return false;
 
-	if (!inobject->attributeExists(CKA_KEY_TYPE) || inobject->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_EC_EDWARDS) {
-		OSAttribute setKeyType((unsigned long)CKK_EC_EDWARDS);
-		inobject->setAttribute(CKA_KEY_TYPE, setKeyType);
+	{
+		CK_ULONG kt = inobject->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED);
+		if (!inobject->attributeExists(CKA_KEY_TYPE) ||
+		    (kt != CKK_EC_EDWARDS && kt != CKK_EC_MONTGOMERY)) {
+			OSAttribute setKeyType((unsigned long)CKK_EC_EDWARDS);
+			inobject->setAttribute(CKA_KEY_TYPE, setKeyType);
+		}
 	}
 
 	// Create parent
@@ -1389,59 +1344,6 @@ bool P11DHPrivateKeyObj::init(OSObject *inobject)
 	attributes[attrBase->getType()] = attrBase;
 	attributes[attrValue->getType()] = attrValue;
 	attributes[attrValueBits->getType()] = attrValueBits;
-
-	initialized = true;
-	return true;
-}
-
-// Constructor
-P11GOSTPrivateKeyObj::P11GOSTPrivateKeyObj()
-{
-	initialized = false;
-}
-
-// Add attributes
-bool P11GOSTPrivateKeyObj::init(OSObject *inobject)
-{
-	if (initialized) return true;
-	if (inobject == NULL) return false;
-
-	if (!inobject->attributeExists(CKA_KEY_TYPE) || inobject->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_GOSTR3410) {
-		OSAttribute setKeyType((unsigned long)CKK_GOSTR3410);
-		inobject->setAttribute(CKA_KEY_TYPE, setKeyType);
-	}
-
-	// Create parent
-	if (!P11PrivateKeyObj::init(inobject)) return false;
-
-	// Create attributes
-	P11Attribute* attrValue = new P11AttrValue(osobject,P11Attribute::ck1|P11Attribute::ck4|P11Attribute::ck6|P11Attribute::ck7);
-	P11Attribute* attrGostR3410Params = new P11AttrGostR3410Params(osobject,P11Attribute::ck4|P11Attribute::ck6);
-	P11Attribute* attrGostR3411Params = new P11AttrGostR3411Params(osobject,P11Attribute::ck4|P11Attribute::ck6);
-	P11Attribute* attrGost28147Params = new P11AttrGost28147Params(osobject,P11Attribute::ck4|P11Attribute::ck6|P11Attribute::ck8);
-
-	// Initialize the attributes
-	if
-	(
-		!attrValue->init() ||
-		!attrGostR3410Params->init() ||
-		!attrGostR3411Params->init() ||
-		!attrGost28147Params->init()
-	)
-	{
-		ERROR_MSG("Could not initialize the attribute");
-		delete attrValue;
-		delete attrGostR3410Params;
-		delete attrGostR3411Params;
-		delete attrGost28147Params;
-		return false;
-	}
-
-	// Add them to the map
-	attributes[attrValue->getType()] = attrValue;
-	attributes[attrGostR3410Params->getType()] = attrGostR3410Params;
-	attributes[attrGostR3411Params->getType()] = attrGostR3411Params;
-	attributes[attrGost28147Params->getType()] = attrGost28147Params;
 
 	initialized = true;
 	return true;
@@ -1708,51 +1610,6 @@ bool P11DESSecretKeyObj::setKeyType(CK_KEY_TYPE inKeytype)
 CK_KEY_TYPE P11DESSecretKeyObj::getKeyType()
 {
 	return keytype;
-}
-
-// Constructor
-P11GOSTSecretKeyObj::P11GOSTSecretKeyObj()
-{
-	initialized = false;
-}
-
-// Add attributes
-bool P11GOSTSecretKeyObj::init(OSObject *inobject)
-{
-	if (initialized) return true;
-	if (inobject == NULL) return false;
-
-	if (!inobject->attributeExists(CKA_KEY_TYPE) || inobject->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_GOST28147) {
-		OSAttribute setKeyType((unsigned long)CKK_GOST28147);
-		inobject->setAttribute(CKA_KEY_TYPE, setKeyType);
-	}
-
-	// Create parent
-	if (!P11SecretKeyObj::init(inobject)) return false;
-
-	// Create attributes
-	P11Attribute* attrValue = new P11AttrValue(osobject,P11Attribute::ck1|P11Attribute::ck4|P11Attribute::ck6|P11Attribute::ck7);
-	P11Attribute* attrGost28147Params = new P11AttrGost28147Params(osobject,P11Attribute::ck1|P11Attribute::ck3|P11Attribute::ck5);
-
-	// Initialize the attributes
-	if
-	(
-		!attrValue->init() ||
-		!attrGost28147Params->init()
-	)
-	{
-		ERROR_MSG("Could not initialize the attribute");
-		delete attrValue;
-		delete attrGost28147Params;
-		return false;
-	}
-
-	// Add them to the map
-	attributes[attrValue->getType()] = attrValue;
-	attributes[attrGost28147Params->getType()] = attrGost28147Params;
-
-	initialized = true;
-	return true;
 }
 
 // Constructor

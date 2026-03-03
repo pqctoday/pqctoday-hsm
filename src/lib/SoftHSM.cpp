@@ -144,10 +144,12 @@ static CK_RV newP11Object(CK_OBJECT_CLASS objClass, CK_KEY_TYPE keyType, CK_CERT
 				*p11object = new P11RSAPublicKeyObj();
 			else if (keyType == CKK_EC)
 				*p11object = new P11ECPublicKeyObj();
-			else if (keyType == CKK_EC_EDWARDS)
+			else if (keyType == CKK_EC_EDWARDS || keyType == CKK_EC_MONTGOMERY)
 				*p11object = new P11EDPublicKeyObj();
 			else if (keyType == CKK_ML_DSA)
 				*p11object = new P11MLDSAPublicKeyObj();
+			else if (keyType == CKK_ML_KEM)
+				*p11object = new P11MLKEMPublicKeyObj();
 			else if (keyType == CKK_SLH_DSA)
 				*p11object = new P11SLHDSAPublicKeyObj();
 			else
@@ -159,10 +161,12 @@ static CK_RV newP11Object(CK_OBJECT_CLASS objClass, CK_KEY_TYPE keyType, CK_CERT
 				*p11object = new P11RSAPrivateKeyObj();
 			else if (keyType == CKK_EC)
 				*p11object = new P11ECPrivateKeyObj();
-			else if (keyType == CKK_EC_EDWARDS)
+			else if (keyType == CKK_EC_EDWARDS || keyType == CKK_EC_MONTGOMERY)
 				*p11object = new P11EDPrivateKeyObj();
 			else if (keyType == CKK_ML_DSA)
 				*p11object = new P11MLDSAPrivateKeyObj();
+			else if (keyType == CKK_ML_KEM)
+				*p11object = new P11MLKEMPrivateKeyObj();
 			else if (keyType == CKK_SLH_DSA)
 				*p11object = new P11SLHDSAPrivateKeyObj();
 			else
@@ -693,19 +697,27 @@ CK_RV SoftHSM::C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
 
 void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE> &t)
 {
-	// Hash algorithms (SHA family only — MD5 and GOST removed)
+	// Hash algorithms (SHA-2 + SHA-3)
 	t["CKM_SHA_1"]			= CKM_SHA_1;
 	t["CKM_SHA224"]			= CKM_SHA224;
 	t["CKM_SHA256"]			= CKM_SHA256;
 	t["CKM_SHA384"]			= CKM_SHA384;
 	t["CKM_SHA512"]			= CKM_SHA512;
+	t["CKM_SHA3_224"]		= CKM_SHA3_224;
+	t["CKM_SHA3_256"]		= CKM_SHA3_256;
+	t["CKM_SHA3_384"]		= CKM_SHA3_384;
+	t["CKM_SHA3_512"]		= CKM_SHA3_512;
 
-	// HMAC (SHA family — MD5 and GOST-HMAC removed)
+	// HMAC (SHA-2 + SHA-3)
 	t["CKM_SHA_1_HMAC"]		= CKM_SHA_1_HMAC;
 	t["CKM_SHA224_HMAC"]		= CKM_SHA224_HMAC;
 	t["CKM_SHA256_HMAC"]		= CKM_SHA256_HMAC;
 	t["CKM_SHA384_HMAC"]		= CKM_SHA384_HMAC;
 	t["CKM_SHA512_HMAC"]		= CKM_SHA512_HMAC;
+	t["CKM_SHA3_224_HMAC"]		= CKM_SHA3_224_HMAC;
+	t["CKM_SHA3_256_HMAC"]		= CKM_SHA3_256_HMAC;
+	t["CKM_SHA3_384_HMAC"]		= CKM_SHA3_384_HMAC;
+	t["CKM_SHA3_512_HMAC"]		= CKM_SHA3_512_HMAC;
 
 	// RSA (MD5-RSA-PKCS removed)
 	t["CKM_RSA_PKCS_KEY_PAIR_GEN"]	= CKM_RSA_PKCS_KEY_PAIR_GEN;
@@ -747,8 +759,9 @@ void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE
 	t["CKM_ECDSA_SHA512"]		= CKM_ECDSA_SHA512;
 	t["CKM_ECDH1_DERIVE"]		= CKM_ECDH1_DERIVE;
 
-	// EdDSA (GOST removed)
-	t["CKM_EC_EDWARDS_KEY_PAIR_GEN"] = CKM_EC_EDWARDS_KEY_PAIR_GEN;
+	// EdDSA / Montgomery
+	t["CKM_EC_EDWARDS_KEY_PAIR_GEN"]    = CKM_EC_EDWARDS_KEY_PAIR_GEN;
+	t["CKM_EC_MONTGOMERY_KEY_PAIR_GEN"] = CKM_EC_MONTGOMERY_KEY_PAIR_GEN;
 	t["CKM_EDDSA"]			= CKM_EDDSA;
 
 	// ML-DSA (FIPS 204, PKCS#11 v3.2)
@@ -941,6 +954,10 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 		case CKM_SHA256:
 		case CKM_SHA384:
 		case CKM_SHA512:
+		case CKM_SHA3_224:
+		case CKM_SHA3_256:
+		case CKM_SHA3_384:
+		case CKM_SHA3_512:
 			// Key size is not in use
 			pInfo->ulMinKeySize = 0;
 			pInfo->ulMaxKeySize = 0;
@@ -974,6 +991,26 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 			pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 		case CKM_SHA512_HMAC:
+			pInfo->ulMinKeySize = 64;
+			pInfo->ulMaxKeySize = 512;
+			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			break;
+		case CKM_SHA3_224_HMAC:
+			pInfo->ulMinKeySize = 28;
+			pInfo->ulMaxKeySize = 512;
+			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			break;
+		case CKM_SHA3_256_HMAC:
+			pInfo->ulMinKeySize = 32;
+			pInfo->ulMaxKeySize = 512;
+			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			break;
+		case CKM_SHA3_384_HMAC:
+			pInfo->ulMinKeySize = 48;
+			pInfo->ulMaxKeySize = 512;
+			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			break;
+		case CKM_SHA3_512_HMAC:
 			pInfo->ulMinKeySize = 64;
 			pInfo->ulMaxKeySize = 512;
 			pInfo->flags = CKF_SIGN | CKF_VERIFY;
@@ -1098,6 +1135,11 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 #endif
 #ifdef WITH_EDDSA
 		case CKM_EC_EDWARDS_KEY_PAIR_GEN:
+			pInfo->ulMinKeySize = eddsaMinSize;
+			pInfo->ulMaxKeySize = eddsaMaxSize;
+			pInfo->flags = CKF_GENERATE_KEY_PAIR;
+			break;
+		case CKM_EC_MONTGOMERY_KEY_PAIR_GEN:
 			pInfo->ulMinKeySize = eddsaMinSize;
 			pInfo->ulMaxKeySize = eddsaMaxSize;
 			pInfo->flags = CKF_GENERATE_KEY_PAIR;
@@ -2223,8 +2265,16 @@ CK_RV SoftHSM::AsymEncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMec
 			rv = MechParamCheckRSAPKCSOAEP(pMechanism);
 			if (rv != CKR_OK)
 				return rv;
-
-			mechanism = AsymMech::RSA_PKCS_OAEP;
+			{
+				CK_RSA_PKCS_OAEP_PARAMS_PTR oaepP = (CK_RSA_PKCS_OAEP_PARAMS_PTR)pMechanism->pParameter;
+				switch (oaepP->hashAlg) {
+					case CKM_SHA224: mechanism = AsymMech::RSA_PKCS_OAEP_SHA224; break;
+					case CKM_SHA256: mechanism = AsymMech::RSA_PKCS_OAEP_SHA256; break;
+					case CKM_SHA384: mechanism = AsymMech::RSA_PKCS_OAEP_SHA384; break;
+					case CKM_SHA512: mechanism = AsymMech::RSA_PKCS_OAEP_SHA512; break;
+					default:         mechanism = AsymMech::RSA_PKCS_OAEP;        break;
+				}
+			}
 			isRSA = true;
 			break;
 		default:
@@ -2879,8 +2929,16 @@ CK_RV SoftHSM::AsymDecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMec
 			rv = MechParamCheckRSAPKCSOAEP(pMechanism);
 			if (rv != CKR_OK)
 				return rv;
-
-			mechanism = AsymMech::RSA_PKCS_OAEP;
+			{
+				CK_RSA_PKCS_OAEP_PARAMS_PTR oaepP = (CK_RSA_PKCS_OAEP_PARAMS_PTR)pMechanism->pParameter;
+				switch (oaepP->hashAlg) {
+					case CKM_SHA224: mechanism = AsymMech::RSA_PKCS_OAEP_SHA224; break;
+					case CKM_SHA256: mechanism = AsymMech::RSA_PKCS_OAEP_SHA256; break;
+					case CKM_SHA384: mechanism = AsymMech::RSA_PKCS_OAEP_SHA384; break;
+					case CKM_SHA512: mechanism = AsymMech::RSA_PKCS_OAEP_SHA512; break;
+					default:         mechanism = AsymMech::RSA_PKCS_OAEP;        break;
+				}
+			}
 			isRSA = true;
 			break;
 		default:
@@ -3336,6 +3394,18 @@ CK_RV SoftHSM::C_DigestInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 		case CKM_SHA512:
 			algo = HashAlgo::SHA512;
 			break;
+		case CKM_SHA3_224:
+			algo = HashAlgo::SHA3_224;
+			break;
+		case CKM_SHA3_256:
+			algo = HashAlgo::SHA3_256;
+			break;
+		case CKM_SHA3_384:
+			algo = HashAlgo::SHA3_384;
+			break;
+		case CKM_SHA3_512:
+			algo = HashAlgo::SHA3_512;
+			break;
 		default:
 			return CKR_MECHANISM_INVALID;
 	}
@@ -3584,6 +3654,10 @@ static bool isMacMechanism(CK_MECHANISM_PTR pMechanism)
 		case CKM_SHA256_HMAC:
 		case CKM_SHA384_HMAC:
 		case CKM_SHA512_HMAC:
+		case CKM_SHA3_224_HMAC:
+		case CKM_SHA3_256_HMAC:
+		case CKM_SHA3_384_HMAC:
+		case CKM_SHA3_512_HMAC:
 		case CKM_AES_CMAC:
 			return true;
 		default:
@@ -3681,6 +3755,30 @@ CK_RV SoftHSM::MacSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechani
 			minSize = 64;
 			algo = MacAlgo::HMAC_SHA512;
 			break;
+		case CKM_SHA3_224_HMAC:
+			if (keyType != CKK_GENERIC_SECRET && keyType != CKK_SHA3_224_HMAC)
+				return CKR_KEY_TYPE_INCONSISTENT;
+			minSize = 28;
+			algo = MacAlgo::HMAC_SHA3_224;
+			break;
+		case CKM_SHA3_256_HMAC:
+			if (keyType != CKK_GENERIC_SECRET && keyType != CKK_SHA3_256_HMAC)
+				return CKR_KEY_TYPE_INCONSISTENT;
+			minSize = 32;
+			algo = MacAlgo::HMAC_SHA3_256;
+			break;
+		case CKM_SHA3_384_HMAC:
+			if (keyType != CKK_GENERIC_SECRET && keyType != CKK_SHA3_384_HMAC)
+				return CKR_KEY_TYPE_INCONSISTENT;
+			minSize = 48;
+			algo = MacAlgo::HMAC_SHA3_384;
+			break;
+		case CKM_SHA3_512_HMAC:
+			if (keyType != CKK_GENERIC_SECRET && keyType != CKK_SHA3_512_HMAC)
+				return CKR_KEY_TYPE_INCONSISTENT;
+			minSize = 64;
+			algo = MacAlgo::HMAC_SHA3_512;
+			break;
 		case CKM_AES_CMAC:
 			if (keyType != CKK_AES)
 				return CKR_KEY_TYPE_INCONSISTENT;
@@ -3704,8 +3802,8 @@ CK_RV SoftHSM::MacSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechani
 	// Adjust key bit length
 	privkey->setBitLen(privkey->getKeyBits().size() * bb);
 
-	// Check key size
-	if (privkey->getBitLen() < (minSize*8))
+	// Key must have at least 1 byte; RFC 2104 permits any key size for HMAC
+	if (privkey->getBitLen() == 0)
 	{
 		mac->recycleKey(privkey);
 		CryptoFactory::i()->recycleMacAlgorithm(mac);
@@ -4639,6 +4737,30 @@ CK_RV SoftHSM::MacVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
 				return CKR_KEY_TYPE_INCONSISTENT;
 			minSize = 64;
 			algo = MacAlgo::HMAC_SHA512;
+			break;
+		case CKM_SHA3_224_HMAC:
+			if (keyType != CKK_GENERIC_SECRET && keyType != CKK_SHA3_224_HMAC)
+				return CKR_KEY_TYPE_INCONSISTENT;
+			minSize = 28;
+			algo = MacAlgo::HMAC_SHA3_224;
+			break;
+		case CKM_SHA3_256_HMAC:
+			if (keyType != CKK_GENERIC_SECRET && keyType != CKK_SHA3_256_HMAC)
+				return CKR_KEY_TYPE_INCONSISTENT;
+			minSize = 32;
+			algo = MacAlgo::HMAC_SHA3_256;
+			break;
+		case CKM_SHA3_384_HMAC:
+			if (keyType != CKK_GENERIC_SECRET && keyType != CKK_SHA3_384_HMAC)
+				return CKR_KEY_TYPE_INCONSISTENT;
+			minSize = 48;
+			algo = MacAlgo::HMAC_SHA3_384;
+			break;
+		case CKM_SHA3_512_HMAC:
+			if (keyType != CKK_GENERIC_SECRET && keyType != CKK_SHA3_512_HMAC)
+				return CKR_KEY_TYPE_INCONSISTENT;
+			minSize = 64;
+			algo = MacAlgo::HMAC_SHA3_512;
 			break;
 		case CKM_AES_CMAC:
 			if (keyType != CKK_AES)
@@ -5598,6 +5720,9 @@ CK_RV SoftHSM::C_GenerateKeyPair
 		case CKM_EC_EDWARDS_KEY_PAIR_GEN:
 			keyType = CKK_EC_EDWARDS;
 			break;
+		case CKM_EC_MONTGOMERY_KEY_PAIR_GEN:
+			keyType = CKK_EC_MONTGOMERY;
+			break;
 #endif
 		case CKM_ML_DSA_KEY_PAIR_GEN:
 			keyType = CKK_ML_DSA;
@@ -5625,9 +5750,9 @@ CK_RV SoftHSM::C_GenerateKeyPair
 		return CKR_ATTRIBUTE_VALUE_INVALID;
 	if (pMechanism->mechanism == CKM_RSA_PKCS_KEY_PAIR_GEN && keyType != CKK_RSA)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_GOSTR3410_KEY_PAIR_GEN && keyType != CKK_GOSTR3410)
-		return CKR_TEMPLATE_INCONSISTENT;
 	if (pMechanism->mechanism == CKM_EC_EDWARDS_KEY_PAIR_GEN && keyType != CKK_EC_EDWARDS)
+		return CKR_TEMPLATE_INCONSISTENT;
+	if (pMechanism->mechanism == CKM_EC_MONTGOMERY_KEY_PAIR_GEN && keyType != CKK_EC_MONTGOMERY)
 		return CKR_TEMPLATE_INCONSISTENT;
 	if (pMechanism->mechanism == CKM_ML_DSA_KEY_PAIR_GEN && keyType != CKK_ML_DSA)
 		return CKR_TEMPLATE_INCONSISTENT;
@@ -5646,9 +5771,9 @@ CK_RV SoftHSM::C_GenerateKeyPair
 		return CKR_ATTRIBUTE_VALUE_INVALID;
 	if (pMechanism->mechanism == CKM_RSA_PKCS_KEY_PAIR_GEN && keyType != CKK_RSA)
 		return CKR_TEMPLATE_INCONSISTENT;
-	if (pMechanism->mechanism == CKM_GOSTR3410_KEY_PAIR_GEN && keyType != CKK_GOSTR3410)
-		return CKR_TEMPLATE_INCONSISTENT;
 	if (pMechanism->mechanism == CKM_EC_EDWARDS_KEY_PAIR_GEN && keyType != CKK_EC_EDWARDS)
+		return CKR_TEMPLATE_INCONSISTENT;
+	if (pMechanism->mechanism == CKM_EC_MONTGOMERY_KEY_PAIR_GEN && keyType != CKK_EC_MONTGOMERY)
 		return CKR_TEMPLATE_INCONSISTENT;
 	if (pMechanism->mechanism == CKM_ML_DSA_KEY_PAIR_GEN && keyType != CKK_ML_DSA)
 		return CKR_TEMPLATE_INCONSISTENT;
@@ -5678,8 +5803,19 @@ CK_RV SoftHSM::C_GenerateKeyPair
 	}
 
 
-	// Generate EDDSA keys
-	if (pMechanism->mechanism == CKM_EC_EDWARDS_KEY_PAIR_GEN)
+	// Generate EC (Weierstrass curve) keys
+	if (pMechanism->mechanism == CKM_EC_KEY_PAIR_GEN)
+	{
+			return this->generateEC(hSession,
+									 pPublicKeyTemplate, ulPublicKeyAttributeCount,
+									 pPrivateKeyTemplate, ulPrivateKeyAttributeCount,
+									 phPublicKey, phPrivateKey,
+									 ispublicKeyToken, ispublicKeyPrivate, isprivateKeyToken, isprivateKeyPrivate);
+	}
+
+	// Generate Edwards / Montgomery keys
+	if (pMechanism->mechanism == CKM_EC_EDWARDS_KEY_PAIR_GEN ||
+	    pMechanism->mechanism == CKM_EC_MONTGOMERY_KEY_PAIR_GEN)
 	{
 			return this->generateED(hSession,
 									 pPublicKeyTemplate, ulPublicKeyAttributeCount,
@@ -7048,7 +7184,8 @@ CK_RV SoftHSM::C_DeriveKey
 			return this->deriveECDH(hSession, pMechanism, hBaseKey, pTemplate, ulCount, phKey, keyType, isOnToken, isPrivate);
 #endif
 #ifdef WITH_EDDSA
-		else if (key->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) == CKK_EC_EDWARDS)
+		else if (key->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) == CKK_EC_EDWARDS ||
+		         key->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) == CKK_EC_MONTGOMERY)
 			return this->deriveEDDSA(hSession, pMechanism, hBaseKey, pTemplate, ulCount, phKey, keyType, isOnToken, isPrivate);
 #endif
 		else
@@ -8118,6 +8255,20 @@ CK_RV SoftHSM::generateED
 		return CKR_TEMPLATE_INCOMPLETE;
 	}
 
+	// Determine the key type from the public key template (Edwards vs Montgomery)
+	CK_KEY_TYPE edKeyType = CKK_EC_EDWARDS;
+	for (CK_ULONG i = 0; i < ulPublicKeyAttributeCount; i++)
+	{
+		if (pPublicKeyTemplate[i].type == CKA_KEY_TYPE)
+		{
+			edKeyType = *(CK_KEY_TYPE*)pPublicKeyTemplate[i].pValue;
+			break;
+		}
+	}
+	CK_ULONG edKeyGenMech = (edKeyType == CKK_EC_MONTGOMERY)
+		? (CK_ULONG)CKM_EC_MONTGOMERY_KEY_PAIR_GEN
+		: (CK_ULONG)CKM_EC_EDWARDS_KEY_PAIR_GEN;
+
 	// Set the parameters
 	ECParameters p;
 	p.setEC(params);
@@ -8143,7 +8294,7 @@ CK_RV SoftHSM::generateED
 	{
 		const CK_ULONG maxAttribs = 32;
 		CK_OBJECT_CLASS publicKeyClass = CKO_PUBLIC_KEY;
-		CK_KEY_TYPE publicKeyType = CKK_EC_EDWARDS;
+		CK_KEY_TYPE publicKeyType = edKeyType;
 		CK_ATTRIBUTE publicKeyAttribs[maxAttribs] = {
 			{ CKA_CLASS, &publicKeyClass, sizeof(publicKeyClass) },
 			{ CKA_TOKEN, &isPublicKeyOnToken, sizeof(isPublicKeyOnToken) },
@@ -8183,10 +8334,9 @@ CK_RV SoftHSM::generateED
 
 				// Common Key Attributes
 				bOK = bOK && osobject->setAttribute(CKA_LOCAL,true);
-				CK_ULONG ulKeyGenMechanism = (CK_ULONG)CKM_EC_EDWARDS_KEY_PAIR_GEN;
-				bOK = bOK && osobject->setAttribute(CKA_KEY_GEN_MECHANISM,ulKeyGenMechanism);
+				bOK = bOK && osobject->setAttribute(CKA_KEY_GEN_MECHANISM,edKeyGenMech);
 
-				// EDDSA Public Key Attributes
+				// EDDSA / Montgomery Public Key Attributes
 				ByteString value;
 				if (isPublicKeyPrivate)
 				{
@@ -8215,7 +8365,7 @@ CK_RV SoftHSM::generateED
 	{
 		const CK_ULONG maxAttribs = 32;
 		CK_OBJECT_CLASS privateKeyClass = CKO_PRIVATE_KEY;
-		CK_KEY_TYPE privateKeyType = CKK_EC_EDWARDS;
+		CK_KEY_TYPE privateKeyType = edKeyType;
 		CK_ATTRIBUTE privateKeyAttribs[maxAttribs] = {
 			{ CKA_CLASS, &privateKeyClass, sizeof(privateKeyClass) },
 			{ CKA_TOKEN, &isPrivateKeyOnToken, sizeof(isPrivateKeyOnToken) },
@@ -8253,8 +8403,7 @@ CK_RV SoftHSM::generateED
 
 				// Common Key Attributes
 				bOK = bOK && osobject->setAttribute(CKA_LOCAL,true);
-				CK_ULONG ulKeyGenMechanism = (CK_ULONG)CKM_EC_EDWARDS_KEY_PAIR_GEN;
-				bOK = bOK && osobject->setAttribute(CKA_KEY_GEN_MECHANISM,ulKeyGenMechanism);
+				bOK = bOK && osobject->setAttribute(CKA_KEY_GEN_MECHANISM,edKeyGenMech);
 
 				// Common Private Key Attributes
 				bool bAlwaysSensitive = osobject->getBooleanValue(CKA_SENSITIVE, false);
@@ -8262,7 +8411,7 @@ CK_RV SoftHSM::generateED
 				bool bNeverExtractable = osobject->getBooleanValue(CKA_EXTRACTABLE, false) == false;
 				bOK = bOK && osobject->setAttribute(CKA_NEVER_EXTRACTABLE, bNeverExtractable);
 
-				// EDDSA Private Key Attributes
+				// EDDSA / Montgomery Private Key Attributes
 				ByteString group;
 				ByteString value;
 				if (isPrivateKeyPrivate)
@@ -8465,6 +8614,7 @@ CK_RV SoftHSM::generateMLDSA
 				case CKA_TOKEN:
 				case CKA_PRIVATE:
 				case CKA_KEY_TYPE:
+				case CKA_PARAMETER_SET: // ck4: set directly after CreateObject
 					continue;
 				default:
 					privateKeyAttribs[privateKeyAttribsCount++] = pPrivateKeyTemplate[i];
@@ -8686,6 +8836,7 @@ CK_RV SoftHSM::generateSLHDSA
 				case CKA_TOKEN:
 				case CKA_PRIVATE:
 				case CKA_KEY_TYPE:
+				case CKA_PARAMETER_SET: // ck4: set directly after CreateObject
 					continue;
 				default:
 					privateKeyAttribs[privateKeyAttribsCount++] = pPrivateKeyTemplate[i];
@@ -9984,7 +10135,21 @@ CK_RV SoftHSM::CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTempla
 		object = sessionObjectStore->createObject(slot->getSlotID(), hSession, isPrivate != CK_FALSE);
 	}
 
-	if (object == NULL || !p11object->init(object))
+	if (object == NULL)
+	{
+		delete p11object;
+		return CKR_GENERAL_ERROR;
+	}
+
+	// Pre-set key type on the object so init() sees the correct value
+	// (needed when a single P11 object class serves multiple CKK types, e.g. Edwards+Montgomery)
+	if (objClass == CKO_PUBLIC_KEY || objClass == CKO_PRIVATE_KEY || objClass == CKO_SECRET_KEY)
+	{
+		OSAttribute attrKT((unsigned long)keyType);
+		object->setAttribute(CKA_KEY_TYPE, attrKT);
+	}
+
+	if (!p11object->init(object))
 	{
 		delete p11object;
 		return CKR_GENERAL_ERROR;
@@ -10557,6 +10722,7 @@ CK_RV SoftHSM::generateMLKEM
 				case CKA_TOKEN:
 				case CKA_PRIVATE:
 				case CKA_KEY_TYPE:
+				case CKA_PARAMETER_SET: // ck4: set directly after CreateObject
 					continue;
 				default:
 					privateKeyAttribs[privateKeyAttribsCount++] = pPrivateKeyTemplate[i];
@@ -11275,14 +11441,17 @@ CK_RV SoftHSM::MechParamCheckRSAPKCSOAEP(CK_MECHANISM_PTR pMechanism)
 	}
 
 	CK_RSA_PKCS_OAEP_PARAMS_PTR params = (CK_RSA_PKCS_OAEP_PARAMS_PTR)pMechanism->pParameter;
-	if (params->hashAlg != CKM_SHA_1)
+
+	// Validate hash algorithm and matching MGF
+	bool validCombo = false;
+	if (params->hashAlg == CKM_SHA_1    && params->mgf == CKG_MGF1_SHA1)    validCombo = true;
+	if (params->hashAlg == CKM_SHA224   && params->mgf == CKG_MGF1_SHA224)  validCombo = true;
+	if (params->hashAlg == CKM_SHA256   && params->mgf == CKG_MGF1_SHA256)  validCombo = true;
+	if (params->hashAlg == CKM_SHA384   && params->mgf == CKG_MGF1_SHA384)  validCombo = true;
+	if (params->hashAlg == CKM_SHA512   && params->mgf == CKG_MGF1_SHA512)  validCombo = true;
+	if (!validCombo)
 	{
-		ERROR_MSG("hashAlg must be CKM_SHA_1");
-		return CKR_ARGUMENTS_BAD;
-	}
-	if (params->mgf != CKG_MGF1_SHA1)
-	{
-		ERROR_MSG("mgf must be CKG_MGF1_SHA1");
+		ERROR_MSG("Invalid hashAlg/mgf combination for RSA-OAEP");
 		return CKR_ARGUMENTS_BAD;
 	}
 	if (params->source != CKZ_DATA_SPECIFIED)

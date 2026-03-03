@@ -1145,51 +1145,6 @@ protected:
 };
 
 /*****************************************
- * CKA_GOSTR3410_PARAMS
- *****************************************/
-
-class P11AttrGostR3410Params : public P11Attribute
-{
-public:
-	// Constructor
-	P11AttrGostR3410Params(OSObject* inobject, CK_ULONG inchecks = 0) : P11Attribute(inobject) { type = CKA_GOSTR3410_PARAMS; checks = ck1|inchecks; }
-
-protected:
-	// Set the default value of the attribute
-	virtual bool setDefault();
-};
-
-/*****************************************
- * CKA_GOSTR3411_PARAMS
- *****************************************/
-
-class P11AttrGostR3411Params : public P11Attribute
-{
-public:
-	// Constructor
-	P11AttrGostR3411Params(OSObject* inobject, CK_ULONG inchecks = 0) : P11Attribute(inobject) { type = CKA_GOSTR3411_PARAMS; checks = ck1|ck8|inchecks; }
-
-protected:
-	// Set the default value of the attribute
-	virtual bool setDefault();
-};
-
-/*****************************************
- * CKA_GOST28147_PARAMS
- *****************************************/
-
-class P11AttrGost28147Params : public P11Attribute
-{
-public:
-	// Constructor
-	P11AttrGost28147Params(OSObject* inobject, CK_ULONG inchecks = 0) : P11Attribute(inobject) { type = CKA_GOST28147_PARAMS; checks = inchecks; }
-
-protected:
-	// Set the default value of the attribute
-	virtual bool setDefault();
-};
-
-/*****************************************
  * CKA_VALUE_LEN
  *****************************************/
 

@@ -52,7 +52,6 @@ struct AsymAlgo
 		DH,
 		ECDH,
 		ECDSA,
-		GOST,
 		EDDSA,
 		MLDSA,    // ML-DSA (FIPS 204)
 		SLHDSA,   // SLH-DSA (FIPS 205)
@@ -69,6 +68,10 @@ struct AsymMech
 		RSA_MD5_PKCS,
 		RSA_PKCS,
 		RSA_PKCS_OAEP,
+		RSA_PKCS_OAEP_SHA224,
+		RSA_PKCS_OAEP_SHA256,
+		RSA_PKCS_OAEP_SHA384,
+		RSA_PKCS_OAEP_SHA512,
 		RSA_SHA1_PKCS,
 		RSA_SHA224_PKCS,
 		RSA_SHA256_PKCS,
@@ -93,8 +96,6 @@ struct AsymMech
 		ECDSA_SHA256,
 		ECDSA_SHA384,
 		ECDSA_SHA512,
-		GOST,
-		GOST_GOST,
 		EDDSA,
 		MLDSA,    // CKM_ML_DSA pure-message sign/verify (FIPS 204)
 		SLHDSA    // CKM_SLH_DSA pure-message sign/verify (FIPS 205)

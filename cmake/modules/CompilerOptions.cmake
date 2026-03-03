@@ -219,26 +219,6 @@ if(WITH_CRYPTO_BACKEND STREQUAL "botan")
         message(STATUS "Botan: Support for EDDSA is disabled")
     endif(ENABLE_EDDSA)
 
-    # acx_botan_gost.m4
-    if(ENABLE_GOST)
-        set(testfile ${CMAKE_SOURCE_DIR}/cmake/modules/tests/test_botan_gost.cpp)
-        try_run(RUN_GOST COMPILE_RESULT
-                "${CMAKE_BINARY_DIR}/prebuild_santity_tests" ${testfile}
-                LINK_LIBRARIES ${CRYPTO_LIBS}
-                CMAKE_FLAGS
-                    "-DINCLUDE_DIRECTORIES=${CRYPTO_INCLUDES}"
-                )
-        if(COMPILE_RESULT AND RUN_GOST EQUAL 0)
-            set(WITH_GOST 1)
-            message(STATUS "Botan: Found GOST")
-        else()
-            set(error_msg "Botan: Cannot find GOST! Botan library has no GOST support!")
-            message(FATAL_ERROR ${error_msg})
-        endif()
-    else(ENABLE_GOST)
-        message(STATUS "Botan: Support for GOST is disabled")
-    endif(ENABLE_GOST)
-
     if(ENABLE_FIPS)
         message(FATAL_ERROR "Botan does not support FIPS 140-2 mode")
     endif(ENABLE_FIPS)
@@ -369,26 +349,6 @@ elseif(WITH_CRYPTO_BACKEND STREQUAL "openssl")
     else(ENABLE_EDDSA)
         message(STATUS "OpenSSL: Support for EDDSA is disabled")
     endif(ENABLE_EDDSA)
-
-    # acx_openssl_gost.m4
-    if(ENABLE_GOST)
-        set(testfile ${CMAKE_SOURCE_DIR}/cmake/modules/tests/test_openssl_gost.c)
-        try_run(RUN_GOST COMPILE_RESULT
-                "${CMAKE_BINARY_DIR}/prebuild_santity_tests" ${testfile}
-                LINK_LIBRARIES ${CRYPTO_LIBS}
-                CMAKE_FLAGS
-                    "-DINCLUDE_DIRECTORIES=${CRYPTO_INCLUDES}"
-                )
-        if(COMPILE_RESULT AND RUN_GOST EQUAL 0)
-            set(WITH_GOST 1)
-            message(STATUS "OpenSSL: Found GOST engine")
-        else()
-            set(error_msg "OpenSSL: Cannot find GOST engine! OpenSSL library has no GOST support!")
-            message(FATAL_ERROR ${error_msg})
-        endif()
-    else(ENABLE_GOST)
-        message(STATUS "OpenSSL: Support for GOST is disabled")
-    endif(ENABLE_GOST)
 
     # acx_openssl_fips.m4
     if(ENABLE_FIPS)

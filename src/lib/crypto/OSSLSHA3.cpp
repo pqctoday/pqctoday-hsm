@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2010 SURFnet bv
+ * Copyright (c) 2025 PQC Today
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -25,54 +25,59 @@
  */
 
 /*****************************************************************************
- GOSTTests.h
+ OSSLSHA3.cpp
 
- Contains test cases to test the GOST implementations
+ OpenSSL SHA-3 implementation (SHA3-224, SHA3-256, SHA3-384, SHA3-512)
  *****************************************************************************/
 
-#ifndef _SOFTHSM_V2_HASHTESTS_H
-#define _SOFTHSM_V2_HASHTESTS_H
+#include "config.h"
+#include "OSSLSHA3.h"
+#include <openssl/evp.h>
 
-#include <cppunit/extensions/HelperMacros.h>
-#include "AsymmetricAlgorithm.h"
-#include "HashAlgorithm.h"
-#include "MacAlgorithm.h"
-#include "RNG.h"
+// SHA3-224
 
-class GOSTTests : public CppUnit::TestFixture
+int OSSLSHA3_224::getHashSize()
 {
-	CPPUNIT_TEST_SUITE(GOSTTests);
-	CPPUNIT_TEST(testHash);
-	CPPUNIT_TEST(testHmac);
-	CPPUNIT_TEST(testHashKnownVector);
-	CPPUNIT_TEST(testKeyGeneration);
-	CPPUNIT_TEST(testSerialisation);
-	CPPUNIT_TEST(testPKCS8);
-	CPPUNIT_TEST(testSigningVerifying);
-	CPPUNIT_TEST(testSignVerifyKnownVector);
-	CPPUNIT_TEST_SUITE_END();
+	return 28;
+}
 
-public:
-	void testHash();
-	void testHmac();
-	void testHashKnownVector();
-	void testKeyGeneration();
-	void testSerialisation();
-	void testPKCS8();
-	void testSigningVerifying();
-	void testSignVerifyKnownVector();
+const EVP_MD* OSSLSHA3_224::getEVPHash() const
+{
+	return EVP_sha3_224();
+}
 
-	void setUp();
-	void tearDown();
+// SHA3-256
 
-private:
-	HashAlgorithm* hash;
+int OSSLSHA3_256::getHashSize()
+{
+	return 32;
+}
 
-	MacAlgorithm* mac;
+const EVP_MD* OSSLSHA3_256::getEVPHash() const
+{
+	return EVP_sha3_256();
+}
 
-	AsymmetricAlgorithm* gost;
+// SHA3-384
 
-	RNG* rng;
-};
+int OSSLSHA3_384::getHashSize()
+{
+	return 48;
+}
 
-#endif // !_SOFTHSM_V2_HASHTESTS_H
+const EVP_MD* OSSLSHA3_384::getEVPHash() const
+{
+	return EVP_sha3_384();
+}
+
+// SHA3-512
+
+int OSSLSHA3_512::getHashSize()
+{
+	return 64;
+}
+
+const EVP_MD* OSSLSHA3_512::getEVPHash() const
+{
+	return EVP_sha3_512();
+}

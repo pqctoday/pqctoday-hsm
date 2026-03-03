@@ -188,10 +188,11 @@ EVP_PKEY* OSSLECPrivateKey::getOSSLKey()
 		return NULL;
 	}
 
-	BN_clear_free(bn_d);
-
+	// bn_d must stay alive until OSSL_PARAM_BLD_to_param() copies it
 	OSSL_PARAM* params = OSSL_PARAM_BLD_to_param(bld);
 	OSSL_PARAM_BLD_free(bld);
+
+	BN_clear_free(bn_d);
 
 	if (params == NULL)
 		return NULL;

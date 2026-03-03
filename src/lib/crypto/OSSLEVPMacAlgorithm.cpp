@@ -84,7 +84,7 @@ bool OSSLEVPMacAlgorithm::signUpdate(const ByteString& dataToSign)
 		return false;
 	}
 
-	// The GOST implementation in OpenSSL will segfault if we update with zero length.
+	// Zero-length update is a no-op.
 	if (dataToSign.size() == 0) return true;
 
 	if (!HMAC_Update(curCTX, dataToSign.const_byte_str(), dataToSign.size()))
@@ -173,7 +173,7 @@ bool OSSLEVPMacAlgorithm::verifyUpdate(const ByteString& originalData)
 		return false;
 	}
 
-	// The GOST implementation in OpenSSL will segfault if we update with zero length.
+	// Zero-length update is a no-op.
 	if (originalData.size() == 0) return true;
 
 	if (!HMAC_Update(curCTX, originalData.const_byte_str(), originalData.size()))

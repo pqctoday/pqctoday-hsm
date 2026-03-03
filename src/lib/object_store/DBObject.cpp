@@ -485,11 +485,6 @@ static AttributeKind attributeKind(CK_ATTRIBUTE_TYPE type)
 	case CKA_OTP_SERVICE_IDENTIFIER:
 	case CKA_OTP_SERVICE_LOGO:
 	case CKA_OTP_SERVICE_LOGO_TYPE:
-*/
-	case CKA_GOSTR3410_PARAMS: return akBinary;
-	case CKA_GOSTR3411_PARAMS: return akBinary;
-	case CKA_GOST28147_PARAMS: return akBinary;
-/*
 	case CKA_HW_FEATURE_TYPE:
 	case CKA_RESET_ON_INIT:
 	case CKA_HAS_RESET:

@@ -186,18 +186,22 @@ EVP_PKEY* OSSLRSAPrivateKey::getOSSLKey()
 	if (ok && bn_dq) ok = (OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_RSA_EXPONENT2,    bn_dq) == 1);
 	if (ok && bn_qi) ok = (OSSL_PARAM_BLD_push_BN(bld, OSSL_PKEY_PARAM_RSA_COEFFICIENT1, bn_qi) == 1);
 
-	BN_clear_free(bn_n);  BN_clear_free(bn_e);  BN_clear_free(bn_d);
-	BN_clear_free(bn_p);  BN_clear_free(bn_q);
-	BN_clear_free(bn_dp); BN_clear_free(bn_dq); BN_clear_free(bn_qi);
-
 	if (!ok)
 	{
+		BN_clear_free(bn_n);  BN_clear_free(bn_e);  BN_clear_free(bn_d);
+		BN_clear_free(bn_p);  BN_clear_free(bn_q);
+		BN_clear_free(bn_dp); BN_clear_free(bn_dq); BN_clear_free(bn_qi);
 		OSSL_PARAM_BLD_free(bld);
 		return NULL;
 	}
 
+	// BIGNUMs must stay alive until OSSL_PARAM_BLD_to_param() copies them
 	OSSL_PARAM* params = OSSL_PARAM_BLD_to_param(bld);
 	OSSL_PARAM_BLD_free(bld);
+
+	BN_clear_free(bn_n);  BN_clear_free(bn_e);  BN_clear_free(bn_d);
+	BN_clear_free(bn_p);  BN_clear_free(bn_q);
+	BN_clear_free(bn_dp); BN_clear_free(bn_dq); BN_clear_free(bn_qi);
 
 	if (params == NULL)
 		return NULL;

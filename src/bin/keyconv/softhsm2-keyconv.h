@@ -76,7 +76,6 @@ int b64_ntop(const unsigned char*, size_t, char*, size_t);
 #define DNS_KEYALG_RSASHA1_NSEC3_SHA1	7
 #define DNS_KEYALG_RSASHA256		8
 #define DNS_KEYALG_RSASHA512		10
-#define DNS_KEYALG_ECC_GOST		12
 
 // Maximum number of lines / line length
 #define MAX_LINE 4096

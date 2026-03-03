@@ -154,9 +154,6 @@
 /* Compile with FIPS 140-2 mode */
 #cmakedefine WITH_FIPS @WITH_FIPS@
 
-/* Compile with GOST support */
-#cmakedefine WITH_GOST @WITH_GOST@
-
 /* Compile with OpenSSL support */
 #cmakedefine WITH_OPENSSL @WITH_OPENSSL@
 

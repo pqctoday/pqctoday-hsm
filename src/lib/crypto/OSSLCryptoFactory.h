@@ -28,8 +28,9 @@
  OSSLCryptoFactory.h
 
  OpenSSL 3.x EVP-only cryptographic algorithm factory.
- ENGINE-based code, GOST, DES, DSA, DH, MD5, and FIPS 140-2 mode have been
- removed. Retained: RSA, ECDSA, ECDH, EdDSA, AES, SHA family, HMAC, CMAC.
+ OpenSSL 3.x EVP-only. Legacy algorithms (DES, DSA, DH, GOST, MD5) removed from this fork.
+ Retained: RSA, ECDSA, ECDH, EdDSA, AES, SHA-2, SHA-3, HMAC, CMAC,
+ ML-DSA, SLH-DSA, ML-KEM.
  *****************************************************************************/
 
 #ifndef _SOFTHSM_V2_OSSLCRYPTOFACTORY_H

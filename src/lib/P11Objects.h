@@ -211,19 +211,6 @@ protected:
 	bool initialized;
 };
 
-class P11GOSTPublicKeyObj : public P11PublicKeyObj
-{
-public:
-	// Constructor
-	P11GOSTPublicKeyObj();
-
-	// Add attributes
-	virtual bool init(OSObject *inobject);
-
-protected:
-	bool initialized;
-};
-
 class P11PrivateKeyObj : public P11KeyObj
 {
 protected:
@@ -300,19 +287,6 @@ protected:
 	bool initialized;
 };
 
-class P11GOSTPrivateKeyObj : public P11PrivateKeyObj
-{
-public:
-	// Constructor
-	P11GOSTPrivateKeyObj();
-
-	// Add attributes
-	virtual bool init(OSObject *inobject);
-
-protected:
-	bool initialized;
-};
-
 class P11SecretKeyObj : public P11KeyObj
 {
 protected:
@@ -371,19 +345,6 @@ public:
 protected:
 	bool initialized;
 	CK_KEY_TYPE keytype;
-};
-
-class P11GOSTSecretKeyObj : public P11SecretKeyObj
-{
-public:
-	// Constructor
-	P11GOSTSecretKeyObj();
-
-	// Add attributes
-	virtual bool init(OSObject *inobject);
-
-protected:
-	bool initialized;
 };
 
 class P11DomainObj : public P11Object
