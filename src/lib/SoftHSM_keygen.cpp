@@ -923,6 +923,15 @@ CK_RV SoftHSM::C_WrapKey
 			        alg = AsymAlgo::EDDSA;
 				break;
 #endif
+			case CKK_ML_DSA:
+				alg = AsymAlgo::MLDSA;
+				break;
+			case CKK_ML_KEM:
+				alg = AsymAlgo::MLKEM;
+				break;
+			case CKK_SLH_DSA:
+				alg = AsymAlgo::SLHDSA;
+				break;
 			default:
 				return CKR_KEY_NOT_WRAPPABLE;
 		}
@@ -953,6 +962,15 @@ CK_RV SoftHSM::C_WrapKey
 				rv = getEDPrivateKey((EDPrivateKey*)privateKey, token, key);
 				break;
 #endif
+			case CKK_ML_DSA:
+				rv = getMLDSAPrivateKey((MLDSAPrivateKey*)privateKey, token, key);
+				break;
+			case CKK_ML_KEM:
+				rv = getMLKEMPrivateKey((MLKEMPrivateKey*)privateKey, token, key);
+				break;
+			case CKK_SLH_DSA:
+				rv = getSLHDSAPrivateKey((SLHDSAPrivateKey*)privateKey, token, key);
+				break;
 		}
 		if (rv != CKR_OK)
 		{

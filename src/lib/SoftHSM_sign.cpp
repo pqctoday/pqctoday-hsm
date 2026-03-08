@@ -497,6 +497,21 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			bAllowMultiPartOp = true;
 			isRSA = true;
 			break;
+		case CKM_SHA3_224_RSA_PKCS:
+			mechanism = AsymMech::RSA_SHA3_224_PKCS;
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
+		case CKM_SHA3_256_RSA_PKCS:
+			mechanism = AsymMech::RSA_SHA3_256_PKCS;
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
+		case CKM_SHA3_512_RSA_PKCS:
+			mechanism = AsymMech::RSA_SHA3_512_PKCS;
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
 #ifdef WITH_RAW_PSS
 		case CKM_RSA_PKCS_PSS:
 			if (pMechanism->pParameter == NULL_PTR ||
@@ -635,6 +650,60 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			mechanism = AsymMech::RSA_SHA512_PKCS_PSS;
 			pssParam.hashAlg = HashAlgo::SHA512;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA512;
+			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			param = &pssParam;
+			paramLen = sizeof(pssParam);
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
+		case CKM_SHA3_224_RSA_PKCS_PSS:
+			if (pMechanism->pParameter == NULL_PTR ||
+			    pMechanism->ulParameterLen != sizeof(CK_RSA_PKCS_PSS_PARAMS) ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->hashAlg != CKM_SHA3_224 ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->mgf != CKG_MGF1_SHA3_224)
+			{
+				ERROR_MSG("Invalid parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+			mechanism = AsymMech::RSA_SHA3_224_PKCS_PSS;
+			pssParam.hashAlg = HashAlgo::SHA3_224;
+			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_224;
+			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			param = &pssParam;
+			paramLen = sizeof(pssParam);
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
+		case CKM_SHA3_256_RSA_PKCS_PSS:
+			if (pMechanism->pParameter == NULL_PTR ||
+			    pMechanism->ulParameterLen != sizeof(CK_RSA_PKCS_PSS_PARAMS) ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->hashAlg != CKM_SHA3_256 ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->mgf != CKG_MGF1_SHA3_256)
+			{
+				ERROR_MSG("Invalid parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+			mechanism = AsymMech::RSA_SHA3_256_PKCS_PSS;
+			pssParam.hashAlg = HashAlgo::SHA3_256;
+			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_256;
+			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			param = &pssParam;
+			paramLen = sizeof(pssParam);
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
+		case CKM_SHA3_512_RSA_PKCS_PSS:
+			if (pMechanism->pParameter == NULL_PTR ||
+			    pMechanism->ulParameterLen != sizeof(CK_RSA_PKCS_PSS_PARAMS) ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->hashAlg != CKM_SHA3_512 ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->mgf != CKG_MGF1_SHA3_512)
+			{
+				ERROR_MSG("Invalid parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+			mechanism = AsymMech::RSA_SHA3_512_PKCS_PSS;
+			pssParam.hashAlg = HashAlgo::SHA3_512;
+			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_512;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
@@ -1522,6 +1591,21 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			bAllowMultiPartOp = true;
 			isRSA = true;
 			break;
+		case CKM_SHA3_224_RSA_PKCS:
+			mechanism = AsymMech::RSA_SHA3_224_PKCS;
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
+		case CKM_SHA3_256_RSA_PKCS:
+			mechanism = AsymMech::RSA_SHA3_256_PKCS;
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
+		case CKM_SHA3_512_RSA_PKCS:
+			mechanism = AsymMech::RSA_SHA3_512_PKCS;
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
 #ifdef WITH_RAW_PSS
 		case CKM_RSA_PKCS_PSS:
 			if (pMechanism->pParameter == NULL_PTR ||
@@ -1658,6 +1742,60 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			mechanism = AsymMech::RSA_SHA512_PKCS_PSS;
 			pssParam.hashAlg = HashAlgo::SHA512;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA512;
+			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			param = &pssParam;
+			paramLen = sizeof(pssParam);
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
+		case CKM_SHA3_224_RSA_PKCS_PSS:
+			if (pMechanism->pParameter == NULL_PTR ||
+			    pMechanism->ulParameterLen != sizeof(CK_RSA_PKCS_PSS_PARAMS) ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->hashAlg != CKM_SHA3_224 ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->mgf != CKG_MGF1_SHA3_224)
+			{
+				ERROR_MSG("Invalid parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+			mechanism = AsymMech::RSA_SHA3_224_PKCS_PSS;
+			pssParam.hashAlg = HashAlgo::SHA3_224;
+			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_224;
+			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			param = &pssParam;
+			paramLen = sizeof(pssParam);
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
+		case CKM_SHA3_256_RSA_PKCS_PSS:
+			if (pMechanism->pParameter == NULL_PTR ||
+			    pMechanism->ulParameterLen != sizeof(CK_RSA_PKCS_PSS_PARAMS) ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->hashAlg != CKM_SHA3_256 ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->mgf != CKG_MGF1_SHA3_256)
+			{
+				ERROR_MSG("Invalid parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+			mechanism = AsymMech::RSA_SHA3_256_PKCS_PSS;
+			pssParam.hashAlg = HashAlgo::SHA3_256;
+			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_256;
+			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			param = &pssParam;
+			paramLen = sizeof(pssParam);
+			bAllowMultiPartOp = true;
+			isRSA = true;
+			break;
+		case CKM_SHA3_512_RSA_PKCS_PSS:
+			if (pMechanism->pParameter == NULL_PTR ||
+			    pMechanism->ulParameterLen != sizeof(CK_RSA_PKCS_PSS_PARAMS) ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->hashAlg != CKM_SHA3_512 ||
+			    CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->mgf != CKG_MGF1_SHA3_512)
+			{
+				ERROR_MSG("Invalid parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+			mechanism = AsymMech::RSA_SHA3_512_PKCS_PSS;
+			pssParam.hashAlg = HashAlgo::SHA3_512;
+			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_512;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
 			param = &pssParam;
 			paramLen = sizeof(pssParam);

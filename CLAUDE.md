@@ -89,10 +89,31 @@ New functions in pkcs11f.h:
 - `C_EncapsulateKey` — ML-KEM encapsulation
 - `C_DecapsulateKey` — ML-KEM decapsulation
 
+## Source of Truth — PKCS#11 Constants
+
+**The PKCS#11 v3.2 spec and its normative header `pkcs11t.h` are the ONLY reference for all `CK*` constant values.**
+
+- Canonical `pkcs11t.h`: https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.2/include/pkcs11-v3.2/pkcs11t.h
+- Local copy: `src/lib/pkcs11/pkcs11t.h` (kept in sync with the spec)
+
+When editing `constants.js` or any file with `CK*` values, **grep `src/lib/pkcs11/pkcs11t.h` first** — do not guess or infer from secondary sources. If a value in any JS/TS file disagrees with `pkcs11t.h`, `pkcs11t.h` wins.
+
+Key PQC type values for quick reference (as of v3.2):
+
+| Constant | Value |
+|---|---|
+| `CKK_HSS` | `0x46` |
+| `CKK_XMSS` | `0x47` |
+| `CKK_XMSSMT` | `0x48` |
+| `CKK_ML_KEM` | `0x49` |
+| `CKK_ML_DSA` | `0x4a` |
+| `CKK_SLH_DSA` | `0x4b` |
+
 ## References
 
 - [SoftHSM2 upstream](https://github.com/softhsm/SoftHSMv2)
-- [PKCS#11 v3.2 CSD01](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.2/csd01/pkcs11-spec-v3.2-csd01.html)
+- [PKCS#11 v3.2 spec](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.2/pkcs11-spec-v3.2.html)
+- [PKCS#11 v3.2 pkcs11t.h](https://docs.oasis-open.org/pkcs11/pkcs11-spec/v3.2/include/pkcs11-v3.2/pkcs11t.h)
 - [FIPS 204 (ML-DSA)](https://csrc.nist.gov/pubs/fips/204/final)
 - [FIPS 203 (ML-KEM)](https://csrc.nist.gov/pubs/fips/203/final)
 - [OpenSSL EVP_PKEY-ML-DSA](https://docs.openssl.org/3.5/man7/EVP_PKEY-ML-DSA/)

@@ -377,6 +377,12 @@ void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE
 	t["CKM_SHA256_RSA_PKCS_PSS"]	= CKM_SHA256_RSA_PKCS_PSS;
 	t["CKM_SHA384_RSA_PKCS_PSS"]	= CKM_SHA384_RSA_PKCS_PSS;
 	t["CKM_SHA512_RSA_PKCS_PSS"]	= CKM_SHA512_RSA_PKCS_PSS;
+	t["CKM_SHA3_224_RSA_PKCS"]	= CKM_SHA3_224_RSA_PKCS;
+	t["CKM_SHA3_256_RSA_PKCS"]	= CKM_SHA3_256_RSA_PKCS;
+	t["CKM_SHA3_512_RSA_PKCS"]	= CKM_SHA3_512_RSA_PKCS;
+	t["CKM_SHA3_224_RSA_PKCS_PSS"]	= CKM_SHA3_224_RSA_PKCS_PSS;
+	t["CKM_SHA3_256_RSA_PKCS_PSS"]	= CKM_SHA3_256_RSA_PKCS_PSS;
+	t["CKM_SHA3_512_RSA_PKCS_PSS"]	= CKM_SHA3_512_RSA_PKCS_PSS;
 
 	// AES (DES/DES3 removed)
 	t["CKM_GENERIC_SECRET_KEY_GEN"]	= CKM_GENERIC_SECRET_KEY_GEN;
@@ -715,6 +721,12 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 		case CKM_SHA256_RSA_PKCS_PSS:
 		case CKM_SHA384_RSA_PKCS_PSS:
 		case CKM_SHA512_RSA_PKCS_PSS:
+		case CKM_SHA3_224_RSA_PKCS:
+		case CKM_SHA3_256_RSA_PKCS:
+		case CKM_SHA3_512_RSA_PKCS:
+		case CKM_SHA3_224_RSA_PKCS_PSS:
+		case CKM_SHA3_256_RSA_PKCS_PSS:
+		case CKM_SHA3_512_RSA_PKCS_PSS:
 			pInfo->ulMinKeySize = rsaMinSize;
 			pInfo->ulMaxKeySize = rsaMaxSize;
 			pInfo->flags = CKF_SIGN | CKF_VERIFY;
@@ -877,6 +889,14 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 	    case CKM_CONCATENATE_DATA_AND_BASE:
 	    case CKM_CONCATENATE_BASE_AND_DATA:
 	    case CKM_CONCATENATE_BASE_AND_KEY:
+	        pInfo->ulMinKeySize = 1;
+	        pInfo->ulMaxKeySize = MAX_HMAC_KEY_BYTES;
+	        pInfo->flags = CKF_DERIVE;
+	        break;
+	    case CKM_PKCS5_PBKD2:
+	    case CKM_HKDF_DERIVE:
+	    case CKM_SP800_108_COUNTER_KDF:
+	    case CKM_SP800_108_FEEDBACK_KDF:
 	        pInfo->ulMinKeySize = 1;
 	        pInfo->ulMaxKeySize = MAX_HMAC_KEY_BYTES;
 	        pInfo->flags = CKF_DERIVE;
