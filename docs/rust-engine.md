@@ -1,0 +1,235 @@
+# softhsmrustv3 — Rust WASM Engine
+
+**Updated:** 2026-03-08 (Phase 2 — full classical + PQC algorithm parity)
+**Package:** `softhsmrustv3` (Rust crate, `cdylib` → `softhsmrustv3_bg.wasm`)
+**Companion:** [softhsmv3devguide.md](softhsmv3devguide.md) (C++ engine), [gap-analysis-pkcs11-v3.2.md](gap-analysis-pkcs11-v3.2.md) (compliance)
+
+---
+
+## Overview
+
+`softhsmrustv3` is a pure-Rust WebAssembly implementation of the PKCS#11 v3.2 interface,
+built as a parallel engine to the C++ `softhsmv3` Emscripten build. Both engines expose
+the same `_C_*` function surface and are interchangeable via the `engineMode` flag in
+`pqc-timeline-app/src/wasm/softhsm.ts`.
+
+The Rust engine exists for two reasons:
+
+1. **Cross-engine parity verification** — the PQC Today Playground's `dual` mode runs the
+   same operation on both engines and compares outputs (shared secrets, signatures) byte-by-byte.
+   This validates that the ML-KEM and ML-DSA implementations are interoperable across two
+   completely independent code paths.
+
+2. **Pure-Rust reference implementation** — demonstrates that PKCS#11 v3.2 PQC operations
+   can be implemented without OpenSSL, using only the Rust crypto ecosystem.
+
+---
+
+## Technology Stack
+
+All cryptography uses pure-Rust crates from the [RustCrypto](https://github.com/RustCrypto)
+ecosystem. No OpenSSL, no system libraries, no native bindings.
+
+| Crate | Version | Algorithms |
+|---|---|---|
+| `ml-kem` | 0.2.3 | ML-KEM-512, ML-KEM-768, ML-KEM-1024 (FIPS 203) |
+| `ml-dsa` | 0.1.0-rc.7 (pkcs8) | ML-DSA-44, ML-DSA-65, ML-DSA-87 (FIPS 204) |
+| `slh-dsa` | 0.2.0-rc.4 | All 12 SLH-DSA parameter sets (FIPS 205) |
+| `rsa` | 0.9 (sha2) | RSA-2048, RSA-3072, RSA-4096 (PKCS#1 v2.2) |
+| `p256` | 0.13 (ecdsa, ecdh) | ECDSA P-256, ECDH P-256 |
+| `p384` | 0.13 (ecdsa, ecdh) | ECDSA P-384, ECDH P-384 |
+| `ed25519-dalek` | 2.1 (rand_core, digest) | Ed25519 signatures (RFC 8032) |
+| `x25519-dalek` | 2.0 (static_secrets) | X25519 key agreement |
+| `aes` | 0.8.3 | AES-128, AES-256 block cipher |
+| `aes-gcm` | 0.10.3 | AES-128-GCM, AES-256-GCM (AEAD) |
+| `aes-kw` | 0.2 (alloc) | AES Key Wrap (RFC 3394) |
+| `cbc` | 0.1.2 | AES-CBC |
+| `ctr` | 0.9.2 | AES-CTR |
+| `hmac` | 0.12.1 | HMAC-SHA-256/384/512 |
+| `hkdf` | 0.12 | HKDF (RFC 5869) |
+| `pbkdf2` | 0.12 | PBKDF2 (BIP39 derivation) |
+| `sha2` | 0.10.8 | SHA-256, SHA-384, SHA-512 |
+| `sha3` | 0.10.8 | SHA3-256, SHA3-384, SHA3-512, SHAKE128, SHAKE256 |
+| `pkcs8` | 0.11.0-rc.11 (alloc) | PKCS#8 key encoding/decoding |
+| `spki` | 0.8.0-rc.4 (alloc) | SubjectPublicKeyInfo (X.509 public keys) |
+| `signature` | 3.0.0-rc.10 | Signature traits |
+| `getrandom` | 0.2.17 (js) | WASM-compatible CSPRNG (uses browser `crypto.getRandomValues`) |
+| `zeroize` | 1 | Secure memory zeroization |
+| `wasm-bindgen` | 0.2.92 | JS/WASM bridge |
+
+---
+
+## Build
+
+The Rust engine is built with `wasm-pack` targeting the `web` profile:
+
+```bash
+cd softhsmv3/rust
+wasm-pack build --target web --release
+# Output: pkg/softhsmrustv3_bg.wasm + pkg/softhsmrustv3.js + pkg/softhsmrustv3.d.ts
+```
+
+WASM binary is optimized for size (`opt-level = "s"`, `lto = true`).
+Output is copied to `pqc-timeline-app/public/wasm/rust/softhsmrustv3_bg.wasm`
+and `pqc-timeline-app/src/wasm/softhsmrustv3.{js,d.ts}`.
+
+---
+
+## PKCS#11 Surface — Implemented Functions
+
+The Rust WASM binary exports 45 `_C_*` functions via `wasm-bindgen`. The TypeScript wrapper
+(`softhsm.ts: getSoftHSMRustModule()`) bridges all PKCS#11 calls and adds JS-side stubs
+for functions not yet in the Rust binary.
+
+### Fully Implemented (native Rust WASM)
+
+| Category | Functions |
+|---|---|
+| **Lifecycle** | `C_Initialize`, `C_Finalize` |
+| **Session** | `C_OpenSession`, `C_CloseSession`, `C_Login`, `C_Logout`, `C_GetSessionInfo` |
+| **Slot / Token** | `C_GetSlotList`, `C_GetTokenInfo`, `C_GetMechanismList`, `C_GetMechanismInfo`, `C_InitToken`, `C_InitPIN` |
+| **Object** | `C_CreateObject`, `C_DestroyObject`, `C_FindObjectsInit`, `C_FindObjects`, `C_FindObjectsFinal`, `C_GetAttributeValue` |
+| **Key generation** | `C_GenerateKey` (AES-128/256), `C_GenerateKeyPair` (ML-KEM, ML-DSA, SLH-DSA, RSA, ECDSA P-256/P-384, Ed25519) |
+| **KEM** | `C_EncapsulateKey`, `C_DecapsulateKey` (ML-KEM-512/768/1024) |
+| **Encrypt / Decrypt** | `C_EncryptInit` + `C_Encrypt` (one-shot), `C_DecryptInit` + `C_Decrypt` (one-shot); mechanisms: AES-GCM, AES-CBC, AES-KW, RSA-OAEP |
+| **Sign / Verify** | `C_SignInit` + `C_Sign` (one-shot), `C_VerifyInit` + `C_Verify` (one-shot), `C_SignMessage` (one-shot), `C_VerifyMessage` (one-shot); algorithms: ML-DSA-44/65/87, SLH-DSA (all 12), RSA-PKCS, RSA-PSS, ECDSA P-256/P-384, Ed25519 |
+| **Message API** | `C_MessageSignInit` + `C_MessageSignFinal` (one-shot envelope), `C_MessageVerifyInit` + `C_MessageVerifyFinal` (one-shot envelope) |
+| **Digest** | `C_DigestInit`, `C_Digest`, `C_DigestUpdate`, `C_DigestFinal`; SHA-256, SHA-384, SHA-512, SHA3-256, SHA3-512, HMAC |
+| **Key wrap / unwrap** | `C_WrapKey`, `C_UnwrapKey` (AES-KW, AES-GCM wrap, RSA-OAEP wrap), `C_DeriveKey` (ECDH, HKDF, PBKDF2) |
+| **Random** | `C_GenerateRandom` (browser CSPRNG via `getrandom::js`) |
+
+### Stubbed — JS-side `CKR_NOT_IMPL` (0x70)
+
+These functions are declared in `softhsmrustv3.d.ts` or padded in the TS wrapper.
+All are fully implemented in the C++ engine; Rust stubs are placeholders for future parity.
+
+| Category | Stubbed Functions |
+|---|---|
+| **Streaming encrypt** | `C_EncryptUpdate`, `C_EncryptFinal`, `C_DecryptUpdate`, `C_DecryptFinal` |
+| **Streaming sign** | `C_SignUpdate`, `C_SignFinal`, `C_VerifyUpdate`, `C_VerifyFinal` |
+| **Message streaming** | `C_SignMessageBegin`, `C_SignMessageNext`, `C_VerifyMessageBegin`, `C_VerifyMessageNext` |
+| **Message encrypt/decrypt** | `C_MessageEncryptInit`, `C_EncryptMessage`, `C_EncryptMessageBegin/Next`, `C_MessageDecryptInit`, `C_DecryptMessage`, `C_DecryptMessageBegin/Next` |
+| **Authenticated wrap** | `C_WrapKeyAuthenticated`, `C_UnwrapKeyAuthenticated` |
+| **Recovery ops** | `C_SignRecoverInit`, `C_SignRecover`, `C_VerifyRecoverInit`, `C_VerifyRecover` |
+| **Dual-function** | `C_DigestEncryptUpdate`, `C_DecryptDigestUpdate`, `C_SignEncryptUpdate`, `C_DecryptVerifyUpdate` |
+| **Object mgmt** | `C_CopyObject`, `C_GetObjectSize`, `C_SetAttributeValue`, `C_DigestKey` |
+| **Session state** | `C_GetOperationState`, `C_SetOperationState` |
+
+---
+
+## Session Handling — Important Differences from C++
+
+The Rust engine has a simplified session model suited to single-session educational use:
+
+- **`C_OpenSession` always returns handle `1`** — session handle is constant.
+  All operations that take `h_session` accept any value; the Rust WASM prefixes the parameter
+  with underscore (`_h_session`) to signal it is intentionally unused.
+- **`C_SignInit` / `C_VerifyInit` / `C_EncryptInit` / `C_DigestInit` USE `h_session`** as a
+  HashMap key to store operation state between `Init` and the corresponding `Sign`/`Verify`/etc.
+  call. This is the exception — these four init functions do read the session handle.
+- **Non-persistent** — all key handles and operation state are lost when the WASM module is
+  garbage-collected. This matches the C++ engine's educational-demo design.
+- **Single-threaded** — WASM runs on the main thread; keygen for large SLH-DSA variants
+  (~200ms) will briefly block the UI. Use Web Workers for production integrations.
+
+> **Cross-check implication:** The PQC Today Playground's dual-engine cross-check passes
+> C++ session handles directly to Rust operations (e.g., after `C_OpenSession` on C++,
+> it calls `_C_EncapsulateKey` on the Rust module with the same handle value). This works
+> correctly because `C_EncapsulateKey` and `C_DecapsulateKey` in the Rust engine ignore
+> `_h_session` entirely.
+
+---
+
+## Dual-Engine Cross-Check Architecture
+
+The cross-check runs automatically in `dual` mode in the PQC Today Playground:
+
+```
+HsmKemPanel (ML-KEM):
+  C++ C_GenerateKeyPair → pubkey exported via CKA_VALUE
+  Rust C_EncapsulateKey(cpp_pubkey) → rust_ciphertext + rust_secret
+  C++ C_DecapsulateKey(rust_ciphertext) → cpp_secret
+  Assert: rust_secret === cpp_secret (byte-for-byte)
+
+HsmSignPanel (ML-DSA):
+  C++ C_Sign(message) → cpp_signature
+  C++ C_GetAttributeValue(pubkey, CKA_VALUE) → cpp_pubkey_bytes
+  Rust C_CreateObject(cpp_pubkey_bytes) → rust_pubkey_handle
+  Rust C_Verify(rust_pubkey, cpp_signature, message) → CKR_OK
+```
+
+Parity success/failure is logged to the unified PKCS#11 call log as
+`Dual-Engine Parity / SUCCESS` or `Dual-Engine Parity / FAIL`.
+
+**Code locations:**
+- `KemOpsTab.tsx:41` — ML-KEM cross-check (Rust encapsulates with C++ pubkey → C++ decapsulates)
+- `SignVerifyTab.tsx:106` — ML-DSA cross-check (C++ signs → Rust imports pubkey → Rust verifies)
+- Guard: `engineMode === 'dual' && crossCheckModuleRef.current !== null`
+
+---
+
+## Loading — Integration in pqc-timeline-app
+
+The Rust engine is loaded as a lazy singleton via `getSoftHSMRustModule()`:
+
+```typescript
+// src/wasm/softhsm.ts
+export const getSoftHSMRustModule = async (): Promise<SoftHSMModule> => {
+  if (!rustModulePromise) {
+    rustModulePromise = (async () => {
+      const rustShim = await import('./softhsmrustv3.js')        // wasm-bindgen JS shim
+      const wasmExports = await rustShim.default('/wasm/rust/softhsmrustv3_bg.wasm')
+      return buildRustModule(wasmExports)   // wraps exports + adds stubs
+    })()
+  }
+  return rustModulePromise
+}
+```
+
+`HsmContext.tsx` stores the loaded module in `crossCheckModuleRef` (dual mode) or
+`moduleRef` (rust-only mode). `HsmSetupPanel` initializes both modules in dual mode.
+
+---
+
+## Algorithm Parity vs C++ Engine
+
+| Algorithm | C++ (softhsmv3) | Rust (softhsmrustv3) | Notes |
+|---|---|---|---|
+| ML-KEM-512/768/1024 | ✅ | ✅ | Cross-check verified |
+| ML-DSA-44/65/87 (pure) | ✅ | ✅ | Cross-check verified |
+| ML-DSA pre-hash (10 variants) | ✅ | ⚠️ Partial | Rust ml-dsa crate does not yet expose pre-hash API |
+| SLH-DSA (all 12 param sets, pure) | ✅ | ✅ | |
+| SLH-DSA pre-hash | ✅ | ⚠️ Partial | slh-dsa crate pre-hash support pending |
+| RSA-2048/3072/4096 | ✅ | ✅ | |
+| ECDSA P-256, P-384 | ✅ | ✅ | |
+| Ed25519 | ✅ | ✅ | |
+| X25519 (ECDH) | ✅ | ✅ | DeriveKey |
+| AES-GCM, AES-CBC, AES-KW, AES-CTR | ✅ | ✅ | |
+| RSA-OAEP wrap/encrypt | ✅ | ✅ | |
+| HMAC-SHA-256/384/512 | ✅ | ✅ | |
+| SHA-256/384/512 digest | ✅ | ✅ | |
+| SHA3-256/512 digest | ✅ | ✅ | |
+| HKDF | ✅ | ✅ | DeriveKey |
+| PBKDF2 | ✅ | ✅ | DeriveKey |
+| ECDSA-SHA3 variants | ✅ | ❌ Not implemented | |
+| ECDH cofactor | ✅ | ❌ Not implemented | |
+| SP 800-108 Counter/Feedback KDF | ✅ | ❌ Not implemented | |
+| Authenticated key wrap | ✅ | ❌ Not implemented (stub) | |
+| Streaming sign/verify/encrypt | ✅ | ❌ Not implemented (stub) | |
+| Message encrypt/decrypt API | ✅ | ❌ Not implemented (stub) | |
+
+---
+
+## Known Limitations
+
+- **No ML-DSA / SLH-DSA pre-hash in Rust** — the `ml-dsa` and `slh-dsa` RustCrypto crates
+  (rc versions) do not yet expose a pre-hash signing API. The C++ engine uses OpenSSL's
+  `OSSL_PARAM_utf8_string("digest", ...)` pattern which has no direct equivalent.
+- **No stateful hash-based signatures** — same constraint as C++ engine (persistent counters
+  incompatible with non-persistent WASM memory).
+- **No ECDSA-SHA3 variants** — `p256`/`p384` crates support standard ECDSA; SHA-3 prehash
+  requires manual digest + raw signature, not yet wired.
+- **No SP 800-108 KDFs or ECDH cofactor** — not available as standalone crates; would
+  require manual OpenSSL-equivalent implementation.
+- **Single session handle** — `C_OpenSession` always returns handle `1`. Multi-session
+  applications must use separate WASM module instances.

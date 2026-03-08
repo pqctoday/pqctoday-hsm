@@ -356,7 +356,50 @@ SHAKE XOF pre-hash: verified working via `"shake128"`/`"shake256"` digest names 
 
 ---
 
-## 5. Playground Integration Status (pqc-timeline-app)
+## 5. Rust Engine Parity (softhsmrustv3)
+
+> Full reference: [rust-engine.md](rust-engine.md)
+
+The PQC Today Playground ships two parallel WASM engines. This section records which C++ gaps
+are also resolved in the Rust engine and which remain Rust-only stubs.
+
+| Mechanism / Feature | C++ (softhsmv3) | Rust (softhsmrustv3) | Notes |
+| --- | --- | --- | --- |
+| ML-KEM-512/768/1024 | ✅ | ✅ | Cross-check verified in `dual` mode |
+| ML-DSA-44/65/87 (pure) | ✅ | ✅ | Cross-check verified in `dual` mode |
+| ML-DSA pre-hash (10 variants) | ✅ | ⚠️ Partial | `ml-dsa` rc crate lacks pre-hash API |
+| SLH-DSA (12 param sets, pure) | ✅ | ✅ | |
+| SLH-DSA pre-hash (12 variants) | ✅ | ⚠️ Partial | `slh-dsa` rc crate pre-hash pending |
+| RSA-2048/3072/4096 | ✅ | ✅ | |
+| ECDSA P-256/P-384 | ✅ | ✅ | |
+| Ed25519 (EdDSA) | ✅ | ✅ | |
+| X25519 (ECDH key agreement) | ✅ | ✅ | `C_DeriveKey` |
+| AES-GCM, AES-CBC, AES-KW, AES-CTR | ✅ | ✅ | |
+| RSA-OAEP wrap / encrypt | ✅ | ✅ | |
+| HMAC-SHA-256/384/512 | ✅ | ✅ | |
+| SHA-256/384/512, SHA3-256/512 digest | ✅ | ✅ | |
+| HKDF (G-5G3) | ✅ | ✅ | `C_DeriveKey` |
+| PBKDF2 / CKM_PKCS5_PBKD2 (G-DA1) | ✅ | ✅ | `C_DeriveKey` |
+| ECDSA-SHA3 variants (G-DA2) | ✅ | ❌ Not implemented | No SHA-3 prehash in p256/p384 crates |
+| CKA_PUBLIC_KEY_INFO (G-PUB1) | ✅ | ✅ | Via `spki` crate |
+| ECDH X9.63 KDF / CKD_SHA256_KDF (G-5G2) | ✅ | ❌ Not implemented | |
+| SP 800-108 Counter KDF (G-PK1) | ✅ | ❌ Not implemented | No standalone KBKDF crate |
+| SP 800-108 Feedback KDF (G-PK2) | ✅ | ❌ Not implemented | |
+| ECDH Cofactor Derive (G-PK4) | ✅ | ❌ Not implemented | |
+| Authenticated key wrap G5 (C_WrapKeyAuthenticated) | ✅ | ❌ Stub (CKR_NOT_IMPL) | |
+| Streaming sign/verify G2 | ✅ | ❌ Stub (CKR_NOT_IMPL) | |
+| Message encrypt/decrypt G3 | ✅ | ❌ Stub (CKR_NOT_IMPL) | |
+| Pre-bound verify G4 (C_VerifySignature*) | ✅ | ❌ Stub (CKR_NOT_IMPL) | |
+| GenerateRandom | ✅ | ✅ | Browser CSPRNG via `getrandom::js` |
+| C_WrapKey / C_UnwrapKey (one-shot) | ✅ | ✅ | AES-KW, AES-GCM, RSA-OAEP |
+
+**Rust engine Phase 2 (v2.33.0, 2026-03-08):** Added RSA, ECDSA, EdDSA, SLH-DSA, digest,
+key wrap/unwrap — achieving full classical + PQC one-shot operation parity with the C++ engine.
+Streaming, message-encrypt, and authenticated-wrap remain C++ only.
+
+---
+
+## 6. Playground Integration Status (pqc-timeline-app)
 
 As of 2026-03-04 (v4):
 
