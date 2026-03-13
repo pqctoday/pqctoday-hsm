@@ -3,6 +3,9 @@
 //!
 //! Provides ML-KEM, ML-DSA, SLH-DSA, RSA, ECDSA, EdDSA, ECDH,
 //! AES (GCM/CBC/KeyWrap), SHA/HMAC, and session management.
+#![allow(non_snake_case)]
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
+#![allow(clippy::too_many_arguments)]
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -130,6 +133,10 @@ pub const CKM_SHA512_HMAC: u32 = 0x00000271;
 pub const CKM_SHA3_256_HMAC: u32 = 0x000002B1;
 pub const CKM_SHA3_512_HMAC: u32 = 0x000002D1;
 
+// KMAC
+pub const CKM_KMAC_128: u32 = 0x80000100;
+pub const CKM_KMAC_256: u32 = 0x80000101;
+
 // Generic Secret
 pub const CKM_GENERIC_SECRET_KEY_GEN: u32 = 0x00000350;
 
@@ -251,7 +258,7 @@ struct FindCtx {
 
 thread_local! {
     static OBJECTS: RefCell<HashMap<u32, Attributes>> = RefCell::new(HashMap::new());
-    static NEXT_HANDLE: RefCell<u32> = RefCell::new(100);
+    static NEXT_HANDLE: RefCell<u32> = const { RefCell::new(100) };
     static SIGN_STATE: RefCell<HashMap<u32, (u32, u32)>> = RefCell::new(HashMap::new());
     static VERIFY_STATE: RefCell<HashMap<u32, (u32, u32)>> = RefCell::new(HashMap::new());
     static ENCRYPT_STATE: RefCell<HashMap<u32, EncryptCtx>> = RefCell::new(HashMap::new());
@@ -661,6 +668,9 @@ const SUPPORTED_MECHS: &[u32] = &[
     CKM_SHA512_HMAC,
     CKM_SHA3_256_HMAC,
     CKM_SHA3_512_HMAC,
+    // KMAC
+    CKM_KMAC_128,
+    CKM_KMAC_256,
     // Secret key generation
     CKM_GENERIC_SECRET_KEY_GEN,
     // EC / ECDSA / EdDSA
@@ -727,6 +737,7 @@ pub fn C_GetMechanismInfo(_slot_id: u32, mech_type: u32, p_info: *mut u8) -> u32
         CKM_SHA256 | CKM_SHA384 | CKM_SHA512 | CKM_SHA3_256 | CKM_SHA3_512 => (0, 0, 0x00000400),
         CKM_SHA256_HMAC | CKM_SHA384_HMAC | CKM_SHA512_HMAC | CKM_SHA3_256_HMAC
         | CKM_SHA3_512_HMAC => (16, 64, 0x00000800 | 0x00002000),
+        CKM_KMAC_128 | CKM_KMAC_256 => (16, 64, 0x00000800 | 0x00002000),
         CKM_GENERIC_SECRET_KEY_GEN => (1, 512, 0x00008000),
         CKM_EC_KEY_PAIR_GEN => (256, 384, 0x00010000),
         CKM_ECDSA_SHA256 | CKM_ECDSA_SHA384 => (256, 384, 0x00000800 | 0x00002000),
@@ -1055,7 +1066,7 @@ pub fn C_GenerateKeyPair(
                     CKA_MODULUS_BITS,
                 )
                 .unwrap_or(2048) as usize;
-                if bits < 2048 || bits > 4096 {
+                if !(2048..=4096).contains(&bits) {
                     return CKR_ARGUMENTS_BAD;
                 }
                 let mut rng = rand::rngs::OsRng;
@@ -1134,7 +1145,7 @@ pub fn C_GenerateKeyPair(
                 );
                 let is_p384 = ec_params
                     .as_ref()
-                    .map_or(false, |b| b.len() >= 7 && b[b.len() - 1] == 0x22);
+                    .is_some_and(|b| b.len() >= 7 && b[b.len() - 1] == 0x22);
 
                 let mut pub_attrs = HashMap::new();
                 let mut prv_attrs = HashMap::new();
@@ -1683,7 +1694,6 @@ fn is_prehash_slh_dsa(mech: u32) -> bool {
 /// Used by CKM_HASH_ML_DSA_* and CKM_HASH_SLH_DSA_* to compute the pre-hash before signing.
 fn prehash_message(mech: u32, msg: &[u8]) -> Option<Vec<u8>> {
     use sha2::Digest as Sha2Digest;
-    use sha3::Digest as Sha3Digest;
     match mech {
         CKM_HASH_ML_DSA_SHA224 | CKM_HASH_SLH_DSA_SHA224 => {
             Some(sha2::Sha224::digest(msg).to_vec())
@@ -1829,6 +1839,27 @@ fn sign_hmac(mech: u32, key_bytes: &[u8], msg: &[u8]) -> Result<Vec<u8>, u32> {
     }
 }
 
+fn sign_kmac(mech: u32, key_bytes: &[u8], msg: &[u8]) -> Result<Vec<u8>, u32> {
+    use sp800_185::KMac;
+    match mech {
+        CKM_KMAC_128 => {
+            let mut mac = KMac::new_kmac128(key_bytes, b"");
+            mac.update(msg);
+            let mut out = vec![0u8; 32];
+            mac.finalize(&mut out);
+            Ok(out)
+        }
+        CKM_KMAC_256 => {
+            let mut mac = KMac::new_kmac256(key_bytes, b"");
+            mac.update(msg);
+            let mut out = vec![0u8; 64];
+            mac.finalize(&mut out);
+            Ok(out)
+        }
+        _ => Err(CKR_KEY_TYPE_INCONSISTENT),
+    }
+}
+
 fn sign_rsa(mech: u32, sk_bytes: &[u8], msg: &[u8]) -> Result<Vec<u8>, u32> {
     use rsa::pkcs8::DecodePrivateKey;
     use rsa::signature::SignatureEncoding;
@@ -1966,6 +1997,8 @@ fn get_sig_len(mech: u32, hkey: u32) -> u32 {
         CKM_SHA256_HMAC | CKM_SHA3_256_HMAC => 32,
         CKM_SHA384_HMAC => 48,
         CKM_SHA512_HMAC | CKM_SHA3_512_HMAC => 64,
+        CKM_KMAC_128 => 32,
+        CKM_KMAC_256 => 64,
         CKM_SHA256_RSA_PKCS | CKM_SHA256_RSA_PKCS_PSS => 512,
         CKM_ECDSA_SHA256 | CKM_ECDSA_SHA3_224 | CKM_ECDSA_SHA3_256 => 64,
         CKM_ECDSA_SHA384 | CKM_ECDSA_SHA3_384 | CKM_ECDSA_SHA3_512 => 96,
@@ -2070,6 +2103,7 @@ pub fn C_Sign(
             CKM_SLH_DSA => sign_slh_dsa(ps, &sk_bytes, eff_msg),
             CKM_SHA256_HMAC | CKM_SHA384_HMAC | CKM_SHA512_HMAC | CKM_SHA3_256_HMAC
             | CKM_SHA3_512_HMAC => sign_hmac(eff_mech, &sk_bytes, eff_msg),
+            CKM_KMAC_128 | CKM_KMAC_256 => sign_kmac(eff_mech, &sk_bytes, eff_msg),
             CKM_SHA256_RSA_PKCS | CKM_SHA256_RSA_PKCS_PSS => sign_rsa(eff_mech, &sk_bytes, eff_msg),
             CKM_ECDSA_SHA256
             | CKM_ECDSA_SHA384
@@ -2361,6 +2395,18 @@ pub fn C_Verify(
             CKM_SLH_DSA => verify_slh_dsa(ps, &pk_bytes, eff_msg, sig_bytes),
             CKM_SHA256_HMAC | CKM_SHA384_HMAC | CKM_SHA512_HMAC | CKM_SHA3_256_HMAC
             | CKM_SHA3_512_HMAC => verify_hmac(eff_mech, &pk_bytes, eff_msg, sig_bytes),
+            CKM_KMAC_128 | CKM_KMAC_256 => {
+                match sign_kmac(eff_mech, &pk_bytes, eff_msg) {
+                    Ok(sig) => {
+                        if sig == sig_bytes {
+                            Ok(())
+                        } else {
+                            Err(CKR_SIGNATURE_INVALID)
+                        }
+                    }
+                    Err(e) => Err(e),
+                }
+            }
             CKM_SHA256_RSA_PKCS | CKM_SHA256_RSA_PKCS_PSS => {
                 verify_rsa(eff_mech, &pk_bytes, eff_msg, sig_bytes)
             }
@@ -3071,7 +3117,7 @@ pub fn C_FindObjectsInit(h_session: u32, p_template: *mut u8, ul_count: u32) -> 
             .filter(|(_, attrs)| {
                 match_attrs
                     .iter()
-                    .all(|(typ, val)| attrs.get(typ).map_or(false, |v| v == val))
+                    .all(|(typ, val)| attrs.get(typ) == Some(val))
             })
             .map(|(handle, _)| *handle)
             .collect::<Vec<u32>>()
