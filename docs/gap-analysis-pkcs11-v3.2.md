@@ -1,9 +1,9 @@
-# PKCS#11 v3.2 Compliance Gap Analysis — softhsmv3 (v7)
+# PKCS#11 v3.2 Compliance Gap Analysis — softhsmv3 (v8)
 
-**Updated:** 2026-03-04 (v7 — Feedback KDF, ECDH Cofactor Derive, validation switch bugfix)
-**Baseline:** Post-Phase-7 + G-DA1/DA2 + G-5G1/5G2/5G3 + G-PUB1 + G-PK1 + G-PK2 + G-PK4 — all tracked gaps resolved
+**Updated:** 2026-03-13 (v8 — CKM_KMAC_128/256 vendor extension, C_GetMechanismInfo full coverage)
+**Baseline:** Post-Phase-7 + G-DA1/DA2 + G-5G1/5G2/5G3 + G-PUB1 + G-PK1 + G-PK2 + G-PK4 + G-KMAC1/KMAC2 — all tracked gaps resolved
 **Spec reference:** OASIS PKCS#11 v3.2 CSD01 (<http://docs.oasis-open.org/pkcs11/pkcs11-base/v3.2/>)
-**Prior baseline (v6):** CKA_PUBLIC_KEY_INFO (G-PUB1) and SP 800-108 Counter KDF (G-PK1) resolved (2026-03-04).
+**Prior baseline (v7):** SP 800-108 Feedback KDF (G-PK2), ECDH Cofactor Derive (G-PK4), C_DeriveKey validation switch bugfix (2026-03-04).
 
 ---
 
@@ -29,11 +29,19 @@ implemented via new `OSSLECDH::deriveKeyWithCofactor()` using `EVP_PKEY_CTX_set_
 `CKM_SP800_108_COUNTER_KDF` case labels — these mechanisms were unreachable (added in prior
 sessions but not gated in the `#ifndef WITH_FIPS` switch). All KDF mechanisms now correctly
 listed in the validation switch.
+**NEW (v8):** `CKM_KMAC_128` (G-KMAC1) and `CKM_KMAC_256` (G-KMAC2) implemented as
+vendor-defined MAC mechanisms (`CKM_VENDOR_DEFINED | 0x100/0x101`) in both C++ (`OSSLKMAC.cpp`,
+OpenSSL `EVP_MAC_fetch("KMAC-128/256")`) and Rust (`kmac` crate). Both engines expose
+`CKF_SIGN | CKF_VERIFY` and support variable-length output.
+**Bugfix (v8):** `C_GetMechanismInfo` now handles all 30 mechanisms advertised by
+`C_GetMechanismList`. Previously, AES-CTR, all pre-hash ML-DSA/SLH-DSA variants, ECDSA-SHA3
+variants, ECDH1-cofactor, and all KDF mechanisms fell through to `CKR_MECHANISM_INVALID` —
+a contradiction visible in the playground log during mechanism discovery.
 
 | Dimension | Remaining open | Notes |
 | --- | --- | --- |
-| C_* function stubs (in scope) | 0 | All G1–G6 + G-DA1/G-DA2 + G-5G1/5G2/5G3 + G-PUB1/G-PK1/G-PK2/G-PK4 resolved |
-| CKM_* mechanisms (in scope) | 0 | AES-CTR, HKDF, X9.63 KDF, SP 800-108 Counter+Feedback KDF, ECDH1 Cofactor added |
+| C_* function stubs (in scope) | 0 | All G1–G6 + G-DA1/G-DA2 + G-5G1/5G2/5G3 + G-PUB1/G-PK1/G-PK2/G-PK4 + G-KMAC1/KMAC2 resolved |
+| CKM_* mechanisms (in scope) | 0 | AES-CTR, HKDF, X9.63 KDF, SP 800-108 Counter+Feedback KDF, ECDH1 Cofactor, KMAC-128/256 added |
 | CKA_* attribute stubs (in scope) | 0 | CKA_PUBLIC_KEY_INFO now populated at keygen for all key types |
 | Out-of-scope stubs | 3 | Async (G7), Recovery/Combined ops (G8) |
 | Out-of-scope mechanisms | 1 | CKM_RIPEMD160 (WASM `no-module` constraint, G9) |
@@ -386,6 +394,7 @@ are also resolved in the Rust engine and which remain Rust-only stubs.
 | SP 800-108 Counter KDF (G-PK1) | ✅ | ❌ Not implemented | No standalone KBKDF crate |
 | SP 800-108 Feedback KDF (G-PK2) | ✅ | ❌ Not implemented | |
 | ECDH Cofactor Derive (G-PK4) | ✅ | ❌ Not implemented | |
+| CKM_KMAC_128 / CKM_KMAC_256 (G-KMAC1/2) | ✅ | ✅ | `C_Sign` / `C_Verify`; variable-length output |
 | Authenticated key wrap G5 (C_WrapKeyAuthenticated) | ✅ | ❌ Stub (CKR_NOT_IMPL) | |
 | Streaming sign/verify G2 | ✅ | ❌ Stub (CKR_NOT_IMPL) | |
 | Message encrypt/decrypt G3 | ✅ | ❌ Stub (CKR_NOT_IMPL) | |
@@ -425,6 +434,7 @@ As of 2026-03-04 (v4):
 | SP 800-108 Counter KDF (G-PK1) | ✓ `hsm_kbkdf()` | Not wired |
 | SP 800-108 Feedback KDF (G-PK2) | ✓ `hsm_kbkdfFeedback()` | Not wired |
 | ECDH1 Cofactor Derive (G-PK4) | ✓ `hsm_ecdhCofactorDerive()` | Not wired |
+| KMAC-128 / KMAC-256 (G-KMAC1/2) | softhsmv3 ✓ (both engines) | Not wired (v8 addition) |
 
 ---
 
@@ -471,11 +481,50 @@ As of 2026-03-04 (v4):
 **Discovery:** `CKM_HKDF_DERIVE` (added in G-5G3) and `CKM_SP800_108_COUNTER_KDF` (added in G-PK1) were never reachable in `C_DeriveKey()`. The validation switch at `SoftHSM_keygen.cpp:1944` uses a `#ifndef WITH_FIPS` preprocessor guard (opened at line 154) that only listed `CKM_ECDH1_DERIVE` before `#endif`. Any unlisted mechanism returned `CKR_MECHANISM_INVALID` before reaching the handler blocks at lines 2211+ (COUNTER_KDF) and 2440+ (HKDF).
 
 **Fix:** Added the following cases to the validation switch (after the `#endif` so they're available in all build modes):
+
 ```cpp
 case CKM_HKDF_DERIVE:
 case CKM_SP800_108_COUNTER_KDF:
 case CKM_SP800_108_FEEDBACK_KDF:
     break;
 ```
+
 Also added `case CKM_ECDH1_COFACTOR_DERIVE:` before the `#endif` (alongside `CKM_ECDH1_DERIVE`, guarded by `#ifndef WITH_FIPS`).
 
+---
+
+## §1.17 G-KMAC1/KMAC2 — CKM_KMAC_128 / CKM_KMAC_256 (vendor-defined MACs) ✓ RESOLVED (v8)
+
+**Status:** ✓ RESOLVED (v8)
+
+**PKCS#11 values:** `CKM_VENDOR_DEFINED | 0x100` (`0x80000100`) and `CKM_VENDOR_DEFINED | 0x101` (`0x80000101`)
+Note: KMAC is not yet assigned a standard CKM value in PKCS#11 v3.2 CSD01; vendor-defined range used pending standardisation.
+
+**OpenSSL API:** `EVP_MAC_fetch(NULL, "KMAC-128", NULL)` / `EVP_MAC_fetch(NULL, "KMAC-256", NULL)` with `OSSL_MAC_PARAM_SIZE` for output length. Available in OpenSSL 3.x.
+
+**What KMAC adds:** KMAC (Keccak Message Authentication Code, NIST SP 800-185 §4) is a MAC built on SHAKE — a SHA-3 family primitive. Unlike HMAC it inherently resists length-extension attacks and supports variable-length output. KMAC-128 provides 128-bit security; KMAC-256 provides 256-bit security.
+
+**Changes:**
+
+- `src/lib/crypto/OSSLKMAC.h` / `OSSLKMAC.cpp` — new MAC implementation (~165 LOC); wraps `EVP_MAC` with key material as `CKA_VALUE`, optional customisation string, variable output length.
+- `src/lib/crypto/OSSLCryptoFactory.cpp` — `getMacAlgorithm()` dispatches `KMAC_128` / `KMAC_256`.
+- `src/lib/SoftHSM_slots.cpp` — registered under `CKM_KMAC_128` / `CKM_KMAC_256` with `CKF_SIGN | CKF_VERIFY`; `C_GetMechanismInfo` entries added (16–∞ and 32–∞ byte key range).
+- `src/lib/SoftHSM_sign.cpp` — dispatch cases added to `C_SignInit` / `C_VerifyInit`.
+- `rust/src/ffi.rs` — `C_GetMechanismInfo` arm `CKM_KMAC_128 | CKM_KMAC_256` with `(16, 64, CKF_SIGN | CKF_VERIFY)`. `C_Sign` / `C_Verify` dispatch to `sign_kmac()`.
+- `rust/src/lib.rs` — `sign_kmac()` using `kmac` crate (`sha3` dependency added to `Cargo.toml`).
+- `rust/src/constants.rs` / `SUPPORTED_MECHS` — `CKM_KMAC_128` and `CKM_KMAC_256` added.
+- `src/lib/pkcs11/pkcs11t.h` — `#define CKM_KMAC_128` and `CKM_KMAC_256` added in vendor block.
+
+---
+
+## §1.18 Bugfix — C_GetMechanismInfo full coverage (v8)
+
+**Discovery:** `SUPPORTED_MECHS` (used by `C_GetMechanismList`) listed 30 mechanism types whose `C_GetMechanismInfo` entries fell through the match/switch to `CKR_MECHANISM_INVALID`. This contradiction was visible in the playground log during mechanism discovery. Affected mechanisms:
+
+- Rust engine: `CKM_AES_CTR`, all 10 `CKM_HASH_ML_DSA_*` variants, all 10 `CKM_HASH_SLH_DSA_*` variants, 4 `CKM_ECDSA_SHA3_*` variants, `CKM_ECDH1_COFACTOR_DERIVE`, `CKM_PKCS5_PBKD2`, `CKM_HKDF_DERIVE`, `CKM_SP800_108_COUNTER_KDF`, `CKM_SP800_108_FEEDBACK_KDF`
+- C++ engine: `CKM_ECDSA_SHA3_{224,256,384,512}`, `CKM_ECDH1_COFACTOR_DERIVE`
+
+**Fix:**
+
+- `rust/src/ffi.rs` — added match arms for each affected mechanism group with appropriate `(minKey, maxKey, flags)` tuples.
+- `src/lib/SoftHSM_slots.cpp` — folded ECDSA-SHA3 variants into the existing `CKM_ECDSA` / `CKM_ECDSA_SHA*` block; folded `CKM_ECDH1_COFACTOR_DERIVE` into the existing `CKM_ECDH1_DERIVE` block.
