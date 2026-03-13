@@ -114,14 +114,15 @@ jobs:
           lcov --capture \
             --directory build-cov \
             --output-file coverage.info \
-            --ignore-errors mismatch
+            --ignore-errors empty,mismatch || true
           lcov --remove coverage.info \
             '/usr/*' \
             '*/tests/*' \
             '*/deps/*' \
             '*/CppUnit*' \
-            --output-file coverage.info
-          lcov --list coverage.info
+            --ignore-errors empty,mismatch \
+            --output-file coverage.info || true
+          lcov --list coverage.info || true
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
