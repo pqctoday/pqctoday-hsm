@@ -821,25 +821,22 @@ bool P11AttrCheckValue::setDefault()
 }
 
 // Update the value if allowed
+// CKA_CHECK_VALUE is always stored and returned in clear — per PKCS#11 v3.2 §4.10.2
+// it is a public fingerprint for key comparison, not sensitive data.
+CK_RV P11AttrCheckValue::retrieve(Token* token, bool /*isPrivate*/, CK_VOID_PTR pValue, CK_ULONG_PTR pulValueLen)
+{
+	// Delegate to base class with isPrivate=false so the stored plaintext bytes
+	// are returned as-is without any decryption attempt.
+	return P11Attribute::retrieve(token, false, pValue, pulValueLen);
+}
+
 CK_RV P11AttrCheckValue::updateAttr(Token *token, bool isPrivate, CK_VOID_PTR pValue, CK_ULONG ulValueLen, int /*op*/)
 {
+	// CKA_CHECK_VALUE is always stored in clear regardless of CKA_PRIVATE.
+	// Per PKCS#11 v3.2 §4.10.2, it is a truncated hash fingerprint meant
+	// to be compared across systems — encryption would defeat its purpose.
 	ByteString plaintext((unsigned char*)pValue, ulValueLen);
-	ByteString value;
-
-	// Encrypt
-
-	if (isPrivate)
-	{
-		if (!token->encrypt(plaintext, value))
-			return CKR_GENERAL_ERROR;
-	}
-	else
-		value = plaintext;
-
-	// Attribute specific checks
-
-	if (value.size() < ulValueLen)
-		return CKR_GENERAL_ERROR;
+	const ByteString& value = plaintext;
 
 	// Store data
 	if (ulValueLen == 0)
@@ -849,6 +846,7 @@ CK_RV P11AttrCheckValue::updateAttr(Token *token, bool isPrivate, CK_VOID_PTR pV
 	else
 	{
 		ByteString checkValue;
+		// Read CKA_VALUE — decrypt if stored encrypted (CKA_PRIVATE=true)
 		ByteString keybits;
 		if (isPrivate)
 		{
@@ -880,6 +878,23 @@ CK_RV P11AttrCheckValue::updateAttr(Token *token, bool isPrivate, CK_VOID_PTR pV
 				aes.setBitLen(keybits.size() * 8);
 				checkValue = aes.getKeyCheckValue();
 				break;
+			case CKK_RSA:
+			case CKK_EC:
+			case CKK_EC_EDWARDS:
+			case CKK_ML_KEM:
+			case CKK_ML_DSA:
+			case CKK_SLH_DSA:
+			{
+				// Asymmetric keys: SHA-256(CKA_VALUE) → first 3 bytes
+				HashAlgorithm* hash = CryptoFactory::i()->getHashAlgorithm(HashAlgo::SHA256);
+				if (hash == NULL) return CKR_GENERAL_ERROR;
+				ByteString digest;
+				bool ok = hash->hashInit() && hash->hashUpdate(keybits) && hash->hashFinal(digest);
+				CryptoFactory::i()->recycleHashAlgorithm(hash);
+				if (!ok || digest.size() < 3) return CKR_GENERAL_ERROR;
+				checkValue = digest.substr(0, 3);
+				break;
+			}
 			default:
 				return CKR_GENERAL_ERROR;
 		}

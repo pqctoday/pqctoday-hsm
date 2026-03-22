@@ -47,6 +47,8 @@
 #include "P11Attributes.h"
 #include "P11Objects.h"
 #include "SlotManager.h"
+#include "SymmetricKey.h"
+#include "AESKey.h"
 
 // CKC_OPENPGP was in PKCS#11 2.x but removed from v3.2 headers.
 #ifndef CKC_OPENPGP
@@ -958,6 +960,91 @@ CK_RV SoftHSM::CreateObject(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTempla
 		    !object->commitTransaction()))
 		{
 			return CKR_GENERAL_ERROR;
+		}
+
+		// Compute CKA_CHECK_VALUE for imported keys.
+		// Generated keys get KCV in SoftHSM_keygen.cpp; C_CreateObject skips
+		// that path so we compute it here for all key classes.
+		{
+			ByteString kcv;
+
+			// Helper: read a stored attribute, decrypting if the object is private.
+			// saveTemplate() may have encrypted ByteString attributes when isPrivate=true.
+			auto getRawBytes = [&](CK_ATTRIBUTE_TYPE t) -> ByteString {
+				if (!object->attributeExists(t)) return ByteString();
+				ByteString stored = object->getAttribute(t).getByteStringValue();
+				if (!stored.size()) return stored;
+				if (isPrivate != CK_FALSE) {
+					ByteString plain;
+					if (!token->decrypt(stored, plain)) return ByteString();
+					return plain;
+				}
+				return stored;
+			};
+
+			if (objClass == CKO_PUBLIC_KEY || objClass == CKO_PRIVATE_KEY)
+			{
+				// Asymmetric keys: SHA-256(key material) → first 3 bytes.
+				// ML-DSA/ML-KEM/SLH-DSA store raw bytes in CKA_VALUE.
+				// RSA stores modulus in CKA_MODULUS; EC stores point in CKA_EC_POINT.
+				ByteString keyMaterial;
+				if (object->attributeExists(CKA_VALUE))
+					keyMaterial = getRawBytes(CKA_VALUE);
+				else if (object->attributeExists(CKA_MODULUS))
+					keyMaterial = getRawBytes(CKA_MODULUS);
+				else if (object->attributeExists(CKA_EC_POINT))
+					keyMaterial = getRawBytes(CKA_EC_POINT);
+
+				if (keyMaterial.size() > 0)
+				{
+					HashAlgorithm* hash = CryptoFactory::i()->getHashAlgorithm(HashAlgo::SHA256);
+					if (hash != NULL)
+					{
+						ByteString digest;
+						bool ok = hash->hashInit() &&
+						          hash->hashUpdate(keyMaterial) &&
+						          hash->hashFinal(digest);
+						CryptoFactory::i()->recycleHashAlgorithm(hash);
+						if (ok && digest.size() >= 3)
+							kcv = digest.substr(0, 3);
+					}
+				}
+			}
+			else if (objClass == CKO_SECRET_KEY)
+			{
+				// Secret keys: AES uses ECB-zero-block; others use SHA-256.
+				ByteString keyBits;
+				if (object->attributeExists(CKA_VALUE))
+					keyBits = getRawBytes(CKA_VALUE);
+
+				if (keyBits.size() > 0)
+				{
+					if (keyType == CKK_AES)
+					{
+						AESKey aesKey;
+						aesKey.setKeyBits(keyBits);
+						aesKey.setBitLen(keyBits.size() * 8);
+						kcv = aesKey.getKeyCheckValue();
+					}
+					else
+					{
+						SymmetricKey symKey;
+						symKey.setKeyBits(keyBits);
+						symKey.setBitLen(keyBits.size() * 8);
+						kcv = symKey.getKeyCheckValue();
+					}
+				}
+			}
+
+			if (kcv.size() > 0)
+			{
+				if (!object->startTransaction() ||
+				    !object->setAttribute(CKA_CHECK_VALUE, kcv) ||
+				    !object->commitTransaction())
+				{
+					// Non-fatal: KCV computation failed, leave default empty value
+				}
+			}
 		}
 	}
 

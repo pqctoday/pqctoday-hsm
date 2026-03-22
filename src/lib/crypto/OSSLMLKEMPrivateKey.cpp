@@ -37,6 +37,8 @@
 #include "OSSLMLKEMPublicKey.h"
 #include <openssl/x509.h>
 #include <openssl/err.h>
+#include <openssl/core_names.h>
+#include <openssl/param_build.h>
 #include <string.h>
 
 /*static*/ const char* OSSLMLKEMPrivateKey::type = "OpenSSL ML-KEM Private Key";
@@ -156,16 +158,53 @@ void OSSLMLKEMPrivateKey::createOSSLKey()
 	if (pkey != NULL) return;
 	if (value.size() == 0) return;
 
+	// Path 1: Try PKCS#8 DER (keys generated via C_GenerateKeyPair)
 	int len = (int)value.size();
 	const unsigned char* p = value.const_byte_str();
 	PKCS8_PRIV_KEY_INFO* p8 = d2i_PKCS8_PRIV_KEY_INFO(NULL, &p, len);
-	if (p8 == NULL)
+	if (p8 != NULL)
 	{
-		ERROR_MSG("createOSSLKey: d2i_PKCS8_PRIV_KEY_INFO failed (0x%08X)", ERR_get_error());
+		pkey = EVP_PKCS82PKEY(p8);
+		PKCS8_PRIV_KEY_INFO_free(p8);
+		if (pkey != NULL) return;
+		ERROR_MSG("createOSSLKey: EVP_PKCS82PKEY failed (0x%08X)", ERR_get_error());
+	}
+
+	// Path 2: Raw FIPS 203 key bytes via EVP_PKEY_fromdata (imported keys)
+	const char* keyName = OSSLMLKEMPublicKey::paramSetToName(parameterSet);
+	if (keyName == NULL)
+	{
+		ERROR_MSG("createOSSLKey: unknown ML-KEM parameter set %lu", parameterSet);
 		return;
 	}
-	pkey = EVP_PKCS82PKEY(p8);
-	PKCS8_PRIV_KEY_INFO_free(p8);
-	if (pkey == NULL)
-		ERROR_MSG("createOSSLKey: EVP_PKCS82PKEY failed (0x%08X)", ERR_get_error());
+	OSSL_PARAM_BLD* bld = OSSL_PARAM_BLD_new();
+	if (bld == NULL) { ERROR_MSG("OSSL_PARAM_BLD_new failed"); return; }
+	if (!OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PRIV_KEY,
+	                                       value.const_byte_str(), value.size()))
+	{
+		OSSL_PARAM_BLD_free(bld);
+		ERROR_MSG("createOSSLKey: push OSSL_PKEY_PARAM_PRIV_KEY failed");
+		return;
+	}
+	OSSL_PARAM* params = OSSL_PARAM_BLD_to_param(bld);
+	OSSL_PARAM_BLD_free(bld);
+	if (params == NULL) { ERROR_MSG("createOSSLKey: to_param failed"); return; }
+
+	EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new_from_name(NULL, keyName, NULL);
+	if (ctx == NULL)
+	{
+		OSSL_PARAM_free(params);
+		ERROR_MSG("createOSSLKey: CTX_new(%s) failed (0x%08X)", keyName, ERR_get_error());
+		return;
+	}
+	if (EVP_PKEY_fromdata_init(ctx) <= 0 ||
+	    EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_KEYPAIR, params) <= 0)
+	{
+		OSSL_PARAM_free(params);
+		EVP_PKEY_CTX_free(ctx);
+		ERROR_MSG("createOSSLKey: fromdata(priv) failed (0x%08X)", ERR_get_error());
+		return;
+	}
+	OSSL_PARAM_free(params);
+	EVP_PKEY_CTX_free(ctx);
 }

@@ -62,7 +62,7 @@ public:
 	CK_ULONG getChecks();
 
 	// Retrieve the value if allowed
-	CK_RV retrieve(Token *token, bool isPrivate, CK_VOID_PTR pValue, CK_ULONG_PTR pulValueLen);
+	virtual CK_RV retrieve(Token *token, bool isPrivate, CK_VOID_PTR pValue, CK_ULONG_PTR pulValueLen);
 
 	// Update the value if allowed
 	CK_RV update(Token *token, bool isPrivate, CK_VOID_PTR pValue, CK_ULONG ulValueLen, int op);
@@ -332,6 +332,8 @@ protected:
 	// Set the default value of the attribute
 	virtual bool setDefault();
 
+	// CKA_CHECK_VALUE is always returned in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+	virtual CK_RV retrieve(Token* token, bool isPrivate, CK_VOID_PTR pValue, CK_ULONG_PTR pulValueLen);
 
 	// Update the value if allowed
 	virtual CK_RV updateAttr(Token *token, bool isPrivate, CK_VOID_PTR pValue, CK_ULONG ulValueLen, int op);

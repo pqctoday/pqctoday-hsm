@@ -38,6 +38,7 @@
 #include "RNG.h"
 
 void OSSLRNG_enableACVP(unsigned char* seed);
+void OSSLRNG_disableACVP();
 
 class OSSLRNG : public RNG
 {

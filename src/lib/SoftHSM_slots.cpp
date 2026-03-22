@@ -255,6 +255,10 @@ CK_RV SoftHSM::C_Finalize(CK_VOID_PTR pReserved)
 	CryptoFactory::reset();
 	SecureMemoryRegistry::reset();
 
+	// Clean up ACVP deterministic PRNG state if active
+	extern void OSSLRNG_disableACVP();
+	OSSLRNG_disableACVP();
+
 	isInitialised = false;
 
 	supportedMechanisms.clear();

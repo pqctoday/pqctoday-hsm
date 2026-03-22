@@ -113,8 +113,35 @@ AES-GCM integrity protection, ensuring the wrapped key hasn't been tampered with
 - `CKA_PUBLIC_KEY_INFO` attribute — retrieve a public key in standard SubjectPublicKeyInfo
   (SPKI / DER) encoding, as used in X.509 certificates
 
+#### CKA_CHECK_VALUE (KCV) — both engines
+
+All generated and imported keys now include a `CKA_CHECK_VALUE` attribute
+(PKCS#11 v3.2 §4.10.2), enabling key integrity and identity verification without
+exposing the key material:
+
+- **Symmetric keys (AES):** first 3 bytes of AES-ECB encryption of a 16-byte zero block
+- **Asymmetric keys (RSA, EC, EdDSA, ML-DSA, ML-KEM, SLH-DSA):** first 3 bytes of
+  SHA-256 over the primary key material (modulus for RSA; public point for EC/EdDSA;
+  raw bytes for PQC keys)
+- **Imported keys** via `C_CreateObject` also receive a computed KCV
+- Supported by both the C++ engine (`SoftHSM_keygen.cpp`, `SoftHSM_objects.cpp`)
+  and the Rust engine (`state.rs: compute_kcv`)
+
+#### ACVP test infrastructure — C++ engine
+
+- Added `OSSLRNG_disableACVP()` to restore OpenSSL's default `RAND_OpenSSL()` method
+  and release the internal cipher context after ACVP testing completes
+
 ### Fixed
 
+- **ACVP deterministic PRNG — C++ engine:** Previous implementation repeated the
+  32-byte seed cyclically with `buf[i] = seed[i % 32]` rather than generating a
+  proper key-stream; now uses a ChaCha20 stream cipher (`EVP_chacha20`) seeded once
+  and streamed continuously, matching the NIST ACVP test-vector generation process
+- **ACVP deterministic PRNG — Rust engine:** Previous `with_rng!` macro created a
+  fresh `ChaCha20Rng::from_seed(seed)` on every invocation, resetting the counter
+  before each operation; now stores a persistent per-thread `ChaCha20Rng` in
+  `ACVP_RNG` that advances its counter across operations, matching C++ engine behaviour
 - Calling `C_DecryptMessageNext` with a null output buffer to query the required output
   size incorrectly performed the actual decryption, consuming the ciphertext
 - `C_VerifySignatureFinal` / `C_VerifySignatureUpdate` did not work with ML-DSA mechanisms

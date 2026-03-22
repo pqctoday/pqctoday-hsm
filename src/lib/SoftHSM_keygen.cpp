@@ -90,6 +90,19 @@
 #include "SlotManager.h"
 #include "odd.h"
 
+// Compute asymmetric key check value: SHA-256(keyValue) → first 3 bytes.
+// Used for RSA, EC, EdDSA, ML-DSA, ML-KEM, SLH-DSA public and private keys.
+static ByteString computeAsymKCV(const ByteString& keyValue)
+{
+	HashAlgorithm* hash = CryptoFactory::i()->getHashAlgorithm(HashAlgo::SHA256);
+	if (hash == NULL) return ByteString("");
+	ByteString digest;
+	bool ok = hash->hashInit() && hash->hashUpdate(keyValue) && hash->hashFinal(digest);
+	CryptoFactory::i()->recycleHashAlgorithm(hash);
+	if (!ok || digest.size() < 3) return ByteString("");
+	return digest.substr(0, 3);
+}
+
 // KDF helpers: map PKCS#11 v3.2 CKD_* identifiers to OpenSSL digest names (for X9.63 KDF)
 static const char* ckdToDigestName(CK_ULONG kdf)
 {
@@ -3396,6 +3409,12 @@ CK_RV SoftHSM::generateRSA
 				}
 				bOK = bOK && osobject->setAttribute(CKA_MODULUS, modulus);
 				bOK = bOK && osobject->setAttribute(CKA_PUBLIC_EXPONENT, publicExponent);
+				// CKA_CHECK_VALUE: SHA-256(modulus) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(modulus);
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
@@ -3507,6 +3526,12 @@ CK_RV SoftHSM::generateRSA
 				bOK = bOK && osobject->setAttribute(CKA_EXPONENT_1,exponent1);
 				bOK = bOK && osobject->setAttribute(CKA_EXPONENT_2, exponent2);
 				bOK = bOK && osobject->setAttribute(CKA_COEFFICIENT, coefficient);
+				// CKA_CHECK_VALUE: SHA-256(modulus) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(modulus);
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
@@ -3659,6 +3684,12 @@ CK_RV SoftHSM::generateEC
 					point = pub->getQ();
 				}
 				bOK = bOK && osobject->setAttribute(CKA_EC_POINT, point);
+				// CKA_CHECK_VALUE: SHA-256(EC point) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(pub->getQ());
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
@@ -3746,6 +3777,12 @@ CK_RV SoftHSM::generateEC
 				}
 				bOK = bOK && osobject->setAttribute(CKA_EC_PARAMS, group);
 				bOK = bOK && osobject->setAttribute(CKA_VALUE, value);
+				// CKA_CHECK_VALUE: SHA-256(private scalar) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(priv->getD());
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
 					ByteString ec_priv_spki = spkiFromPkey(((OSSLECPublicKey*)pub)->getOSSLKey());
@@ -3910,6 +3947,12 @@ CK_RV SoftHSM::generateED
 					value = pub->getA();
 				}
 				bOK = bOK && osobject->setAttribute(CKA_EC_POINT, value);
+				// CKA_CHECK_VALUE: SHA-256(public point) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(pub->getA());
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
 					ByteString ed_spki = spkiFromPkey(((OSSLEDPublicKey*)pub)->getOSSLKey());
@@ -3995,6 +4038,12 @@ CK_RV SoftHSM::generateED
 				}
 				bOK = bOK && osobject->setAttribute(CKA_EC_PARAMS, group);
 				bOK = bOK && osobject->setAttribute(CKA_VALUE, value);
+				// CKA_CHECK_VALUE: SHA-256(private scalar) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(priv->getK());
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
 					ByteString ed_priv_spki = spkiFromPkey(((OSSLEDPublicKey*)pub)->getOSSLKey());
@@ -4132,6 +4181,12 @@ CK_RV SoftHSM::generateMLDSA
 				else
 					pubValue = pub->getValue();
 				bOK = bOK && osobject->setAttribute(CKA_VALUE, pubValue);
+				// CKA_CHECK_VALUE: SHA-256(plaintext) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(pub->getValue());
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
 					ByteString mldsa_spki = spkiFromPkey(((OSSLMLDSAPublicKey*)pub)->getOSSLKey());
@@ -4209,6 +4264,12 @@ CK_RV SoftHSM::generateMLDSA
 				else
 					privValue = priv->getValue();
 				bOK = bOK && osobject->setAttribute(CKA_VALUE, privValue);
+				// CKA_CHECK_VALUE: SHA-256(plaintext) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(priv->getValue());
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
 					ByteString mldsa_priv_spki = spkiFromPkey(((OSSLMLDSAPublicKey*)pub)->getOSSLKey());
@@ -4346,6 +4407,12 @@ CK_RV SoftHSM::generateSLHDSA
 				else
 					pubValue = pub->getValue();
 				bOK = bOK && osobject->setAttribute(CKA_VALUE, pubValue);
+				// CKA_CHECK_VALUE: SHA-256(plaintext) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(pub->getValue());
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
 					ByteString slhdsa_spki = spkiFromPkey(((OSSLSLHDSAPublicKey*)pub)->getOSSLKey());
@@ -4423,6 +4490,12 @@ CK_RV SoftHSM::generateSLHDSA
 				else
 					privValue = priv->getValue();
 				bOK = bOK && osobject->setAttribute(CKA_VALUE, privValue);
+				// CKA_CHECK_VALUE: SHA-256(plaintext) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(priv->getValue());
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
 					ByteString slhdsa_priv_spki = spkiFromPkey(((OSSLSLHDSAPublicKey*)pub)->getOSSLKey());
@@ -6179,6 +6252,12 @@ CK_RV SoftHSM::generateMLKEM
 				else
 					pubValue = pub->getValue();
 				bOK = bOK && osobject->setAttribute(CKA_VALUE, pubValue);
+				// CKA_CHECK_VALUE: SHA-256(plaintext) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(pub->getValue());
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
 					ByteString mlkem_spki = spkiFromPkey(((OSSLMLKEMPublicKey*)pub)->getOSSLKey());
@@ -6259,6 +6338,12 @@ CK_RV SoftHSM::generateMLKEM
 				else
 					privValue = priv->getValue();
 				bOK = bOK && osobject->setAttribute(CKA_VALUE, privValue);
+				// CKA_CHECK_VALUE: SHA-256(plaintext) → 3 bytes
+				{
+					ByteString kcv = computeAsymKCV(priv->getValue());
+					// CKA_CHECK_VALUE stored in clear — not sensitive per PKCS#11 v3.2 §4.10.2
+					bOK = bOK && osobject->setAttribute(CKA_CHECK_VALUE, kcv);
+				}
 				// PKCS#11 v3.2 §4.14 — CKA_PUBLIC_KEY_INFO: SubjectPublicKeyInfo DER (always public)
 				{
 					ByteString mlkem_priv_spki = spkiFromPkey(((OSSLMLKEMPublicKey*)pub)->getOSSLKey());

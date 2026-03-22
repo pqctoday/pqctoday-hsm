@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
+use rand_chacha::ChaCha20Rng;
 
 use crate::constants::*;
 use crate::crypto::*;
@@ -14,7 +15,10 @@ thread_local! {
     pub static DECRYPT_STATE: RefCell<HashMap<u32, EncryptCtx>> = RefCell::new(HashMap::new());
     pub static DIGEST_STATE: RefCell<HashMap<u32, DigestCtx>> = RefCell::new(HashMap::new());
     pub static FIND_STATE: RefCell<HashMap<u32, FindCtx>> = RefCell::new(HashMap::new());
-    pub static ACVP_SEED: RefCell<Option<[u8; 32]>> = RefCell::new(None);
+    /// Persistent ACVP deterministic RNG — created once in C_Initialize, advances
+    /// across all operations, cleared in C_Finalize. Uses IETF ChaCha20 (RFC 8439)
+    /// to match the C++ OpenSSL EVP_chacha20 implementation.
+    pub static ACVP_RNG: RefCell<Option<ChaCha20Rng>> = RefCell::new(None);
 }
 
 pub struct EncryptCtx {
@@ -109,6 +113,74 @@ pub fn read_bool_attr(attrs: &Attributes, attr_type: u32) -> bool {
         .get(&attr_type)
         .map(|v| v.first().copied().unwrap_or(0) != 0)
         .unwrap_or(false)
+}
+
+/// Compute and store CKA_CHECK_VALUE (KCV) — PKCS#11 v3.2 §4.10.2.
+/// - AES secret keys: first 3 bytes of AES-ECB(key, zero_block)
+/// - Generic secret (HMAC): first 3 bytes of SHA-256(key_value)
+/// - Asymmetric keys (public/private): first 3 bytes of SHA-256(CKA_VALUE)
+pub fn compute_kcv(attrs: &mut Attributes) {
+    use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
+    use sha2::{Sha256, Digest};
+
+    let class = attrs.get(&CKA_CLASS)
+        .filter(|v| v.len() >= 4)
+        .map(|v| u32::from_le_bytes([v[0], v[1], v[2], v[3]]))
+        .unwrap_or(0);
+
+    let key_value = match attrs.get(&CKA_VALUE) {
+        Some(v) if !v.is_empty() => v.clone(),
+        _ => return,
+    };
+
+    let kcv: Vec<u8> = match class {
+        CKO_SECRET_KEY => {
+            let key_type = attrs.get(&CKA_KEY_TYPE)
+                .filter(|v| v.len() >= 4)
+                .map(|v| u32::from_le_bytes([v[0], v[1], v[2], v[3]]))
+                .unwrap_or(0);
+            match key_type {
+                CKK_AES => {
+                    // AES-ECB encrypt a 16-byte zero block, take first 3 bytes
+                    let zero_block = GenericArray::default();
+                    match key_value.len() {
+                        16 => {
+                            let cipher = aes::Aes128::new(GenericArray::from_slice(&key_value));
+                            let mut block = zero_block;
+                            cipher.encrypt_block(&mut block);
+                            block[..3].to_vec()
+                        }
+                        24 => {
+                            let cipher = aes::Aes192::new(GenericArray::from_slice(&key_value));
+                            let mut block = zero_block;
+                            cipher.encrypt_block(&mut block);
+                            block[..3].to_vec()
+                        }
+                        32 => {
+                            let cipher = aes::Aes256::new(GenericArray::from_slice(&key_value));
+                            let mut block = zero_block;
+                            cipher.encrypt_block(&mut block);
+                            block[..3].to_vec()
+                        }
+                        _ => return,
+                    }
+                }
+                CKK_GENERIC_SECRET => {
+                    // PKCS#11 v3.2: SHA-256 of key value, first 3 bytes
+                    let hash = Sha256::digest(&key_value);
+                    hash[..3].to_vec()
+                }
+                _ => return,
+            }
+        }
+        CKO_PUBLIC_KEY | CKO_PRIVATE_KEY => {
+            // Asymmetric keys: SHA-256 of CKA_VALUE → first 3 bytes
+            let hash = Sha256::digest(&key_value);
+            hash[..3].to_vec()
+        }
+        _ => return,
+    };
+    attrs.insert(CKA_CHECK_VALUE, kcv);
 }
 
 /// Derive and store CKA_ALWAYS_SENSITIVE and CKA_NEVER_EXTRACTABLE from the

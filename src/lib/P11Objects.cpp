@@ -704,6 +704,8 @@ bool P11PublicKeyObj::init(OSObject *inobject)
 	P11Attribute* attrWrapTemplate = new P11AttrWrapTemplate(osobject);
 	// CKA_PUBLIC_KEY_INFO: default empty; populated with SPKI DER by keygen (G-PUB1 complete)
 	P11Attribute* attrPublicKeyInfo = new P11AttrPublicKeyInfo(osobject,0);
+	// CKA_CHECK_VALUE: SHA-256(CKA_VALUE) → first 3 bytes for asymmetric keys
+	P11Attribute* attrCheckValue = new P11AttrCheckValue(osobject,0);
 
 	// Initialize the attributes
 	if
@@ -715,7 +717,8 @@ bool P11PublicKeyObj::init(OSObject *inobject)
 		!attrWrap->init() ||
 		!attrTrusted->init() ||
 		!attrWrapTemplate->init() ||
-		!attrPublicKeyInfo->init()
+		!attrPublicKeyInfo->init() ||
+		!attrCheckValue->init()
 	)
 	{
 		ERROR_MSG("Could not initialize the attribute");
@@ -727,6 +730,7 @@ bool P11PublicKeyObj::init(OSObject *inobject)
 		delete attrTrusted;
 		delete attrWrapTemplate;
 		delete attrPublicKeyInfo;
+		delete attrCheckValue;
 		return false;
 	}
 
@@ -739,6 +743,7 @@ bool P11PublicKeyObj::init(OSObject *inobject)
 	attributes[attrTrusted->getType()] = attrTrusted;
 	attributes[attrWrapTemplate->getType()] = attrWrapTemplate;
 	attributes[attrPublicKeyInfo->getType()] = attrPublicKeyInfo;
+	attributes[attrCheckValue->getType()] = attrCheckValue;
 
 	initialized = true;
 	return true;
@@ -1025,6 +1030,8 @@ bool P11PrivateKeyObj::init(OSObject *inobject)
 	P11Attribute* attrAlwaysAuthenticate = new P11AttrAlwaysAuthenticate(osobject);
 	// CKA_PUBLIC_KEY_INFO: default empty; populated with SPKI DER by keygen (G-PUB1 complete)
 	P11Attribute* attrPublicKeyInfo = new P11AttrPublicKeyInfo(osobject,P11Attribute::ck8);
+	// CKA_CHECK_VALUE: SHA-256(CKA_VALUE) → first 3 bytes for asymmetric keys
+	P11Attribute* attrCheckValue = new P11AttrCheckValue(osobject,P11Attribute::ck8);
 
 	// Initialize the attributes
 	if
@@ -1041,7 +1048,8 @@ bool P11PrivateKeyObj::init(OSObject *inobject)
 		!attrWrapWithTrusted->init() ||
 		!attrUnwrapTemplate->init() ||
 		!attrAlwaysAuthenticate->init() ||
-		!attrPublicKeyInfo->init()
+		!attrPublicKeyInfo->init() ||
+		!attrCheckValue->init()
 	)
 	{
 		ERROR_MSG("Could not initialize the attribute");
@@ -1058,6 +1066,7 @@ bool P11PrivateKeyObj::init(OSObject *inobject)
 		delete attrUnwrapTemplate;
 		delete attrAlwaysAuthenticate;
 		delete attrPublicKeyInfo;
+		delete attrCheckValue;
 		return false;
 	}
 
@@ -1075,6 +1084,7 @@ bool P11PrivateKeyObj::init(OSObject *inobject)
 	attributes[attrUnwrapTemplate->getType()] = attrUnwrapTemplate;
 	attributes[attrAlwaysAuthenticate->getType()] = attrAlwaysAuthenticate;
 	attributes[attrPublicKeyInfo->getType()] = attrPublicKeyInfo;
+	attributes[attrCheckValue->getType()] = attrCheckValue;
 
 	initialized = true;
 	return true;

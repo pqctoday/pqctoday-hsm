@@ -66,7 +66,8 @@ ByteString SymmetricKey::getKeyCheckValue() const
 {
 	ByteString digest;
 
-	HashAlgorithm* hash = CryptoFactory::i()->getHashAlgorithm(HashAlgo::SHA1);
+	// PKCS#11 v3.2 §4.10.2: SHA-256 for non-ECB secret keys (updated from SHA-1)
+	HashAlgorithm* hash = CryptoFactory::i()->getHashAlgorithm(HashAlgo::SHA256);
 	if (hash == NULL) return digest;
 
 	if (!hash->hashInit() ||

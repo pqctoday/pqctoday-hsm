@@ -14,14 +14,29 @@ use crate::slh_dsa_keygen;
 use rand::SeedableRng;
 use rand::rngs::OsRng;
 
+/// ACVP-aware RNG selection macro.
+/// In ACVP mode, uses the persistent ChaCha20Rng from thread-local state
+/// so the counter advances across operations (matching C++ OpenSSL behaviour).
+/// In normal mode, uses OsRng for non-deterministic randomness.
+///
+/// Implementation: `take()` extracts the RNG from thread-local into a local
+/// variable, runs $body inline (NOT in a closure — so `return` works normally),
+/// then restores the advanced RNG back to thread-local. If $body exits via
+/// `return` (error paths), the RNG is lost but `C_Initialize` recreates it.
 macro_rules! with_rng {
     ($rng:ident, $body:block) => {
-        if let Some(seed) = crate::state::ACVP_SEED.with(|s| *s.borrow()) {
-            let mut $rng = rand_chacha::ChaCha20Rng::from_seed(seed);
-            $body
-        } else {
-            let mut $rng = OsRng;
-            $body
+        {
+            let mut _acvp_rng_cell = crate::state::ACVP_RNG.with(|r| r.borrow_mut().take());
+            if _acvp_rng_cell.is_some() {
+                let mut $rng = _acvp_rng_cell.as_mut().unwrap();
+                let _with_rng_result = { $body };
+                // Restore the (now-advanced) RNG back to thread-local state
+                crate::state::ACVP_RNG.with(|r| { *r.borrow_mut() = _acvp_rng_cell; });
+                _with_rng_result
+            } else {
+                let mut $rng = OsRng;
+                $body
+            }
         }
     };
 }
@@ -41,8 +56,10 @@ pub fn C_Initialize(p_init_args: *mut u8) -> u32 {
                     let seed_slice = std::slice::from_raw_parts(p_seed, 32);
                     let mut seed = [0u8; 32];
                     seed.copy_from_slice(seed_slice);
-                    ACVP_SEED.with(|s| {
-                        *s.borrow_mut() = Some(seed);
+                    // Create a persistent ChaCha20Rng that advances across operations
+                    let rng = rand_chacha::ChaCha20Rng::from_seed(seed);
+                    ACVP_RNG.with(|r| {
+                        *r.borrow_mut() = Some(rng);
                     });
                 }
             }
@@ -62,7 +79,7 @@ pub fn C_Finalize(_p_reserved: *mut u8) -> u32 {
     DECRYPT_STATE.with(|s| s.borrow_mut().clear());
     DIGEST_STATE.with(|s| s.borrow_mut().clear());
     FIND_STATE.with(|s| s.borrow_mut().clear());
-    ACVP_SEED.with(|s| *s.borrow_mut() = None);
+    ACVP_RNG.with(|r| *r.borrow_mut() = None);
     CKR_OK
 }
 
@@ -343,6 +360,8 @@ pub fn C_GenerateKeyPair(
                     ul_private_key_attribute_count,
                 );
                 finalize_private_key_attrs(&mut prv_attrs);
+                compute_kcv(&mut pub_attrs);
+                compute_kcv(&mut prv_attrs);
                 *ph_public_key = allocate_handle(pub_attrs);
                 *ph_private_key = allocate_handle(prv_attrs);
                 CKR_OK
@@ -439,6 +458,8 @@ pub fn C_GenerateKeyPair(
                     ul_private_key_attribute_count,
                 );
                 finalize_private_key_attrs(&mut prv_attrs);
+                compute_kcv(&mut pub_attrs);
+                compute_kcv(&mut prv_attrs);
                 *ph_public_key = allocate_handle(pub_attrs);
                 *ph_private_key = allocate_handle(prv_attrs);
                 CKR_OK
@@ -544,6 +565,8 @@ pub fn C_GenerateKeyPair(
                     ul_private_key_attribute_count,
                 );
                 finalize_private_key_attrs(&mut prv_attrs);
+                compute_kcv(&mut pub_attrs);
+                compute_kcv(&mut prv_attrs);
                 *ph_public_key = allocate_handle(pub_attrs);
                 *ph_private_key = allocate_handle(prv_attrs);
                 CKR_OK
@@ -636,6 +659,8 @@ pub fn C_GenerateKeyPair(
                     ul_private_key_attribute_count,
                 );
                 finalize_private_key_attrs(&mut prv_attrs);
+                compute_kcv(&mut pub_attrs);
+                compute_kcv(&mut prv_attrs);
                 *ph_public_key = allocate_handle(pub_attrs);
                 *ph_private_key = allocate_handle(prv_attrs);
                 CKR_OK
@@ -719,6 +744,8 @@ pub fn C_GenerateKeyPair(
                     ul_private_key_attribute_count,
                 );
                 finalize_private_key_attrs(&mut prv_attrs);
+                compute_kcv(&mut pub_attrs);
+                compute_kcv(&mut prv_attrs);
                 *ph_public_key = allocate_handle(pub_attrs);
                 *ph_private_key = allocate_handle(prv_attrs);
                 CKR_OK
@@ -782,6 +809,8 @@ pub fn C_GenerateKeyPair(
                     ul_private_key_attribute_count,
                 );
                 finalize_private_key_attrs(&mut prv_attrs);
+                compute_kcv(&mut pub_attrs);
+                compute_kcv(&mut prv_attrs);
                 *ph_public_key = allocate_handle(pub_attrs);
                 *ph_private_key = allocate_handle(prv_attrs);
                 CKR_OK
@@ -832,6 +861,7 @@ pub fn C_GenerateKey(
                 store_bool(&mut attrs, CKA_DERIVE, false);
                 store_bool(&mut attrs, CKA_LOCAL, true);
                 absorb_template_attrs(&mut attrs, p_template, ul_count);
+                compute_kcv(&mut attrs);
                 *ph_key = allocate_handle(attrs);
                 CKR_OK
             }
@@ -863,6 +893,7 @@ pub fn C_GenerateKey(
                 store_bool(&mut attrs, CKA_DERIVE, false);
                 store_bool(&mut attrs, CKA_LOCAL, true);
                 absorb_template_attrs(&mut attrs, p_template, ul_count);
+                compute_kcv(&mut attrs);
                 *ph_key = allocate_handle(attrs);
                 CKR_OK
             }
@@ -1093,6 +1124,8 @@ pub fn C_CreateObject(
                 store_param_set(&mut new_attrs, ps);
             }
         }
+        // Compute CKA_CHECK_VALUE (KCV) — PKCS#11 v3.2
+        compute_kcv(&mut new_attrs);
         *ph_object = allocate_handle(new_attrs);
     }
     CKR_OK
