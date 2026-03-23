@@ -543,6 +543,6 @@ BSD-2-Clause (same as SoftHSM2). See [LICENSE](LICENSE). See [Terms of Service](
 
 ## Acknowledgments
 
-This project is a fork of [SoftHSM2](https://github.com/softhsm/SoftHSMv2) by the OpenDNSSEC project. PQC implementation references Mozilla NSS (Bug 1965329) and Thales Luna HSM documentation.
+This project is a fork of [SoftHSM2](https://github.com/softhsm/SoftHSMv2) by the OpenDNSSEC project. PQC implementation references Mozilla NSS (Bug 1965329).
 
 Maintained by [PQC Today](https://pqctoday.com).
