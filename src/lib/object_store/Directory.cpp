@@ -129,6 +129,13 @@ bool Directory::refresh()
 		// Convert the name of the entry to a C++ string
 		std::string name(entry->d_name);
 
+		// Reject path traversal components
+		if (name.find("..") != std::string::npos || name.find('/') != std::string::npos)
+		{
+			DEBUG_MSG("Skipping entry with path traversal: %s", name.c_str());
+			continue;
+		}
+
 #if defined(_DIRENT_HAVE_D_TYPE) && defined(_BSD_SOURCE)
 		// Determine the type of the entry
 		switch(entry->d_type)
@@ -143,6 +150,11 @@ bool Directory::refresh()
 			files.push_back(name);
 			pushed = true;
 			break;
+		case DT_LNK:
+			// Reject symlinks for security
+			DEBUG_MSG("Skipping symlink: %s", name.c_str());
+			pushed = true;
+			break;
 		default:
 			break;
 		}
@@ -155,7 +167,12 @@ bool Directory::refresh()
 
 			if (!lstat(fullPath.c_str(), &entryStatus))
 			{
-				if (S_ISDIR(entryStatus.st_mode))
+				// Reject symlinks for security
+				if (S_ISLNK(entryStatus.st_mode))
+				{
+					DEBUG_MSG("Skipping symlink: %s", name.c_str());
+				}
+				else if (S_ISDIR(entryStatus.st_mode))
 				{
 					subDirs.push_back(name);
 				}

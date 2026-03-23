@@ -153,6 +153,8 @@ CK_RV extractObjectInformation(CK_ATTRIBUTE_PTR pTemplate,
 		switch (pTemplate[i].type)
 		{
 			case CKA_CLASS:
+				if (pTemplate[i].pValue == NULL_PTR)
+					return CKR_ATTRIBUTE_VALUE_INVALID;
 				if (pTemplate[i].ulValueLen == sizeof(CK_OBJECT_CLASS))
 				{
 					objClass = *(CK_OBJECT_CLASS_PTR)pTemplate[i].pValue;
@@ -160,6 +162,8 @@ CK_RV extractObjectInformation(CK_ATTRIBUTE_PTR pTemplate,
 				}
 				break;
 			case CKA_KEY_TYPE:
+				if (pTemplate[i].pValue == NULL_PTR)
+					return CKR_ATTRIBUTE_VALUE_INVALID;
 				if (pTemplate[i].ulValueLen == sizeof(CK_KEY_TYPE))
 				{
 					keyType = *(CK_KEY_TYPE*)pTemplate[i].pValue;
@@ -167,6 +171,8 @@ CK_RV extractObjectInformation(CK_ATTRIBUTE_PTR pTemplate,
 				}
 				break;
 			case CKA_CERTIFICATE_TYPE:
+				if (pTemplate[i].pValue == NULL_PTR)
+					return CKR_ATTRIBUTE_VALUE_INVALID;
 				if (pTemplate[i].ulValueLen == sizeof(CK_CERTIFICATE_TYPE))
 				{
 					certType = *(CK_CERTIFICATE_TYPE*)pTemplate[i].pValue;
@@ -174,12 +180,16 @@ CK_RV extractObjectInformation(CK_ATTRIBUTE_PTR pTemplate,
 				}
 				break;
 			case CKA_TOKEN:
+				if (pTemplate[i].pValue == NULL_PTR)
+					return CKR_ATTRIBUTE_VALUE_INVALID;
 				if (pTemplate[i].ulValueLen == sizeof(CK_BBOOL))
 				{
 					isOnToken = *(CK_BBOOL*)pTemplate[i].pValue;
 				}
 				break;
 			case CKA_PRIVATE:
+				if (pTemplate[i].pValue == NULL_PTR)
+					return CKR_ATTRIBUTE_VALUE_INVALID;
 				if (pTemplate[i].ulValueLen == sizeof(CK_BBOOL))
 				{
 					isPrivate = *(CK_BBOOL*)pTemplate[i].pValue;

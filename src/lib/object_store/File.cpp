@@ -420,6 +420,12 @@ bool File::readString(std::string& value)
 		return false;
 	}
 
+	// Sanity check: cap at 64MB (same limit as readByteString)
+	if (len > 0x4000000)
+	{
+		return false;
+	}
+
 	// Read the string from the file
 	value.resize(len);
 

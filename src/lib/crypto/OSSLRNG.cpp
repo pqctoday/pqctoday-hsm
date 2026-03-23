@@ -34,19 +34,22 @@
 #include "OSSLRNG.h"
 #include <openssl/rand.h>
 #include <openssl/evp.h>
+#include <openssl/crypto.h>
 #include <string.h>
 
-bool acvp_mode = false;
-unsigned char acvp_seed[32] = {0};
-EVP_CIPHER_CTX *acvp_ctx = NULL;
+static thread_local bool acvp_mode = false;
+static thread_local unsigned char acvp_seed[32] = {0};
+static thread_local EVP_CIPHER_CTX *acvp_ctx = NULL;
 
 static int acvp_rand_bytes(unsigned char *buf, int num) {
 	if (num <= 0) return 1;
 	if (!acvp_ctx) return 0;
 	int outlen = 0;
-	unsigned char *zeros = (unsigned char *)calloc(num, 1);
+	unsigned char *zeros = (unsigned char *)OPENSSL_zalloc(num);
+	if (!zeros) return 0;
 	EVP_EncryptUpdate(acvp_ctx, buf, &outlen, zeros, num);
-	free(zeros);
+	OPENSSL_cleanse(zeros, num);
+	OPENSSL_free(zeros);
 	return 1;
 }
 
@@ -69,6 +72,7 @@ void OSSLRNG_enableACVP(unsigned char* seed) {
 	acvp_ctx = EVP_CIPHER_CTX_new();
 	unsigned char iv[16] = {0};
 	EVP_EncryptInit_ex(acvp_ctx, EVP_chacha20(), NULL, acvp_seed, iv);
+	OPENSSL_cleanse(iv, sizeof(iv));
 
 	RAND_set_rand_method(&acvp_rand_method);
 }
@@ -79,7 +83,7 @@ void OSSLRNG_disableACVP() {
 		acvp_ctx = NULL;
 	}
 	acvp_mode = false;
-	memset(acvp_seed, 0, 32);
+	OPENSSL_cleanse(acvp_seed, 32);
 	RAND_set_rand_method(RAND_OpenSSL());
 }
 

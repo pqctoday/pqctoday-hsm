@@ -57,7 +57,11 @@ ByteString DERUTIL::raw2Octet(const ByteString& byteString)
 			if (value & 0xFF) break;
 		}
 
-		// Set header data
+		// Set header data (defensive overflow guard)
+		if (bytes > sizeof(size_t))
+		{
+			return ByteString();
+		}
 		header.resize(2 + bytes);
 		header[0] = (unsigned char)0x04;
 		header[1] = (unsigned char)(0x80 | bytes);

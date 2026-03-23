@@ -104,13 +104,13 @@ CK_RV SoftHSM::SymEncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			algo = SymAlgo::AES;
 			mode = SymMode::CBC;
 			if (pMechanism->pParameter == NULL_PTR ||
-			    pMechanism->ulParameterLen == 0)
+			    pMechanism->ulParameterLen != 16)
 			{
-				DEBUG_MSG("CBC mode requires an init vector");
-				return CKR_ARGUMENTS_BAD;
+				DEBUG_MSG("CBC mode requires a 16-byte init vector");
+				return CKR_MECHANISM_PARAM_INVALID;
 			}
-			iv.resize(pMechanism->ulParameterLen);
-			memcpy(&iv[0], pMechanism->pParameter, pMechanism->ulParameterLen);
+			iv.resize(16);
+			memcpy(&iv[0], pMechanism->pParameter, 16);
 			break;
 		case CKM_AES_CBC_PAD:
 			if (keyType != CKK_AES)
@@ -119,13 +119,13 @@ CK_RV SoftHSM::SymEncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			mode = SymMode::CBC;
 			padding = true;
 			if (pMechanism->pParameter == NULL_PTR ||
-			    pMechanism->ulParameterLen == 0)
+			    pMechanism->ulParameterLen != 16)
 			{
-				DEBUG_MSG("CBC mode requires an init vector");
-				return CKR_ARGUMENTS_BAD;
+				DEBUG_MSG("CBC mode requires a 16-byte init vector");
+				return CKR_MECHANISM_PARAM_INVALID;
 			}
-			iv.resize(pMechanism->ulParameterLen);
-			memcpy(&iv[0], pMechanism->pParameter, pMechanism->ulParameterLen);
+			iv.resize(16);
+			memcpy(&iv[0], pMechanism->pParameter, 16);
 			break;
 		case CKM_AES_CTR:
 			if (keyType != CKK_AES)
@@ -158,8 +158,22 @@ CK_RV SoftHSM::SymEncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 				DEBUG_MSG("GCM mode requires parameters");
 				return CKR_ARGUMENTS_BAD;
 			}
+			// Validate embedded pointers before dereferencing
+			if (CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen > 0 &&
+			    CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv == NULL_PTR)
+			{
+				DEBUG_MSG("GCM pIv is NULL with non-zero ulIvLen");
+				return CKR_ARGUMENTS_BAD;
+			}
+			if (CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen > 0 &&
+			    CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD == NULL_PTR)
+			{
+				DEBUG_MSG("GCM pAAD is NULL with non-zero ulAADLen");
+				return CKR_ARGUMENTS_BAD;
+			}
 			iv.resize(CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
-			memcpy(&iv[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
+			if (CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen > 0)
+				memcpy(&iv[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
 			aad.resize(CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
 			if (CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen > 0)
 				memcpy(&aad[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
@@ -720,13 +734,13 @@ CK_RV SoftHSM::SymDecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			algo = SymAlgo::AES;
 			mode = SymMode::CBC;
 			if (pMechanism->pParameter == NULL_PTR ||
-			    pMechanism->ulParameterLen == 0)
+			    pMechanism->ulParameterLen != 16)
 			{
-				DEBUG_MSG("CBC mode requires an init vector");
-				return CKR_ARGUMENTS_BAD;
+				DEBUG_MSG("CBC mode requires a 16-byte init vector");
+				return CKR_MECHANISM_PARAM_INVALID;
 			}
-			iv.resize(pMechanism->ulParameterLen);
-			memcpy(&iv[0], pMechanism->pParameter, pMechanism->ulParameterLen);
+			iv.resize(16);
+			memcpy(&iv[0], pMechanism->pParameter, 16);
 			break;
 		case CKM_AES_CBC_PAD:
 			if (keyType != CKK_AES)
@@ -735,13 +749,13 @@ CK_RV SoftHSM::SymDecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			mode = SymMode::CBC;
 			padding = true;
 			if (pMechanism->pParameter == NULL_PTR ||
-			    pMechanism->ulParameterLen == 0)
+			    pMechanism->ulParameterLen != 16)
 			{
-				DEBUG_MSG("CBC mode requires an init vector");
-				return CKR_ARGUMENTS_BAD;
+				DEBUG_MSG("CBC mode requires a 16-byte init vector");
+				return CKR_MECHANISM_PARAM_INVALID;
 			}
-			iv.resize(pMechanism->ulParameterLen);
-			memcpy(&iv[0], pMechanism->pParameter, pMechanism->ulParameterLen);
+			iv.resize(16);
+			memcpy(&iv[0], pMechanism->pParameter, 16);
 			break;
 		case CKM_AES_CTR:
 			if (keyType != CKK_AES)
@@ -774,8 +788,22 @@ CK_RV SoftHSM::SymDecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 				DEBUG_MSG("GCM mode requires parameters");
 				return CKR_ARGUMENTS_BAD;
 			}
+			// Validate embedded pointers before dereferencing
+			if (CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen > 0 &&
+			    CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv == NULL_PTR)
+			{
+				DEBUG_MSG("GCM pIv is NULL with non-zero ulIvLen");
+				return CKR_ARGUMENTS_BAD;
+			}
+			if (CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen > 0 &&
+			    CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD == NULL_PTR)
+			{
+				DEBUG_MSG("GCM pAAD is NULL with non-zero ulAADLen");
+				return CKR_ARGUMENTS_BAD;
+			}
 			iv.resize(CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
-			memcpy(&iv[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
+			if (CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen > 0)
+				memcpy(&iv[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pIv, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulIvLen);
 			aad.resize(CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
 			if (CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen > 0)
 				memcpy(&aad[0], CK_GCM_PARAMS_PTR(pMechanism->pParameter)->pAAD, CK_GCM_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
@@ -1104,7 +1132,13 @@ static CK_RV SymDecryptUpdate(Session* session, CK_BYTE_PTR pEncryptedData, CK_U
 	// Check encrypted data size
 	size_t blockSize = cipher->getBlockSize();
 	size_t remainingSize = cipher->getBufferSize();
-	CK_ULONG maxSize = ulEncryptedDataLen + remainingSize;
+	CK_ULONG maxSize;
+	if (ulEncryptedDataLen > ~(CK_ULONG)0 - remainingSize)
+	{
+		session->resetOp();
+		return CKR_ENCRYPTED_DATA_LEN_RANGE;
+	}
+	maxSize = ulEncryptedDataLen + remainingSize;
 	if (cipher->isBlockCipher())
 	{
 		// There must always be one block left in padding mode if next operation is DecryptFinal.

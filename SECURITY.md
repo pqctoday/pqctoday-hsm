@@ -41,6 +41,32 @@ Out of scope:
 - PKCS#11 v3.2 `C_EncapsulateKey` / `C_DecapsulateKey` use ML-KEM (FIPS 203) via OpenSSL EVP
 - All EVP contexts are freed on every code path; no ENGINE API is used
 
+## WASM Security Limitations
+
+When built for WebAssembly (Emscripten or wasm32-unknown-unknown), the following platform-level security guarantees do **not** apply:
+
+- **No secure memory**: `mlock()`, `madvise(MADV_DONTDUMP)`, and `SecureAllocator` are no-ops. Key material in WASM linear memory may be observable by the host JavaScript environment and is subject to garbage collection and memory snapshots.
+- **Exposed linear memory**: WASM modules export their entire linear memory as an `ArrayBuffer`. Any JavaScript code in the same origin can read all key material directly via `Module.HEAPU8`.
+- **No ASLR or memory isolation**: WASM linear memory has a fixed, deterministic layout. Memory addresses are predictable and cannot be randomized.
+- **Maximum memory cap**: The WASM build is capped at 512 MB (`MAXIMUM_MEMORY=536870912`) to prevent unbounded growth.
+
+### Required HTTP Headers
+
+Deployments serving the WASM module **must** set these response headers to enable `SharedArrayBuffer` (required by Emscripten pthreads):
+
+```
+Cross-Origin-Embedder-Policy: require-corp
+Cross-Origin-Opener-Policy: same-origin
+```
+
+### Recommendations for WASM Consumers
+
+1. Treat the WASM HSM as an **educational/development tool**, not a production HSM
+2. Never store production secrets in the WASM module's object store
+3. Serve the module only over HTTPS with the required CORP/COOP headers
+4. Use `Content-Security-Policy: script-src 'self' 'wasm-unsafe-eval'` to prevent code injection
+5. Zeroize keys via `C_DestroyObject` when no longer needed (the Rust module zeroizes `CKA_VALUE` on destroy)
+
 ## Disclosure Policy
 
 Once a fix is merged and released, we will:

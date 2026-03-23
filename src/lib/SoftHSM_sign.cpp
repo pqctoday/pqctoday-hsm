@@ -564,6 +564,11 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			}
 
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = false;
@@ -583,6 +588,11 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			pssParam.hashAlg = HashAlgo::SHA1;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA1;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -601,6 +611,11 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			pssParam.hashAlg = HashAlgo::SHA224;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA224;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -619,6 +634,11 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			pssParam.hashAlg = HashAlgo::SHA256;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA256;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -637,6 +657,11 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			pssParam.hashAlg = HashAlgo::SHA384;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA384;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -655,6 +680,11 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			pssParam.hashAlg = HashAlgo::SHA512;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA512;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -673,6 +703,11 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			pssParam.hashAlg = HashAlgo::SHA3_224;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_224;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -691,6 +726,11 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			pssParam.hashAlg = HashAlgo::SHA3_256;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_256;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -709,6 +749,11 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			pssParam.hashAlg = HashAlgo::SHA3_512;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_512;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -844,6 +889,11 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 		HASH_MLDSA_CASE(CKM_HASH_ML_DSA_SHAKE256, HASH_MLDSA_SHAKE256, SHAKE256)
 #undef HASH_MLDSA_CASE
 		case CKM_SLH_DSA:
+			if (pMechanism->pParameter != NULL_PTR || pMechanism->ulParameterLen != 0)
+			{
+				ERROR_MSG("CKM_SLH_DSA pure mode does not accept parameters");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			mechanism = AsymMech::SLHDSA;
 			bAllowMultiPartOp = false;
 			isSLHDSA = true;
@@ -909,6 +959,13 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 #undef HASH_SLHDSA_CASE
 		default:
 			return CKR_MECHANISM_INVALID;
+	}
+
+	// Reject unexpected parameters for parameterless mechanisms
+	if (param == NULL && pMechanism->pParameter != NULL_PTR)
+	{
+		ERROR_MSG("Mechanism does not accept parameters");
+		return CKR_MECHANISM_PARAM_INVALID;
 	}
 
 	AsymmetricAlgorithm* asymCrypto = NULL;
@@ -1165,6 +1222,11 @@ static CK_RV AsymSign(Session* session, CK_BYTE_PTR pData, CK_ULONG ulDataLen, C
 
 	// We must allow input length <= k and therfore need to prepend the data with zeroes.
 	if (mechanism == AsymMech::RSA) {
+		if (ulDataLen > size)
+		{
+			session->resetOp();
+			return CKR_DATA_LEN_RANGE;
+		}
 		data.wipe(size-ulDataLen);
 	}
 
@@ -1656,6 +1718,11 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			}
 
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = false;
@@ -1675,6 +1742,11 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			pssParam.hashAlg = HashAlgo::SHA1;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA1;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -1693,6 +1765,11 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			pssParam.hashAlg = HashAlgo::SHA224;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA224;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -1711,6 +1788,11 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			pssParam.hashAlg = HashAlgo::SHA256;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA256;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -1729,6 +1811,11 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			pssParam.hashAlg = HashAlgo::SHA384;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA384;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -1747,6 +1834,11 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			pssParam.hashAlg = HashAlgo::SHA512;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA512;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -1765,6 +1857,11 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			pssParam.hashAlg = HashAlgo::SHA3_224;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_224;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -1783,6 +1880,11 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			pssParam.hashAlg = HashAlgo::SHA3_256;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_256;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -1801,6 +1903,11 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 			pssParam.hashAlg = HashAlgo::SHA3_512;
 			pssParam.mgf = AsymRSAMGF::MGF1_SHA3_512;
 			pssParam.sLen = CK_RSA_PKCS_PSS_PARAMS_PTR(pMechanism->pParameter)->sLen;
+			if (pssParam.sLen > 512)
+			{
+				ERROR_MSG("RSA-PSS salt length exceeds maximum (512)");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			param = &pssParam;
 			paramLen = sizeof(pssParam);
 			bAllowMultiPartOp = true;
@@ -1935,6 +2042,11 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 		HASH_MLDSA_CASE(CKM_HASH_ML_DSA_SHAKE256, HASH_MLDSA_SHAKE256, SHAKE256)
 #undef HASH_MLDSA_CASE
 		case CKM_SLH_DSA:
+			if (pMechanism->pParameter != NULL_PTR || pMechanism->ulParameterLen != 0)
+			{
+				ERROR_MSG("CKM_SLH_DSA pure mode does not accept parameters");
+				return CKR_MECHANISM_PARAM_INVALID;
+			}
 			mechanism = AsymMech::SLHDSA;
 			bAllowMultiPartOp = false;
 			isSLHDSA = true;
@@ -2000,6 +2112,13 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 #undef HASH_SLHDSA_CASE
 		default:
 			return CKR_MECHANISM_INVALID;
+	}
+
+	// Reject unexpected parameters for parameterless mechanisms
+	if (param == NULL && pMechanism->pParameter != NULL_PTR)
+	{
+		ERROR_MSG("Mechanism does not accept parameters");
+		return CKR_MECHANISM_PARAM_INVALID;
 	}
 
 	AsymmetricAlgorithm* asymCrypto = NULL;
@@ -2227,6 +2346,11 @@ static CK_RV AsymVerify(Session* session, CK_BYTE_PTR pData, CK_ULONG ulDataLen,
 
 	// We must allow input length <= k and therfore need to prepend the data with zeroes.
 	if (mechanism == AsymMech::RSA) {
+		if (ulDataLen > size)
+		{
+			session->resetOp();
+			return CKR_DATA_LEN_RANGE;
+		}
 		data.wipe(size-ulDataLen);
 	}
 

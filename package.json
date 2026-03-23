@@ -19,7 +19,9 @@
     "index.js",
     "index.d.ts",
     "constants.js",
-    "constants.d.ts"
+    "constants.d.ts",
+    "rust/Cargo.toml",
+    "rust/Cargo.lock"
   ],
   "main": "index.js",
   "types": "index.d.ts",

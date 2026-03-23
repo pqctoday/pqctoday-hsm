@@ -64,7 +64,7 @@ set(MIN_PIN_LEN 4 CACHE STRING "Minimum PIN length")
 # ---- Build Type -------------------------------------------------------------
 
 if(NOT CMAKE_BUILD_TYPE)
-    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
 message(STATUS "Build Configuration: ${CMAKE_BUILD_TYPE}")

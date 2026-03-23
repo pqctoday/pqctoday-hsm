@@ -49,6 +49,34 @@ if [[ "$ACTUAL_SHA256" != "$OSSL_SHA256" ]]; then
 fi
 echo "[build-openssl-wasm] Checksum OK."
 
+# GPG signature verification (optional but recommended)
+ASC_FILE="${TARBALL}.asc"
+if [[ ! -f "$ASC_FILE" ]]; then
+    echo "[build-openssl-wasm] Downloading GPG signature..."
+    curl -fL "https://www.openssl.org/source/${ASC_FILE}" -o "$ASC_FILE" 2>/dev/null || true
+fi
+if command -v gpg &>/dev/null && [[ -f "$ASC_FILE" ]]; then
+    echo "[build-openssl-wasm] Verifying GPG signature..."
+    # OpenSSL release signing keys (https://www.openssl.org/community/otc.html)
+    GPG_KEYS=(
+        "8657ABB260F056B1E5190839D9C4D26D0E604491"
+        "B7C1C14360F353A36862E4D5231C84CDDCC69C45"
+        "A21FAB74B0088AA361152586B8EF1A6BA9DA2D5C"
+        "EFC0A467D613CB83C7ED6D30D894E2CE8B3D79F5"
+    )
+    for key in "${GPG_KEYS[@]}"; do
+        gpg --keyserver hkps://keys.openpgp.org --recv-keys "$key" 2>/dev/null || true
+    done
+    if gpg --verify "$ASC_FILE" "$TARBALL" 2>/dev/null; then
+        echo "[build-openssl-wasm] GPG signature verified OK."
+    else
+        echo "[build-openssl-wasm] WARNING: GPG signature verification FAILED." >&2
+        echo "[build-openssl-wasm] SHA-256 passed; proceeding with caution." >&2
+    fi
+else
+    echo "[build-openssl-wasm] NOTE: gpg not available; skipping signature verification."
+fi
+
 OSSL_SRC="$SRC_DIR/openssl-${OSSL_VERSION}"
 if [[ ! -d "$OSSL_SRC" ]]; then
     echo "[build-openssl-wasm] Extracting..."

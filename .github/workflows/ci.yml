@@ -132,6 +132,18 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  rust-audit:
+    name: Rust Dependency Audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+      - name: Run cargo audit
+        run: cd rust && cargo audit --deny warnings
+
       - name: Check for deprecated OpenSSL API usage
         run: |
           echo "=== Scanning for removed/deprecated OpenSSL 1.x APIs ==="

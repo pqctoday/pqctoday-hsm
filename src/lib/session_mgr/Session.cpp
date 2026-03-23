@@ -190,6 +190,8 @@ void Session::resetOp()
 
 	if (param != NULL)
 	{
+		// Securely wipe param in case it contains key material (e.g. GcmMsgCtx)
+		memset(param, 0, paramLen);
 		free(param);
 		param = NULL;
 		paramLen = 0;

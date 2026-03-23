@@ -1003,6 +1003,7 @@ dependencies = [
  "slh-dsa",
  "sp800-185",
  "spki 0.8.0-rc.4",
+ "subtle",
  "wasm-bindgen",
  "web-sys",
  "x25519-dalek",

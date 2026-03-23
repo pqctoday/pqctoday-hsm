@@ -291,7 +291,10 @@ CK_RV P11Attribute::retrieve(Token *token, bool isPrivate, CK_VOID_PTR pValue, C
 		}
 		else if (attr.isAttributeMapAttribute())
 		{
-			attrSize = attr.getAttributeMapValue().size() * sizeof(CK_ATTRIBUTE);
+			size_t mapSize = attr.getAttributeMapValue().size();
+			if (mapSize > SIZE_MAX / sizeof(CK_ATTRIBUTE))
+				return CKR_GENERAL_ERROR;
+			attrSize = mapSize * sizeof(CK_ATTRIBUTE);
 		}
 		else
 		{
@@ -340,8 +343,10 @@ CK_RV P11Attribute::retrieve(Token *token, bool isPrivate, CK_VOID_PTR pValue, C
 					return CKR_GENERAL_ERROR;
 				}
 				if (value.size() !=  0) {
+					// Use actual decrypted size to prevent buffer overread
+					size_t copyLen = (value.size() < attrSize) ? value.size() : attrSize;
 					const unsigned char* attrPtr = value.const_byte_str();
-					memcpy(pValue,attrPtr,attrSize);
+					memcpy(pValue, attrPtr, copyLen);
 				}
 			}
 			else if (attr.getByteStringValue().size() != 0)

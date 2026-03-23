@@ -150,7 +150,12 @@ bool OSSLECDSA::sign(PrivateKey* privateKey, const ByteString& dataToSign,
 	{
 		// Raw ECDSA: sign the pre-hashed bytes directly via EVP_PKEY_sign
 		EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(pkey, NULL);
-		if (ctx == NULL || EVP_PKEY_sign_init(ctx) <= 0)
+		if (ctx == NULL)
+		{
+			ERROR_MSG("ECDSA EVP_PKEY_CTX_new failed");
+			return false;
+		}
+		if (EVP_PKEY_sign_init(ctx) <= 0)
 		{
 			ERROR_MSG("ECDSA sign init failed (0x%08X)", ERR_get_error());
 			EVP_PKEY_CTX_free(ctx);
@@ -180,7 +185,12 @@ bool OSSLECDSA::sign(PrivateKey* privateKey, const ByteString& dataToSign,
 	{
 		// Hash-then-sign via EVP_DigestSign
 		EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-		if (ctx == NULL || EVP_DigestSignInit(ctx, NULL, md, NULL, pkey) <= 0)
+		if (ctx == NULL)
+		{
+			ERROR_MSG("ECDSA EVP_MD_CTX_new failed");
+			return false;
+		}
+		if (EVP_DigestSignInit(ctx, NULL, md, NULL, pkey) <= 0)
 		{
 			ERROR_MSG("ECDSA DigestSign init failed (0x%08X)", ERR_get_error());
 			EVP_MD_CTX_free(ctx);
@@ -304,7 +314,13 @@ bool OSSLECDSA::verify(PublicKey* publicKey, const ByteString& originalData,
 	{
 		// Raw ECDSA: verify the pre-hashed bytes
 		EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(pkey, NULL);
-		if (ctx == NULL || EVP_PKEY_verify_init(ctx) <= 0)
+		if (ctx == NULL)
+		{
+			ERROR_MSG("ECDSA EVP_PKEY_CTX_new failed");
+			OPENSSL_free(derSig);
+			return false;
+		}
+		if (EVP_PKEY_verify_init(ctx) <= 0)
 		{
 			ERROR_MSG("ECDSA verify init failed (0x%08X)", ERR_get_error());
 			EVP_PKEY_CTX_free(ctx);
@@ -319,7 +335,13 @@ bool OSSLECDSA::verify(PublicKey* publicKey, const ByteString& originalData,
 	{
 		// Hash-then-verify
 		EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-		if (ctx == NULL || EVP_DigestVerifyInit(ctx, NULL, md, NULL, pkey) <= 0)
+		if (ctx == NULL)
+		{
+			ERROR_MSG("ECDSA EVP_MD_CTX_new failed");
+			OPENSSL_free(derSig);
+			return false;
+		}
+		if (EVP_DigestVerifyInit(ctx, NULL, md, NULL, pkey) <= 0)
 		{
 			ERROR_MSG("ECDSA DigestVerify init failed (0x%08X)", ERR_get_error());
 			EVP_MD_CTX_free(ctx);

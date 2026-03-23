@@ -74,6 +74,16 @@ if(ENABLE_64BIT)
     endif(CMAKE_SIZEOF_VOID_P STREQUAL "8")
 endif(ENABLE_64BIT)
 
+# Security hardening flags (stack protector, full RELRO)
+if(NOT EMSCRIPTEN AND NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+    enable_cxx_compiler_flag_if_supported(-fstack-protector-strong)
+    # Full RELRO and non-executable stack (Linux linker only, not Apple)
+    if(NOT APPLE)
+        add_link_options(-Wl,-z,relro -Wl,-z,now)
+        add_link_options(-Wl,-z,noexecstack)
+    endif()
+endif()
+
 # Equivalent of acx_visibility.m4
 if(DISABLE_VISIBILITY)
     message(STATUS "-fvisibility=hidden has been disabled")

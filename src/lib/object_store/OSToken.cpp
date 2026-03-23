@@ -101,7 +101,8 @@ OSToken::OSToken(const std::string inTokenPath, int inUmask)
 	// Set the initial attributes
 	CK_ULONG flags =
 		CKF_RNG |
-		CKF_LOGIN_REQUIRED | // FIXME: check
+		CKF_LOGIN_REQUIRED | // PKCS#11 v3.2 §5.6: normal user must C_Login before
+		                     // accessing private objects. Correct default for PIN-protected token.
 		CKF_RESTORE_KEY_NOT_NEEDED |
 		CKF_TOKEN_INITIALIZED |
 		CKF_SO_PIN_LOCKED |

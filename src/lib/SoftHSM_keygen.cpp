@@ -510,12 +510,14 @@ CK_RV SoftHSM::WrapKeySym
 #endif
 		case CKM_AES_CBC:
 			algo = SymAlgo::AES;
+			mode = SymWrap::AES_KEYWRAP;
 			break;
-			
+
 		case CKM_AES_CBC_PAD:
 			blocksize = 16;
 			wrappedlen = RFC5652Pad(keydata, blocksize);
 			algo = SymAlgo::AES;
+			mode = SymWrap::AES_KEYWRAP_PAD;
 			break;
 			
 		default:
@@ -667,6 +669,10 @@ CK_RV SoftHSM::WrapMechRsaAesKw
 	CK_KEY_TYPE emphKeyType = CKK_AES;
 	CK_BBOOL bFalse = CK_FALSE;
 	CK_BBOOL bTrue = CK_TRUE;
+	// Ephemeral AES key for RSA-AES key wrapping (session-only, destroyed immediately after use).
+	// CKA_EXTRACTABLE=TRUE is intentional: the key is used only during this wrap operation
+	// and is destroyed at function exit. CKA_SENSITIVE is not set because the key lifetime
+	// is bounded to this function scope.
 	CK_ATTRIBUTE emph_temp[] = {
 		{CKA_CLASS, &emphKeyClass, sizeof(CK_OBJECT_CLASS)},
 		{CKA_KEY_TYPE, &emphKeyType, sizeof(CK_KEY_TYPE)},
@@ -1058,6 +1064,7 @@ CK_RV SoftHSM::UnwrapKeySym
 #endif
 	        case CKM_AES_CBC_PAD:
 			algo = SymAlgo::AES;
+			mode = SymWrap::AES_KEYWRAP_PAD;
 			// Block-size validation (multiples of AES_BLOCK_BYTES) was
 			// already enforced in C_UnwrapKey before this helper is called.
 			break;

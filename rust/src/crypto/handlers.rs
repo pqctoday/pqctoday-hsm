@@ -708,8 +708,9 @@ pub fn verify_slh_dsa(ps: u32, pk_bytes: &[u8], msg: &[u8], sig_bytes: &[u8]) ->
 }
 
 pub fn verify_hmac(mech: u32, key_bytes: &[u8], msg: &[u8], sig_bytes: &[u8]) -> Result<(), u32> {
+    use subtle::ConstantTimeEq;
     let expected = sign_hmac(mech, key_bytes, msg)?;
-    if expected.len() == sig_bytes.len() && expected == sig_bytes {
+    if expected.len() == sig_bytes.len() && expected.ct_eq(sig_bytes).into() {
         Ok(())
     } else {
         Err(CKR_SIGNATURE_INVALID)

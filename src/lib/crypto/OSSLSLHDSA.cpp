@@ -119,6 +119,25 @@ static const SLHDSAPreHashInfo* getSLHDSAPreHashInfo(HashAlgo::Type hashAlg)
 	}
 }
 
+// Free lazily-cached EVP_MD* objects — called from C_Finalize (CR-03)
+void OSSLSLHDSA_cleanupPreHashCache()
+{
+	static const HashAlgo::Type allAlgs[] = {
+		HashAlgo::SHA224, HashAlgo::SHA256, HashAlgo::SHA384, HashAlgo::SHA512,
+		HashAlgo::SHA3_224, HashAlgo::SHA3_256, HashAlgo::SHA3_384, HashAlgo::SHA3_512,
+		HashAlgo::SHAKE128, HashAlgo::SHAKE256
+	};
+	for (auto alg : allAlgs)
+	{
+		const SLHDSAPreHashInfo* info = getSLHDSAPreHashInfo(alg);
+		if (info && info->md)
+		{
+			EVP_MD_free(info->md);
+			info->md = NULL;
+		}
+	}
+}
+
 // Build HashSLH-DSA message: M' = 0x01 || len(ctx) || ctx || OID || PH(M)
 // per FIPS 205 §10.1
 static bool buildSLHDSAPreHashMsg(const ByteString& message,
@@ -148,13 +167,18 @@ static bool buildSLHDSAPreHashMsg(const ByteString& message,
 	{
 		// SHAKE requires EVP_DigestFinalXOF for fixed-length output
 		EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
-		if (!mdctx) return false;
+		if (!mdctx)
+		{
+			OPENSSL_cleanse(digest, sizeof(digest));
+			return false;
+		}
 		bool ok = EVP_DigestInit_ex(mdctx, info->md, NULL) &&
 		          EVP_DigestUpdate(mdctx, message.const_byte_str(), message.size()) &&
 		          EVP_DigestFinalXOF(mdctx, digest, info->digestLen);
 		EVP_MD_CTX_free(mdctx);
 		if (!ok)
 		{
+			OPENSSL_cleanse(digest, sizeof(digest));
 			ERROR_MSG("SHAKE hash failed for pre-hash SLH-DSA");
 			return false;
 		}
@@ -165,13 +189,21 @@ static bool buildSLHDSAPreHashMsg(const ByteString& message,
 		if (!EVP_Digest(message.const_byte_str(), message.size(),
 		                digest, &dLen, info->md, NULL))
 		{
+			OPENSSL_cleanse(digest, sizeof(digest));
 			ERROR_MSG("Hash failed for pre-hash SLH-DSA (%s)", info->evpName);
 			return false;
 		}
 	}
 
 	// Build M' = 0x01 || len(ctx) || ctx || AlgId_DER || H(M)
-	size_t totalLen = 1 + 1 + params->contextLen + info->algIdDerLen + info->digestLen;
+	// Overflow guard: contextLen <= 255, algIdDerLen <= 15, digestLen <= 64 (max 336).
+	size_t totalLen = 1 + 1;
+	if (params->contextLen > SIZE_MAX - totalLen) { OPENSSL_cleanse(digest, sizeof(digest)); return false; }
+	totalLen += params->contextLen;
+	if (info->algIdDerLen > SIZE_MAX - totalLen) { OPENSSL_cleanse(digest, sizeof(digest)); return false; }
+	totalLen += info->algIdDerLen;
+	if (info->digestLen > SIZE_MAX - totalLen) { OPENSSL_cleanse(digest, sizeof(digest)); return false; }
+	totalLen += info->digestLen;
 	encoded.resize(totalLen);
 	size_t off = 0;
 	encoded[off++] = 0x01;  // pre-hash domain separator (FIPS 205 §10.1)
@@ -184,6 +216,7 @@ static bool buildSLHDSAPreHashMsg(const ByteString& message,
 	memcpy(&encoded[off], info->algIdDer, info->algIdDerLen);
 	off += info->algIdDerLen;
 	memcpy(&encoded[off], digest, info->digestLen);
+	OPENSSL_cleanse(digest, sizeof(digest));
 
 	return true;
 }

@@ -46,12 +46,23 @@
 #include "HandleManager.h"
 #include "Session.h"
 #include "log.h"
+#include <openssl/rand.h>
 
 // Constructor
 HandleManager::HandleManager()
 {
 	handlesMutex = MutexFactory::i()->getMutex();
-	handleCounter = 0;
+	// Seed handle counter with a random offset to prevent predictable handles
+	CK_ULONG seed = 0;
+	if (RAND_bytes(reinterpret_cast<unsigned char*>(&seed), sizeof(seed)) == 1)
+	{
+		// Use lower 20 bits as offset (up to ~1M), preserving ample handle space
+		handleCounter = seed & 0xFFFFF;
+	}
+	else
+	{
+		handleCounter = 0;
+	}
 }
 
 // Destructor

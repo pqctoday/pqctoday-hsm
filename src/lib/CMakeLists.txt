@@ -146,6 +146,7 @@ if(EMSCRIPTEN)
         "-sEXPORTED_RUNTIME_METHODS=['FS','getValue','setValue','UTF8ToString','stringToUTF8','lengthBytesUTF8','HEAPU8','HEAP32']"
         "-sALLOW_MEMORY_GROWTH=1"
         "-sINITIAL_MEMORY=67108864"
+        "-sMAXIMUM_MEMORY=536870912"
         "-sFORCE_FILESYSTEM=1"
         "-sENVIRONMENT=node,web"
         "--pre-js" "${CMAKE_SOURCE_DIR}/src/wasm/softhsm_pre.js"

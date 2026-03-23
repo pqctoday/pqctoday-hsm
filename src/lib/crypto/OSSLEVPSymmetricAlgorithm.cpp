@@ -146,6 +146,7 @@ bool OSSLEVPSymmetricAlgorithm::encryptInit(const SymmetricKey* key, const SymMo
 	{
 		ERROR_MSG("Failed to initialise EVP encrypt operation");
 
+		iv.wipe();
 		ByteString dummy;
 		SymmetricAlgorithm::encryptFinal(dummy);
 
@@ -159,6 +160,7 @@ bool OSSLEVPSymmetricAlgorithm::encryptInit(const SymmetricKey* key, const SymMo
 	{
 		ERROR_MSG("Failed to allocate space for EVP_CIPHER_CTX");
 
+		iv.wipe();
 		ByteString dummy;
 		SymmetricAlgorithm::encryptFinal(dummy);
 
@@ -187,6 +189,7 @@ bool OSSLEVPSymmetricAlgorithm::encryptInit(const SymmetricKey* key, const SymMo
 
 		clean();
 
+		iv.wipe();
 		ByteString dummy;
 		SymmetricAlgorithm::encryptFinal(dummy);
 
@@ -207,10 +210,12 @@ bool OSSLEVPSymmetricAlgorithm::encryptInit(const SymmetricKey* key, const SymMo
 			ByteString dummy;
 			SymmetricAlgorithm::encryptFinal(dummy);
 
+			iv.wipe();
 			return false;
 		}
 	}
 
+	iv.wipe();
 	return true;
 }
 
@@ -339,6 +344,7 @@ bool OSSLEVPSymmetricAlgorithm::decryptInit(const SymmetricKey* key, const SymMo
 	{
 		ERROR_MSG("Failed to initialise EVP decrypt operation");
 
+		iv.wipe();
 		ByteString dummy;
 		SymmetricAlgorithm::decryptFinal(dummy);
 
@@ -352,6 +358,7 @@ bool OSSLEVPSymmetricAlgorithm::decryptInit(const SymmetricKey* key, const SymMo
 	{
 		ERROR_MSG("Failed to allocate space for EVP_CIPHER_CTX");
 
+		iv.wipe();
 		ByteString dummy;
 		SymmetricAlgorithm::decryptFinal(dummy);
 
@@ -380,6 +387,7 @@ bool OSSLEVPSymmetricAlgorithm::decryptInit(const SymmetricKey* key, const SymMo
 
 		clean();
 
+		iv.wipe();
 		ByteString dummy;
 		SymmetricAlgorithm::decryptFinal(dummy);
 
@@ -400,10 +408,12 @@ bool OSSLEVPSymmetricAlgorithm::decryptInit(const SymmetricKey* key, const SymMo
 			ByteString dummy;
 			SymmetricAlgorithm::decryptFinal(dummy);
 
+			iv.wipe();
 			return false;
 		}
 	}
 
+	iv.wipe();
 	return true;
 }
 

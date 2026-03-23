@@ -70,8 +70,16 @@ pub fn C_Initialize(p_init_args: *mut u8) -> u32 {
 
 #[wasm_bindgen(js_name = _C_Finalize)]
 pub fn C_Finalize(_p_reserved: *mut u8) -> u32 {
-    // Full reset: clear all objects, handles, and operation state
-    OBJECTS.with(|o| o.borrow_mut().clear());
+    // Zeroize all key material (CKA_VALUE) before clearing object store
+    OBJECTS.with(|o| {
+        let mut store = o.borrow_mut();
+        for attrs in store.values_mut() {
+            if let Some(val) = attrs.get_mut(&CKA_VALUE) {
+                val.zeroize();
+            }
+        }
+        store.clear();
+    });
     NEXT_HANDLE.with(|h| *h.borrow_mut() = 100);
     SIGN_STATE.with(|s| s.borrow_mut().clear());
     VERIFY_STATE.with(|s| s.borrow_mut().clear());
@@ -85,6 +93,9 @@ pub fn C_Finalize(_p_reserved: *mut u8) -> u32 {
 
 #[wasm_bindgen(js_name = _C_GetSlotList)]
 pub fn C_GetSlotList(_token_present: u8, p_slot_list: *mut u32, pul_count: *mut u32) -> u32 {
+    if pul_count.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
     unsafe {
         if p_slot_list.is_null() {
             *pul_count = 1;
@@ -109,6 +120,9 @@ pub fn C_OpenSession(
     _notify: *mut u8,
     ph_session: *mut u32,
 ) -> u32 {
+    if ph_session.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
     unsafe {
         *ph_session = NEXT_SESSION_HANDLE.fetch_add(1, Ordering::Relaxed);
     }
@@ -274,6 +288,9 @@ pub fn C_GenerateKeyPair(
     ph_public_key: *mut u32,
     ph_private_key: *mut u32,
 ) -> u32 {
+    if ph_public_key.is_null() || ph_private_key.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
     unsafe {
         let mech_type = *(p_mechanism as *const u32);
         match mech_type {
@@ -872,6 +889,9 @@ pub fn C_GenerateKey(
     ul_count: u32,
     ph_key: *mut u32,
 ) -> u32 {
+    if ph_key.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
     unsafe {
         let mech_type = *(p_mechanism as *const u32);
         match mech_type {
@@ -963,7 +983,10 @@ pub fn C_EncapsulateKey(
     ph_key: *mut u32,
 ) -> u32 {
     use ml_kem::{kem::Encapsulate, EncodedSizeUser, KemCore};
-    
+
+    if ph_key.is_null() || pul_ciphertext_len.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
     unsafe {
         let mech_type = *(p_mechanism as *const u32);
         if mech_type != CKM_ML_KEM {
@@ -1049,6 +1072,9 @@ pub fn C_DecapsulateKey(
 ) -> u32 {
     use ml_kem::{kem::Decapsulate, EncodedSizeUser, KemCore};
 
+    if ph_key.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
     unsafe {
         let mech_type = *(p_mechanism as *const u32);
         if mech_type != CKM_ML_KEM {
@@ -1207,7 +1233,18 @@ pub fn C_CreateObject(
 
 #[wasm_bindgen(js_name = _C_DestroyObject)]
 pub fn C_DestroyObject(_h_session: u32, h_object: u32) -> u32 {
-    let removed = OBJECTS.with(|objs| objs.borrow_mut().remove(&h_object).is_some());
+    let removed = OBJECTS.with(|objs| {
+        let mut store = objs.borrow_mut();
+        if let Some(mut attrs) = store.remove(&h_object) {
+            // Zeroize key material before deallocation (RS-02)
+            if let Some(val) = attrs.get_mut(&CKA_VALUE) {
+                val.zeroize();
+            }
+            true
+        } else {
+            false
+        }
+    });
     if removed {
         // PKCS#11 v3.2: clean up any active operation state referencing the destroyed key.
         // Without this, a session that called C_SignInit then C_DestroyObject would hold a
@@ -1440,7 +1477,8 @@ pub fn C_Verify(
             | CKM_SHA3_512_HMAC => verify_hmac(eff_mech, &pk_bytes, eff_msg, sig_bytes),
             CKM_KMAC_128 | CKM_KMAC_256 => match sign_kmac(eff_mech, &pk_bytes, eff_msg) {
                 Ok(sig) => {
-                    if sig == sig_bytes {
+                    use subtle::ConstantTimeEq;
+                    if sig.len() == sig_bytes.len() && sig.ct_eq(sig_bytes).into() {
                         Ok(())
                     } else {
                         Err(CKR_SIGNATURE_INVALID)

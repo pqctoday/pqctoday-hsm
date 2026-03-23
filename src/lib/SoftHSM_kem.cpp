@@ -224,6 +224,8 @@ CK_RV SoftHSM::C_EncapsulateKey
 	CK_BBOOL isOnToken = CK_FALSE;
 	CK_BBOOL isPrivate = CK_TRUE;
 	CK_CERTIFICATE_TYPE dummy;
+	if (pTemplate == NULL_PTR && ulAttributeCount > 0)
+		return CKR_ARGUMENTS_BAD;
 	rv = extractObjectInformation(pTemplate, ulAttributeCount, objClass, keyType, dummy, isOnToken, isPrivate, true);
 	if (rv != CKR_OK && rv != CKR_TEMPLATE_INCOMPLETE)
 	{
@@ -259,8 +261,10 @@ CK_RV SoftHSM::C_EncapsulateKey
 			case CKA_PRIVATE:
 			case CKA_KEY_TYPE:
 			case CKA_VALUE:
-				continue;
+				return CKR_ATTRIBUTE_VALUE_INVALID;
 			default:
+				if (secretAttribsCount >= maxAttribs)
+					return CKR_TEMPLATE_INCONSISTENT;
 				secretAttribs[secretAttribsCount++] = pTemplate[i];
 		}
 	}
@@ -288,6 +292,8 @@ CK_RV SoftHSM::C_EncapsulateKey
 	else
 		storedValue = sharedSecret;
 	bOK = bOK && osobject->setAttribute(CKA_VALUE, storedValue);
+	sharedSecret.wipe();
+	storedValue.wipe();
 
 	if (bOK)
 		bOK = osobject->commitTransaction();
@@ -400,6 +406,8 @@ CK_RV SoftHSM::C_DecapsulateKey
 	CK_BBOOL isOnToken = CK_FALSE;
 	CK_BBOOL isPrivate = CK_TRUE;
 	CK_CERTIFICATE_TYPE dummy;
+	if (pTemplate == NULL_PTR && ulAttributeCount > 0)
+		return CKR_ARGUMENTS_BAD;
 	rv = extractObjectInformation(pTemplate, ulAttributeCount, objClass, keyType, dummy, isOnToken, isPrivate, true);
 	if (rv != CKR_OK && rv != CKR_TEMPLATE_INCOMPLETE)
 	{
@@ -435,8 +443,10 @@ CK_RV SoftHSM::C_DecapsulateKey
 			case CKA_PRIVATE:
 			case CKA_KEY_TYPE:
 			case CKA_VALUE:
-				continue;
+				return CKR_ATTRIBUTE_VALUE_INVALID;
 			default:
+				if (secretAttribsCount >= maxAttribs)
+					return CKR_TEMPLATE_INCONSISTENT;
 				secretAttribs[secretAttribsCount++] = pTemplate[i];
 		}
 	}
@@ -464,6 +474,8 @@ CK_RV SoftHSM::C_DecapsulateKey
 	else
 		storedValue = sharedSecret;
 	bOK = bOK && osobject->setAttribute(CKA_VALUE, storedValue);
+	sharedSecret.wipe();
+	storedValue.wipe();
 
 	if (bOK)
 		bOK = osobject->commitTransaction();

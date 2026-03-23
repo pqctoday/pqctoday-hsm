@@ -259,6 +259,12 @@ CK_RV SoftHSM::C_Finalize(CK_VOID_PTR pReserved)
 	extern void OSSLRNG_disableACVP();
 	OSSLRNG_disableACVP();
 
+	// Free lazily-cached EVP_MD* objects from pre-hash tables (CR-03)
+	extern void OSSLMLDSA_cleanupPreHashCache();
+	extern void OSSLSLHDSA_cleanupPreHashCache();
+	OSSLMLDSA_cleanupPreHashCache();
+	OSSLSLHDSA_cleanupPreHashCache();
+
 	isInitialised = false;
 
 	supportedMechanisms.clear();
