@@ -10,6 +10,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.1] — 2026-03-29
+
+### Security
+
+- **OpenSSL 3.6.0 → 3.6.1:** 9 CVE fixes including TLS 1.3 CompressedCertificate
+  excessive memory allocation (CVE-2025-66199), CMS AuthEnvelopedData stack buffer
+  overflow (CVE-2025-15467), and OCSP stapling regression.
+
+### Fixed
+
+- **C_EncapsulateKey / C_DecapsulateKey template rejection (CKR 0x13):**
+  `extractObjectInformation()` parsed CKA_CLASS, CKA_TOKEN, CKA_PRIVATE, and
+  CKA_KEY_TYPE from the caller's template, then a subsequent loop rejected those
+  same attributes with `CKR_ATTRIBUTE_VALUE_INVALID` instead of skipping them.
+  Full ML-KEM-768 encapsulate → decapsulate → shared-secret-match flow now passes.
+- **handle_mgr missing OpenSSL include path:** `HandleManager.cpp` includes
+  `<openssl/rand.h>` but `CMakeLists.txt` was missing `${CRYPTO_INCLUDES}`,
+  causing `fatal error: 'openssl/rand.h' file not found` on clean WASM builds.
+
+---
+
 ## [0.4.0] — 2026-03-22
 
 ### Security
