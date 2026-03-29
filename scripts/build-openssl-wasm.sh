@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-openssl-wasm.sh — Build OpenSSL 3.6.0 as a static WASM library.
+# build-openssl-wasm.sh — Build OpenSSL 3.6.1 as a static WASM library.
 #
 # Output: deps/openssl-wasm/lib/libcrypto.a  (+ headers in deps/openssl-wasm/include/)
 # Idempotent: skips the build if the output already exists.
@@ -8,8 +8,8 @@
 
 set -euo pipefail
 
-OSSL_VERSION=3.6.0
-OSSL_SHA256="b6a5f44b7eb69e3fa35dbf15524405b44837a481d43d81daddde3ff21fcbb8e9"
+OSSL_VERSION=3.6.1
+OSSL_SHA256="b1bfedcd5b289ff22aee87c9d600f515767ebf45f77168cb6d64f231f518a82e"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -86,7 +86,7 @@ fi
 cd "$OSSL_SRC"
 
 echo "[build-openssl-wasm] Configuring OpenSSL ${OSSL_VERSION} for Emscripten (linux-generic32 + emcc)..."
-# OpenSSL 3.6.0 does not have a built-in wasm32-unknown-emscripten target.
+# OpenSSL 3.6.x does not have a built-in wasm32-unknown-emscripten target.
 # Use linux-generic32 with emcc/emar/emranlib as the cross-compiler toolchain.
 # Do NOT use 'emcmake' — that is for CMake projects, not OpenSSL's Perl Configure.
 env CC=emcc AR=emar RANLIB=emranlib perl "$OSSL_SRC/Configure" linux-generic32 \

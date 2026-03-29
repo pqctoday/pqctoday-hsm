@@ -256,10 +256,13 @@ CK_RV SoftHSM::C_EncapsulateKey
 	{
 		switch (pTemplate[i].type)
 		{
+			// Already extracted by extractObjectInformation — skip, don't reject
 			case CKA_CLASS:
 			case CKA_TOKEN:
 			case CKA_PRIVATE:
 			case CKA_KEY_TYPE:
+				continue;
+			// CKA_VALUE must not be caller-supplied for encapsulated keys
 			case CKA_VALUE:
 				return CKR_ATTRIBUTE_VALUE_INVALID;
 			default:
@@ -438,10 +441,13 @@ CK_RV SoftHSM::C_DecapsulateKey
 	{
 		switch (pTemplate[i].type)
 		{
+			// Already extracted by extractObjectInformation — skip, don't reject
 			case CKA_CLASS:
 			case CKA_TOKEN:
 			case CKA_PRIVATE:
 			case CKA_KEY_TYPE:
+				continue;
+			// CKA_VALUE must not be caller-supplied for decapsulated keys
 			case CKA_VALUE:
 				return CKR_ATTRIBUTE_VALUE_INVALID;
 			default:
