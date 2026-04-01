@@ -600,3 +600,5 @@ Note: KMAC is not yet assigned a standard CKM value in PKCS#11 v3.2 CSD01; vendo
 - `test_slh_dsa_sign_verify_with_context` — sign+verify with context, wrong context fails
 - `test_slh_dsa_deterministic_produces_same_signature` — same message twice → identical sigs
 - `test_slh_dsa_context_cross_verify_fails_on_mismatch` — sign with "sign-ctx", verify with "verify-ctx" → `CKR_SIGNATURE_INVALID`
+
+**Bugfix (v9.1):** `C_SignMessage` and `C_VerifyMessage` were silently discarding context and deterministic flag on every call. Root cause: `AsymSign`/`AsymVerify` call `Session::resetOp()` which frees `param`. Since `C_SignMessage` is invoked twice per message in the two-pass pattern (size query + real sign), the params stored by `C_MessageSignInit` were wiped after the size query, so the actual sign ran with no context. Fix: snapshot `session->param` before `AsymSign`/`AsymVerify` and restore on success. Confirmed in browser ACVP tests 21 and 22 (context binding + deterministic).
