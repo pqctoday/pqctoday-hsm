@@ -1,6 +1,6 @@
 [package]
 name = "softhsmrustv3"
-version = "0.4.1"
+version = "0.4.3"
 edition = "2021"
 description = "A native Rust WebAssembly clone of SoftHSMv3"
 
@@ -38,6 +38,7 @@ signature = "3.0.0-rc.10"  # TODO: upgrade when stable release available
 slh-dsa = "=0.2.0-rc.4"  # TODO: upgrade when stable release available
 spki = { version = "0.8.0-rc.4", features = ["alloc"] }  # TODO: upgrade when stable release available
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+x448 = { version = "0.14.0-pre.8", default-features = false, features = ["static_secrets"] }
 console_error_panic_hook = "0.1.7"
 zeroize = "1"
 subtle = "2"

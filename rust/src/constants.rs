@@ -41,6 +41,7 @@ pub const CKK_EC: u32 = 0x0000_0003; // ECDSA (P-256, P-384)
 pub const CKK_GENERIC_SECRET: u32 = 0x0000_0010;
 pub const CKK_AES: u32 = 0x0000_001f;
 pub const CKK_EC_EDWARDS: u32 = 0x0000_0040; // EdDSA (Ed25519)
+pub const CKK_EC_MONTGOMERY: u32 = 0x0000_0041; // X25519 (PKCS#11 v3.2 §6.7)
 pub const CKK_ML_KEM: u32 = 0x0000_0049;
 pub const CKK_ML_DSA: u32 = 0x0000_004a;
 pub const CKK_SLH_DSA: u32 = 0x0000_004b;
@@ -151,6 +152,10 @@ pub const CKM_HASH_SLH_DSA_SHA3_512: u32 = 0x0000_003d;
 pub const CKM_HASH_SLH_DSA_SHAKE128: u32 = 0x0000_003e;
 pub const CKM_HASH_SLH_DSA_SHAKE256: u32 = 0x0000_003f;
 
+// PKCS#11 v3.2 §5.2.12 — X9.63 KDF with SHA3
+pub const CKD_SHA3_256_KDF: u32 = 0x0000_000B; // PKCS#11 v3.2 §5.2.12 — SHA3-256 X9.63 KDF
+pub const CKD_SHA3_512_KDF: u32 = 0x0000_000D; // PKCS#11 v3.2 §5.2.12 — SHA3-512 X9.63 KDF
+
 // PBKDF2 PRF types
 pub const CKP_PBKDF2_HMAC_SHA256: u32 = 0x04;
 pub const CKP_PBKDF2_HMAC_SHA384: u32 = 0x05;
@@ -174,7 +179,9 @@ pub const CKM_ECDSA_SHA3_512: u32 = 0x0000_104a;
 pub const CKM_ECDH1_DERIVE: u32 = 0x0000_1050;
 pub const CKM_ECDH1_COFACTOR_DERIVE: u32 = 0x0000_1051;
 pub const CKM_EC_EDWARDS_KEY_PAIR_GEN: u32 = 0x0000_1055;
+pub const CKM_EC_MONTGOMERY_KEY_PAIR_GEN: u32 = 0x0000_1056; // PKCS#11 v3.2 §6.7 — X25519 keygen
 pub const CKM_EDDSA: u32 = 0x0000_1057;
+pub const CKM_EC_MONTGOMERY_KEY_DERIVE: u32 = 0x0000_1058; // Alias: ECDH1_DERIVE for X25519 keys
 // Internal-only: Ed25519ph (prehashed) — same PKCS#11 mechanism, dispatched via phFlag in params
 pub const CKM_EDDSA_PH: u32 = 0xFFFF_1057;
 
@@ -281,6 +288,8 @@ pub const SUPPORTED_MECHS: &[u32] = &[
     CKM_ECDH1_DERIVE,
     CKM_ECDH1_COFACTOR_DERIVE,
     CKM_EC_EDWARDS_KEY_PAIR_GEN,
+    CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
+    CKM_EC_MONTGOMERY_KEY_DERIVE,
     CKM_EDDSA,
     // AES
     CKM_AES_KEY_GEN,

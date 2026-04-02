@@ -24,6 +24,7 @@ pub const ALGO_ECDSA: u32 = 5;
 pub const ALGO_EDDSA: u32 = 6;
 pub const ALGO_ECDH_P256: u32 = 7;
 pub const ALGO_ECDH_X25519: u32 = 8;
+pub const ALGO_ECDH_X448: u32 = 9;
 
 // ECDSA curve identifiers (stored in CKA_PRIV_PARAM_SET)
 pub const CURVE_P256: u32 = 256;
@@ -207,8 +208,21 @@ pub fn build_ec_spki_p384(pt: &[u8]) -> Vec<u8> {
 
 /// Build SPKI DER for Ed25519 (id-EdDSA, OID 1.3.101.112) from a 32-byte key.
 pub fn build_ed25519_spki(pk: &[u8]) -> Vec<u8> {
-    // AlgId: 30 05 06 03 2b6570
+    // AlgId: 30 05 06 03 2b6570  (OID 1.3.101.112)
     let alg_id: &[u8] = &[0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70];
+    build_spki_from_parts(alg_id, pk)
+}
+
+pub fn build_x25519_spki(pk: &[u8]) -> Vec<u8> {
+    // AlgId: 30 05 06 03 2b656e  (OID 1.3.101.110 — id-X25519, RFC 8410)
+    let alg_id: &[u8] = &[0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6e];
+    build_spki_from_parts(alg_id, pk)
+}
+
+/// Build SPKI DER for X448 (id-X448, OID 1.3.101.111) from a 56-byte public key.
+pub fn build_x448_spki(pk: &[u8]) -> Vec<u8> {
+    // AlgId: 30 05 06 03 2b656f  (OID 1.3.101.111 — id-X448, RFC 8410)
+    let alg_id: &[u8] = &[0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x6f];
     build_spki_from_parts(alg_id, pk)
 }
 

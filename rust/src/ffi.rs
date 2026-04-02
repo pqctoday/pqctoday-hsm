@@ -221,9 +221,13 @@ pub fn C_GetMechanismInfo(_slot_id: u32, mech_type: u32, p_info: *mut u8) -> u32
         CKM_GENERIC_SECRET_KEY_GEN => (1, 512, 0x00008000),
         CKM_EC_KEY_PAIR_GEN => (256, 384, 0x00010000),
         CKM_ECDSA_SHA256 | CKM_ECDSA_SHA384 => (256, 384, 0x00000800 | 0x00002000),
-        CKM_ECDH1_DERIVE => (256, 384, 0x00080000),
+        CKM_ECDH1_DERIVE | CKM_ECDH1_COFACTOR_DERIVE => (256, 384, 0x00080000),
         CKM_EC_EDWARDS_KEY_PAIR_GEN => (255, 255, 0x00010000),
         CKM_EDDSA => (255, 255, 0x00000800 | 0x00002000),
+        // PKCS#11 v3.2 §6.7 — Montgomery-curve key pair generation (X25519=255-bit, X448=448-bit)
+        CKM_EC_MONTGOMERY_KEY_PAIR_GEN => (255, 448, 0x00010000),
+        // PKCS#11 v3.2 §6.7 — Montgomery key derivation (X25519 or X448)
+        CKM_EC_MONTGOMERY_KEY_DERIVE => (255, 448, 0x00080000),
         CKM_AES_KEY_GEN => (16, 32, 0x00008000),
         CKM_AES_GCM | CKM_AES_CBC_PAD => (16, 32, 0x00000100 | 0x00000200),
         CKM_AES_KEY_WRAP | CKM_AES_KEY_WRAP_KWP | CKM_AES_KEY_WRAP_PAD_LEGACY => {
@@ -257,8 +261,6 @@ pub fn C_GetMechanismInfo(_slot_id: u32, mech_type: u32, p_info: *mut u8) -> u32
         | CKM_ECDSA_SHA3_256
         | CKM_ECDSA_SHA3_384
         | CKM_ECDSA_SHA3_512 => (256, 384, 0x00000800 | 0x00002000),
-        // ECDH cofactor derivation
-        CKM_ECDH1_COFACTOR_DERIVE => (256, 384, 0x00080000),
         // Key derivation functions
         CKM_PKCS5_PBKD2
         | CKM_HKDF_DERIVE
@@ -858,6 +860,104 @@ pub fn C_GenerateKeyPair(
                 // 30 2a 30 05 06 03 2b6570 03 22 00 <32 bytes>
                 let spki = build_ed25519_spki(&vk_bytes);
                 pub_attrs.insert(CKA_PUBLIC_KEY_INFO, spki);
+                absorb_template_attrs(
+                    &mut pub_attrs,
+                    p_public_key_template,
+                    ul_public_key_attribute_count,
+                );
+                absorb_template_attrs(
+                    &mut prv_attrs,
+                    p_private_key_template,
+                    ul_private_key_attribute_count,
+                );
+                finalize_private_key_attrs(&mut prv_attrs);
+                compute_kcv(&mut pub_attrs);
+                compute_kcv(&mut prv_attrs);
+                *ph_public_key = allocate_handle(pub_attrs);
+                *ph_private_key = allocate_handle(prv_attrs);
+                CKR_OK
+            }
+
+            CKM_EC_MONTGOMERY_KEY_PAIR_GEN => {
+                // PKCS#11 v3.2 §6.7 — EC Montgomery key pair generation.
+                // Distinguish X25519 (OID last byte 0x6e) from X448 (OID last byte 0x6f)
+                // via CKA_EC_PARAMS in the public or private key template.
+                let oid_bytes = get_attr_bytes(
+                    p_public_key_template,
+                    ul_public_key_attribute_count,
+                    CKA_EC_PARAMS,
+                )
+                .or_else(|| {
+                    get_attr_bytes(
+                        p_private_key_template,
+                        ul_private_key_attribute_count,
+                        CKA_EC_PARAMS,
+                    )
+                });
+                let is_x448 = oid_bytes
+                    .as_ref()
+                    .and_then(|b| b.last().copied())
+                    .map(|last| last == 0x6f)
+                    .unwrap_or(false);
+
+                let mut pub_attrs = HashMap::new();
+                let mut prv_attrs = HashMap::new();
+                store_ulong(&mut pub_attrs, CKA_CLASS, CKO_PUBLIC_KEY);
+                store_ulong(&mut pub_attrs, CKA_KEY_TYPE, CKK_EC_MONTGOMERY);
+                store_bool(&mut pub_attrs, CKA_TOKEN, false);
+                store_bool(&mut pub_attrs, CKA_PRIVATE, false);
+                store_bool(&mut pub_attrs, CKA_ENCRYPT, false);
+                store_bool(&mut pub_attrs, CKA_VERIFY, false);
+                store_bool(&mut pub_attrs, CKA_WRAP, false);
+                store_bool(&mut pub_attrs, CKA_DERIVE, false);
+                store_bool(&mut pub_attrs, CKA_LOCAL, true);
+                store_ulong(&mut pub_attrs, CKA_KEY_GEN_MECHANISM, CKM_EC_MONTGOMERY_KEY_PAIR_GEN);
+                store_ulong(&mut prv_attrs, CKA_CLASS, CKO_PRIVATE_KEY);
+                store_ulong(&mut prv_attrs, CKA_KEY_TYPE, CKK_EC_MONTGOMERY);
+                store_bool(&mut prv_attrs, CKA_TOKEN, false);
+                store_bool(&mut prv_attrs, CKA_PRIVATE, true);
+                store_bool(&mut prv_attrs, CKA_SENSITIVE, true);
+                store_bool(&mut prv_attrs, CKA_EXTRACTABLE, false);
+                store_bool(&mut prv_attrs, CKA_DECRYPT, false);
+                store_bool(&mut prv_attrs, CKA_SIGN, false);
+                store_bool(&mut prv_attrs, CKA_UNWRAP, false);
+                store_bool(&mut prv_attrs, CKA_DERIVE, true);
+                store_bool(&mut prv_attrs, CKA_LOCAL, true);
+                store_ulong(&mut prv_attrs, CKA_KEY_GEN_MECHANISM, CKM_EC_MONTGOMERY_KEY_PAIR_GEN);
+
+                if is_x448 {
+                    // X448 — 56-byte keys (RFC 8410, OID 1.3.101.111)
+                    use x448::{PublicKey as X448PublicKey, StaticSecret as X448StaticSecret};
+                    let mut sk_bytes_arr = [0u8; 56];
+                    if getrandom::getrandom(&mut sk_bytes_arr).is_err() {
+                        return CKR_FUNCTION_FAILED;
+                    }
+                    let sk = X448StaticSecret::from(sk_bytes_arr);
+                    let pk = X448PublicKey::from(&sk);
+                    let pk_bytes = pk.as_bytes().to_vec();
+                    let sk_bytes = sk.as_bytes().to_vec();
+                    store_algo_family(&mut pub_attrs, ALGO_ECDH_X448);
+                    store_algo_family(&mut prv_attrs, ALGO_ECDH_X448);
+                    pub_attrs.insert(CKA_VALUE, pk_bytes.clone());
+                    prv_attrs.insert(CKA_VALUE, sk_bytes);
+                    let spki = build_x448_spki(&pk_bytes);
+                    pub_attrs.insert(CKA_PUBLIC_KEY_INFO, spki);
+                } else {
+                    // X25519 — 32-byte keys (RFC 8410, OID 1.3.101.110)
+                    let sk = with_rng!(rng, {
+                        x25519_dalek::StaticSecret::random_from_rng(&mut rng)
+                    });
+                    let pk = x25519_dalek::PublicKey::from(&sk);
+                    let pk_bytes = pk.as_bytes().to_vec();
+                    let sk_bytes = sk.to_bytes().to_vec();
+                    store_algo_family(&mut pub_attrs, ALGO_ECDH_X25519);
+                    store_algo_family(&mut prv_attrs, ALGO_ECDH_X25519);
+                    pub_attrs.insert(CKA_VALUE, pk_bytes.clone());
+                    prv_attrs.insert(CKA_VALUE, sk_bytes);
+                    let spki = build_x25519_spki(&pk_bytes);
+                    pub_attrs.insert(CKA_PUBLIC_KEY_INFO, spki);
+                }
+
                 absorb_template_attrs(
                     &mut pub_attrs,
                     p_public_key_template,
@@ -2349,7 +2449,7 @@ pub fn C_DeriveKey(
 
         let key_value: Vec<u8> = match mech_type {
             // ── ECDH ────────────────────────────────────────────────────────
-            CKM_ECDH1_DERIVE | CKM_ECDH1_COFACTOR_DERIVE => {
+            CKM_ECDH1_DERIVE | CKM_ECDH1_COFACTOR_DERIVE | CKM_EC_MONTGOMERY_KEY_DERIVE => {
                 let p_param = *(p_mechanism.add(4) as *const u32) as usize as *const u32;
                 if p_param.is_null() {
                     return CKR_ARGUMENTS_BAD;
@@ -2360,7 +2460,17 @@ pub fn C_DeriveKey(
                 if peer_pk_ptr.is_null() || peer_pk_len == 0 {
                     return CKR_ARGUMENTS_BAD;
                 }
-                let peer_pk_bytes = std::slice::from_raw_parts(peer_pk_ptr, peer_pk_len);
+                let peer_pk_raw = std::slice::from_raw_parts(peer_pk_ptr, peer_pk_len);
+                // Strip DER OCTET STRING wrapper if present: 0x04 <len> <point bytes>
+                // PKCS#11 v3.2 §2.3.5 allows either raw SEC1 or the DER-wrapped form.
+                let peer_pk_bytes: &[u8] = if peer_pk_raw.len() >= 3
+                    && peer_pk_raw[0] == 0x04
+                    && (peer_pk_raw[1] as usize) + 2 == peer_pk_raw.len()
+                {
+                    &peer_pk_raw[2..]
+                } else {
+                    peer_pk_raw
+                };
                 let our_sk_bytes = match get_object_value(h_base_key) {
                     Some(v) => v,
                     None => return CKR_ARGUMENTS_BAD,
@@ -2397,6 +2507,26 @@ pub fn C_DeriveKey(
                         pk_arr.zeroize();
                         result
                     }
+                    (ALGO_ECDH_X448, _) => {
+                        // X448 Diffie-Hellman (PKCS#11 v3.2 §6.7, RFC 7748 §6.2)
+                        use x448::{PublicKey as X448PublicKey, StaticSecret as X448StaticSecret};
+                        if our_sk_bytes.len() != 56 || peer_pk_bytes.len() != 56 {
+                            return CKR_KEY_TYPE_INCONSISTENT;
+                        }
+                        let mut sk_arr = [0u8; 56];
+                        sk_arr.copy_from_slice(&our_sk_bytes);
+                        let mut pk_arr = [0u8; 56];
+                        pk_arr.copy_from_slice(peer_pk_bytes);
+                        let pk = match X448PublicKey::from_bytes(&pk_arr) {
+                            Some(pk) => pk,
+                            None => return CKR_ARGUMENTS_BAD, // wrong length or low-order point
+                        };
+                        pk_arr.zeroize();
+                        // StaticSecret::from() applies RFC7748 clamping; zeroizes on drop
+                        let sk = X448StaticSecret::from(sk_arr);
+                        let shared = sk.diffie_hellman(&pk);
+                        shared.as_bytes().to_vec()
+                    }
                     _ => {
                         if our_sk_bytes.len() == 32 && peer_pk_bytes.len() == 65 {
                             let sk = match p256::NonZeroScalar::try_from(our_sk_bytes.as_slice()) {
@@ -2432,8 +2562,8 @@ pub fn C_DeriveKey(
                             shared
                         }
                     }
-                    0x00000006 /* CKD_SHA256_KDF */ 
-                    | 0x00000007 /* CKD_SHA384_KDF */ 
+                    0x00000006 /* CKD_SHA256_KDF */
+                    | 0x00000007 /* CKD_SHA384_KDF */
                     | 0x00000008 /* CKD_SHA512_KDF */ => {
                         use sha2::Digest;
                         macro_rules! x963_kdf {
@@ -2456,6 +2586,30 @@ pub fn C_DeriveKey(
                             0x00000007 => x963_kdf!(sha2::Sha384),
                             0x00000008 => x963_kdf!(sha2::Sha512),
                             _ => x963_kdf!(sha2::Sha256),
+                        }
+                    }
+                    CKD_SHA3_256_KDF | CKD_SHA3_512_KDF => {
+                        // PKCS#11 v3.2 §5.2.12 — X9.63 KDF with SHA3-256 / SHA3-512
+                        use sha3::Digest;
+                        macro_rules! x963_kdf_sha3 {
+                            ($Hash:ty) => {{
+                                let mut out = Vec::new();
+                                let mut counter: u32 = 1;
+                                while out.len() < key_len {
+                                    let mut hasher = <$Hash>::new();
+                                    hasher.update(&shared);
+                                    hasher.update(&counter.to_be_bytes());
+                                    hasher.update(shared_data);
+                                    out.extend_from_slice(&hasher.finalize());
+                                    counter += 1;
+                                }
+                                out.truncate(key_len);
+                                out
+                            }};
+                        }
+                        match kdf {
+                            CKD_SHA3_512_KDF => x963_kdf_sha3!(sha3::Sha3_512),
+                            _ => x963_kdf_sha3!(sha3::Sha3_256),
                         }
                     }
                     _ => return CKR_MECHANISM_INVALID,

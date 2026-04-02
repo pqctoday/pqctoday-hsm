@@ -108,11 +108,13 @@ static const char* ckdToDigestName(CK_ULONG kdf)
 {
 	switch (kdf)
 	{
-		case CKD_SHA1_KDF:   return "SHA-1";
-		case CKD_SHA256_KDF: return "SHA2-256";
-		case CKD_SHA384_KDF: return "SHA2-384";
-		case CKD_SHA512_KDF: return "SHA2-512";
-		default:             return nullptr;
+		case CKD_SHA1_KDF:    return "SHA-1";
+		case CKD_SHA256_KDF:  return "SHA2-256";
+		case CKD_SHA384_KDF:  return "SHA2-384";
+		case CKD_SHA512_KDF:  return "SHA2-512";
+		case CKD_SHA3_256_KDF: return "SHA3-256"; // PKCS#11 v3.2 §5.2.12
+		case CKD_SHA3_512_KDF: return "SHA3-512"; // PKCS#11 v3.2 §5.2.12
+		default:               return nullptr;
 	}
 }
 
@@ -1846,7 +1848,7 @@ CK_RV SoftHSM::C_UnwrapKeyAuthenticated
 		                                      isOnToken, isPrivate, isImplicit);
 		if (rv2 != CKR_OK) return rv2;
 	}
-	if (objClass != CKO_SECRET_KEY) return CKR_ATTRIBUTE_VALUE_INVALID; // private-key not yet supported
+	if (objClass != CKO_SECRET_KEY && objClass != CKO_PRIVATE_KEY) return CKR_ATTRIBUTE_VALUE_INVALID;
 
 	// Authorization check for creating the new object
 	{
@@ -1928,13 +1930,32 @@ CK_RV SoftHSM::C_UnwrapKeyAuthenticated
 			bOK = bOK && osobject->setAttribute(CKA_LOCAL, false);
 			bOK = bOK && osobject->setAttribute(CKA_ALWAYS_SENSITIVE, false);
 			bOK = bOK && osobject->setAttribute(CKA_NEVER_EXTRACTABLE, false);
-			ByteString value;
-			if (isPrivate)
-				token->encrypt(keydata, value);
+			if (objClass == CKO_SECRET_KEY)
+			{
+				ByteString value;
+				if (isPrivate)
+					token->encrypt(keydata, value);
+				else
+					value = keydata;
+				bOK = bOK && osobject->setAttribute(CKA_VALUE, value);
+				value.wipe();
+			}
+#ifdef WITH_ECC
+			else if (keyType == CKK_EC)
+			{
+				bOK = bOK && setECPrivateKey(osobject, keydata, token, isPrivate != CK_FALSE);
+			}
+#endif
+#ifdef WITH_EDDSA
+			else if (keyType == CKK_EC_EDWARDS || keyType == CKK_EC_MONTGOMERY)
+			{
+				bOK = bOK && setEDPrivateKey(osobject, keydata, token, isPrivate != CK_FALSE);
+			}
+#endif
 			else
-				value = keydata;
-			bOK = bOK && osobject->setAttribute(CKA_VALUE, value);
-			value.wipe();  // clear encrypted/plaintext value copy
+			{
+				bOK = false;
+			}
 			if (bOK)
 				bOK = osobject->commitTransaction();
 			else
@@ -6551,6 +6572,23 @@ bool SoftHSM::setRSAPrivateKey(OSObject* key, const ByteString &ber, Token* toke
 
 bool SoftHSM::setECPrivateKey(OSObject* key, const ByteString &ber, Token* token, bool isPrivate) const
 {
+	// Raw scalar path: hardware HSM flows (e.g. GSMA SUCI) wrap the raw 32-byte (P-256)
+	// or 48-byte (P-384) private scalar directly under AES-KEY-WRAP / AES-GCM without a
+	// PKCS#8 envelope.  Detect by size (never >48 for supported curves) and the absence
+	// of a DER SEQUENCE header (0x30).  CKA_EC_PARAMS must be in the unwrap template and
+	// is already stored on the object via C_CreateObject; only CKA_VALUE needs setting.
+	bool isRawScalar = (ber.size() == 32 || ber.size() == 48) &&
+	                   (ber.size() == 0 || ber.const_byte_str()[0] != 0x30);
+	if (isRawScalar)
+	{
+		ByteString value;
+		if (isPrivate)
+			token->encrypt(ber, value);
+		else
+			value = ber;
+		return key->setAttribute(CKA_VALUE, value);
+	}
+
 	AsymmetricAlgorithm* ecc = CryptoFactory::i()->getAsymmetricAlgorithm(AsymAlgo::ECDSA);
 	if (ecc == NULL)
 		return false;
