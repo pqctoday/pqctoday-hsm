@@ -29,6 +29,7 @@ pub const ALGO_ECDH_X448: u32 = 9;
 // ECDSA curve identifiers (stored in CKA_PRIV_PARAM_SET)
 pub const CURVE_P256: u32 = 256;
 pub const CURVE_P384: u32 = 384;
+pub const CURVE_K256: u32 = 257;
 
 // ── Object Store ─────────────────────────────────────────────────────────────
 
@@ -40,6 +41,8 @@ pub(crate) enum DigestCtx {
     Sha512(sha2::Sha512),
     Sha3_256(sha3::Sha3_256),
     Sha3_512(sha3::Sha3_512),
+    /// G11 — Keccak-256 (vendor CKM_KECCAK_256). Buffers data for single-shot finalize.
+    Keccak256(Vec<u8>),
 }
 
 pub struct FindCtx {
@@ -574,6 +577,13 @@ pub fn sign_ecdsa(mech: u32, curve: u32, sk_bytes: &[u8], msg: &[u8]) -> Result<
             let sig: p384::ecdsa::Signature = sk.sign(msg);
             Ok(sig.to_bytes().to_vec())
         }
+        (CKM_ECDSA_SHA256, CURVE_K256) => {
+            use k256::ecdsa::signature::Signer;
+            let sk = k256::ecdsa::SigningKey::from_slice(sk_bytes)
+                .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let sig: k256::ecdsa::Signature = sk.sign(msg);
+            Ok(sig.to_bytes().to_vec())
+        }
         // SHA-3 prehash variants on P-256 — manually hash then sign prehash bytes
         (CKM_ECDSA_SHA3_224, CURVE_P256)
         | (CKM_ECDSA_SHA3_224, 0)
@@ -665,6 +675,26 @@ pub fn get_sig_len(mech: u32, hkey: u32) -> u32 {
             CKP_SLH_DSA_SHA2_256S | CKP_SLH_DSA_SHAKE_256S => 29792,
             _ => 49856,
         },
+        // LMS/HSS — size depends on param set; compute from key attributes.
+        // Formula (RFC 8554): LMOTS sig = 4+n+p*n; LMS sig = 4+lmots_sig+4+h*n; HSS sig = 4+Npub*pub_size+Nsig*lms_sig
+        // For n=32: LMOTS(W1)=4+32+265*32=8724, LMOTS(W4)=4+32+67*32=2180, LMOTS(W8)=4+32+34*32=1124
+        // LMS(H5/W4)=2348, LMS(H25/W4)=8188; HSS(L=8,H5/W4) ≈ 8*(2348+52)+4 = 19204
+        // Return an upper bound based on LMS param set and levels; the actual write sets pul_sig_len precisely.
+        CKM_LMS => {
+            let lms_param = get_object_attr_u32(hkey, CKA_LMS_PARAM_SET)
+                .unwrap_or(CKP_LMS_SHA256_M32_H5);
+            let lmots_param = get_object_attr_u32(hkey, CKA_LMOTS_PARAM_SET)
+                .unwrap_or(CKP_LMOTS_SHA256_N32_W4);
+            lms_single_sig_len(lms_param, lmots_param)
+        }
+        CKM_HSS => {
+            let lms_param = get_object_attr_u32(hkey, CKA_LMS_PARAM_SET)
+                .unwrap_or(CKP_LMS_SHA256_M32_H5);
+            let lmots_param = get_object_attr_u32(hkey, CKA_LMOTS_PARAM_SET)
+                .unwrap_or(CKP_LMOTS_SHA256_N32_W4);
+            let levels = get_object_attr_u32(hkey, CKA_HSS_LMS_TYPE).unwrap_or(1);
+            hss_sig_len(levels, lms_param, lmots_param)
+        }
         CKM_SHA256_HMAC | CKM_SHA3_256_HMAC => 32,
         CKM_SHA384_HMAC => 48,
         CKM_SHA512_HMAC | CKM_SHA3_512_HMAC => 64,
@@ -676,6 +706,40 @@ pub fn get_sig_len(mech: u32, hkey: u32) -> u32 {
         CKM_EDDSA | CKM_EDDSA_PH => 64,
         _ => 512,
     }
+}
+
+/// Compute the byte length of a single-level LMS signature (RFC 8554 §5.4).
+/// n=32 (SHA-256/M32), p depends on W.
+pub fn lms_single_sig_len(lms_param: u32, lmots_param: u32) -> u32 {
+    let n = 32u32;
+    let p = match lmots_param {
+        CKP_LMOTS_SHA256_N32_W1 => 265u32,
+        CKP_LMOTS_SHA256_N32_W2 => 133,
+        CKP_LMOTS_SHA256_N32_W4 => 67,
+        CKP_LMOTS_SHA256_N32_W8 => 34,
+        _ => 67,
+    };
+    let h = match lms_param {
+        CKP_LMS_SHA256_M32_H5  => 5u32,
+        CKP_LMS_SHA256_M32_H10 => 10,
+        CKP_LMS_SHA256_M32_H15 => 15,
+        CKP_LMS_SHA256_M32_H20 => 20,
+        CKP_LMS_SHA256_M32_H25 => 25,
+        _ => 5,
+    };
+    let lmots_sig_len = 4 + n + p * n;           // typecode + C + y[]
+    let lms_sig_len = 4 + lmots_sig_len + 4 + h * n; // q + ots_sig + typecode + path[]
+    lms_sig_len
+}
+
+/// Compute the byte length of an HSS signature (RFC 8554 §6.3).
+/// LMS public key size = 4+16+32 = 52 bytes.
+pub fn hss_sig_len(levels: u32, lms_param: u32, lmots_param: u32) -> u32 {
+    let lms_sig = lms_single_sig_len(lms_param, lmots_param);
+    let lms_pub = 52u32; // typecode(4) + I(16) + T[1](32)
+    let l = levels.max(1);
+    // HSS sig: Nspk(4) + (L-1)*(pub + sig) + 1*sig
+    4 + (l - 1) * (lms_pub + lms_sig) + lms_sig
 }
 
 // ── Verify Helpers ──────────────────────────────────────────────────────────
@@ -795,6 +859,14 @@ pub fn verify_ecdsa(
                 .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
             let sig =
                 p384::ecdsa::Signature::try_from(sig_bytes).map_err(|_| CKR_SIGNATURE_INVALID)?;
+            vk.verify(msg, &sig).map_err(|_| CKR_SIGNATURE_INVALID)
+        }
+        (CKM_ECDSA_SHA256, CURVE_K256) => {
+            use k256::ecdsa::signature::Verifier;
+            let vk = k256::ecdsa::VerifyingKey::from_sec1_bytes(pk_bytes)
+                .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let sig =
+                k256::ecdsa::Signature::try_from(sig_bytes).map_err(|_| CKR_SIGNATURE_INVALID)?;
             vk.verify(msg, &sig).map_err(|_| CKR_SIGNATURE_INVALID)
         }
         // SHA-3 prehash variants on P-256 — manually hash then verify prehash bytes

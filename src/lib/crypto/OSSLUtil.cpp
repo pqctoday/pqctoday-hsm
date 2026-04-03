@@ -167,6 +167,10 @@ int OSSL::byteString2oid(const ByteString& byteString)
 	long length;
 	int tag, pclass;
 
+	// Check for raw explicit DER exact matches first
+	ByteString secp256k1Params = "06052b8104000a"; // 1.3.132.0.10 DER String
+	if (byteString == secp256k1Params) return NID_secp256k1;
+
 	ASN1_get_object(&pp, &length, &tag, &pclass, byteString.size());
 	if (pclass == V_ASN1_UNIVERSAL && tag == V_ASN1_OBJECT)
 	{

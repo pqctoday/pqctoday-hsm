@@ -163,6 +163,50 @@ pub fn get_object_algo_family(handle: u32) -> u32 {
     })
 }
 
+/// Read an arbitrary attribute from an existing object in the store.
+pub fn get_object_attr_bytes(handle: u32, attr_type: u32) -> Option<Vec<u8>> {
+    OBJECTS.with(|objs| {
+        objs.borrow()
+            .get(&handle)
+            .and_then(|attrs| attrs.get(&attr_type).cloned())
+    })
+}
+
+/// Read a u32 attribute (4-byte LE) from an existing object in the store.
+pub fn get_object_attr_u32(handle: u32, attr_type: u32) -> Option<u32> {
+    get_object_attr_bytes(handle, attr_type).and_then(|v| {
+        if v.len() >= 4 {
+            Some(u32::from_le_bytes([v[0], v[1], v[2], v[3]]))
+        } else {
+            None
+        }
+    })
+}
+
+/// Read a u64 attribute (8-byte LE) from an existing object in the store.
+pub fn get_object_attr_u64(handle: u32, attr_type: u32) -> Option<u64> {
+    get_object_attr_bytes(handle, attr_type).and_then(|v| {
+        if v.len() >= 8 {
+            Some(u64::from_le_bytes([v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]]))
+        } else {
+            None
+        }
+    })
+}
+
+/// Overwrite an attribute on an existing object in the store. Returns true on success.
+pub fn set_object_attr_bytes(handle: u32, attr_type: u32, value: Vec<u8>) -> bool {
+    OBJECTS.with(|objs| {
+        let mut store = objs.borrow_mut();
+        if let Some(attrs) = store.get_mut(&handle) {
+            attrs.insert(attr_type, value);
+            true
+        } else {
+            false
+        }
+    })
+}
+
 /// Store parameter set as a 4-byte LE value in the attributes map.
 pub fn store_param_set(attrs: &mut Attributes, ps: u32) {
     attrs.insert(CKA_PRIV_PARAM_SET, ps.to_le_bytes().to_vec());

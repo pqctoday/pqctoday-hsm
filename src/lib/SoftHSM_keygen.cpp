@@ -87,6 +87,7 @@
 #include "cryptoki.h"
 #include "P11Attributes.h"
 #include "P11Objects.h"
+#include "HDWalletDerivation.h"
 #include "SlotManager.h"
 #include "odd.h"
 
@@ -2016,6 +2017,8 @@ CK_RV SoftHSM::C_DeriveKey
 		case CKM_HKDF_DERIVE:
 		case CKM_SP800_108_COUNTER_KDF:
 		case CKM_SP800_108_FEEDBACK_KDF:
+		case CKM_BIP32_MASTER_DERIVE:
+		case CKM_BIP32_CHILD_DERIVE:
 			break;
 
 		default:
@@ -2210,6 +2213,126 @@ CK_RV SoftHSM::C_DeriveKey
 	// Check if the specified mechanism is allowed for the key
 	if (!isMechanismPermitted(key, pMechanism->mechanism))
 		return CKR_MECHANISM_INVALID;
+
+	if (pMechanism->mechanism == CKM_BIP32_MASTER_DERIVE || pMechanism->mechanism == CKM_BIP32_CHILD_DERIVE)
+	{
+		std::string curveOid;
+		ByteString rawOid;
+		bool foundCurve = false;
+		for (CK_ULONG i = 0; i < ulCount; i++) {
+			if (pTemplate[i].type == CKA_EC_PARAMS && pTemplate[i].pValue != NULL_PTR) {
+				rawOid = ByteString((unsigned char*)pTemplate[i].pValue, pTemplate[i].ulValueLen);
+				curveOid = rawOid.hex_str();
+				foundCurve = true;
+				break;
+			}
+		}
+		if (!foundCurve) return CKR_TEMPLATE_INCOMPLETE;
+
+		ByteString privKeyBytes, chainCodeBytes;
+		bool deriveOk = false;
+
+		if (pMechanism->mechanism == CKM_BIP32_MASTER_DERIVE) {
+			ByteString seed;
+			if (isKeyPrivate) {
+				if (!token->decrypt(key->getByteStringValue(CKA_VALUE), seed)) return CKR_GENERAL_ERROR;
+			} else {
+				seed = key->getByteStringValue(CKA_VALUE);
+			}
+
+			deriveOk = HDWalletDerivation::deriveMasterNode(seed, curveOid, privKeyBytes, chainCodeBytes);
+			seed.wipe();
+		} else {
+			if (pMechanism->pParameter == NULL_PTR || pMechanism->ulParameterLen != sizeof(CK_BIP32_CHILD_DERIVE_PARAMS)) {
+				return CKR_ARGUMENTS_BAD;
+			}
+			CK_BIP32_CHILD_DERIVE_PARAMS* params = (CK_BIP32_CHILD_DERIVE_PARAMS*)pMechanism->pParameter;
+			
+			ByteString parentPriv;
+			if (isKeyPrivate) {
+				if (!token->decrypt(key->getByteStringValue(CKA_VALUE), parentPriv)) return CKR_GENERAL_ERROR;
+			} else {
+				parentPriv = key->getByteStringValue(CKA_VALUE);
+			}
+			
+			ByteString parentChainCode = key->getByteStringValue(CKA_BIP32_CHAIN_CODE);
+			if (parentChainCode.size() == 0) return CKR_KEY_TYPE_INCONSISTENT;
+
+			deriveOk = HDWalletDerivation::deriveChildNode(parentPriv, parentChainCode, params->index, params->flags != 0, curveOid, privKeyBytes, chainCodeBytes);
+			parentPriv.wipe();
+		}
+
+		if (!deriveOk) {
+			privKeyBytes.wipe(); chainCodeBytes.wipe();
+			return CKR_FUNCTION_FAILED;
+		}
+
+		// Save the object
+		CK_OBJECT_CLASS objCko = CKO_PRIVATE_KEY;
+		CK_KEY_TYPE objCkk = CKK_EC;
+		CK_BBOOL objFalse = CK_FALSE;
+		CK_BBOOL objTrue = CK_TRUE;
+		
+		const CK_ULONG maxAttr = 32;
+		CK_ATTRIBUTE drvAttr[maxAttr] = {
+			{ CKA_CLASS, &objCko, sizeof(objCko) },
+			{ CKA_KEY_TYPE, &objCkk, sizeof(objCkk) },
+			{ CKA_TOKEN, &objFalse, sizeof(objFalse) },
+			{ CKA_PRIVATE, &objTrue, sizeof(objTrue) },
+			{ CKA_SENSITIVE, &objTrue, sizeof(objTrue) },
+			{ CKA_EXTRACTABLE, &objFalse, sizeof(objFalse) }
+		};
+		CK_ULONG drvCount = 6;
+		
+		for (CK_ULONG i = 0; i < ulCount && drvCount < maxAttr; i++) {
+			switch (pTemplate[i].type) {
+				case CKA_CLASS: case CKA_KEY_TYPE: case CKA_VALUE: case CKA_BIP32_CHAIN_CODE:
+				case CKA_TOKEN: case CKA_PRIVATE: case CKA_SENSITIVE: case CKA_EXTRACTABLE:
+					continue;
+				default:
+					drvAttr[drvCount++] = pTemplate[i];
+					break;
+			}
+		}
+
+		CK_RV rv2 = CreateObject(hSession, drvAttr, drvCount, phKey, OBJECT_OP_GENERATE);
+		if (rv2 != CKR_OK) {
+			privKeyBytes.wipe(); chainCodeBytes.wipe();
+			return rv2;
+		}
+		
+		OSObject* nObj = (OSObject*)handleManager->getObject(*phKey);
+		if (nObj == NULL_PTR || !nObj->isValid() || !nObj->startTransaction()) {
+			privKeyBytes.wipe(); chainCodeBytes.wipe();
+			return CKR_FUNCTION_FAILED;
+		}
+
+		bool svOk = nObj->setAttribute(CKA_LOCAL, false);
+		svOk = svOk && nObj->setAttribute(CKA_KEY_GEN_MECHANISM, pMechanism->mechanism);
+		
+		ByteString encVal;
+		if (token->encrypt(privKeyBytes, encVal)) {
+			svOk = svOk && nObj->setAttribute(CKA_VALUE, encVal);
+		} else svOk = false;
+		
+		svOk = svOk && nObj->setAttribute(CKA_BIP32_CHAIN_CODE, chainCodeBytes);
+		svOk = svOk && nObj->setAttribute(CKA_EC_PARAMS, rawOid);
+		
+#ifdef WITH_ECC
+		// Set OpenSSL structural keys natively if CKK_EC
+		setECPrivateKey(nObj, privKeyBytes, token, true);
+#endif
+
+		if (svOk) nObj->commitTransaction(); else nObj->abortTransaction();
+		privKeyBytes.wipe(); chainCodeBytes.wipe();
+		
+		if (!svOk) {
+			handleManager->destroyObject(*phKey);
+			*phKey = CK_INVALID_HANDLE;
+			return CKR_FUNCTION_FAILED;
+		}
+		return CKR_OK;
+	}
 
 	// Extract information from the template that is needed to create the object.
 	CK_OBJECT_CLASS objClass;
@@ -4569,12 +4692,13 @@ CK_RV SoftHSM::deriveECDH
 		DEBUG_MSG("pParameter must be of type CK_ECDH1_DERIVE_PARAMS");
 		return CKR_MECHANISM_PARAM_INVALID;
 	}
-	// Accept CKD_NULL and ANSI X9.63 KDF variants; reject all others (PKCS#11 v3.2 §2.3.5)
+	// Accept CKD_NULL and ANSI X9.63 KDF variants; reject all others (PKCS#11 v3.2 §2.3.5 + §5.2.12)
 	{
 		CK_ULONG kdfCheck = CK_ECDH1_DERIVE_PARAMS_PTR(pMechanism->pParameter)->kdf;
 		if (kdfCheck != CKD_NULL && kdfCheck != CKD_SHA1_KDF &&
 		    kdfCheck != CKD_SHA256_KDF && kdfCheck != CKD_SHA384_KDF &&
-		    kdfCheck != CKD_SHA512_KDF)
+		    kdfCheck != CKD_SHA512_KDF &&
+		    kdfCheck != CKD_SHA3_256_KDF && kdfCheck != CKD_SHA3_512_KDF)
 		{
 			DEBUG_MSG("Unsupported KDF type 0x%08lx", (unsigned long)kdfCheck);
 			return CKR_MECHANISM_PARAM_INVALID;
@@ -4995,12 +5119,13 @@ CK_RV SoftHSM::deriveEDDSA
 		DEBUG_MSG("pParameter must be of type CK_ECDH1_DERIVE_PARAMS");
 		return CKR_MECHANISM_PARAM_INVALID;
 	}
-	// Accept CKD_NULL and ANSI X9.63 KDF variants; reject all others (PKCS#11 v3.2 §2.3.5)
+	// Accept CKD_NULL and ANSI X9.63 KDF variants; reject all others (PKCS#11 v3.2 §2.3.5 + §5.2.12)
 	{
 		CK_ULONG kdfCheck = CK_ECDH1_DERIVE_PARAMS_PTR(pMechanism->pParameter)->kdf;
 		if (kdfCheck != CKD_NULL && kdfCheck != CKD_SHA1_KDF &&
 		    kdfCheck != CKD_SHA256_KDF && kdfCheck != CKD_SHA384_KDF &&
-		    kdfCheck != CKD_SHA512_KDF)
+		    kdfCheck != CKD_SHA512_KDF &&
+		    kdfCheck != CKD_SHA3_256_KDF && kdfCheck != CKD_SHA3_512_KDF)
 		{
 			DEBUG_MSG("Unsupported KDF type 0x%08lx", (unsigned long)kdfCheck);
 			return CKR_MECHANISM_PARAM_INVALID;

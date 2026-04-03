@@ -41,6 +41,7 @@
 #include "CryptoFactory.h"
 #include "cryptoki.h"
 #include "HashAlgorithm.h"
+#include "vendor_mechanisms.h"
 
 CK_RV SoftHSM::C_DigestInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism)
 {
@@ -87,6 +88,10 @@ CK_RV SoftHSM::C_DigestInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 		case CKM_SHA3_512:
 			algo = HashAlgo::SHA3_512;
 			break;
+		case CKM_KECCAK_256:
+			// G11 — Keccak-256 is implemented in the Rust engine only (tiny-keccak).
+			// The C++ OpenSSL engine does not support non-standard Keccak padding.
+			return CKR_MECHANISM_INVALID;
 		default:
 			return CKR_MECHANISM_INVALID;
 	}

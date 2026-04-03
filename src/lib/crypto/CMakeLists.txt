@@ -29,6 +29,7 @@ set(SOURCES
     RSAPublicKey.cpp
     SymmetricAlgorithm.cpp
     SymmetricKey.cpp
+    HDWalletDerivation.cpp
 
     # ML-DSA (FIPS 204) abstract bases and parameters
     MLDSAPublicKey.cpp

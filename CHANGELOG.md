@@ -10,6 +10,55 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.4] — 2026-04-03
+
+### Added
+
+- **G10 — LMS/HSS stateful hash-based signatures (NIST SP 800-208, RFC 8554)**
+  - `CKM_LMS_KEY_PAIR_GEN` / `CKM_LMS` (vendor, single-level LMS) via Rust hbs-lms 0.1.1
+  - `CKM_HSS_KEY_PAIR_GEN` / `CKM_HSS` (PKCS#11 v3.2 §6.14, multi-level HSS, 1–8 levels)
+  - Vendor key type `CKK_LMS`; standard `CKK_HSS`, `CKK_XMSS`, `CKK_XMSSMT`
+  - Vendor attributes: `CKA_STATEFUL_KEY_STATE`, `CKA_LMS_PARAM_SET`, `CKA_LMOTS_PARAM_SET`,
+    `CKA_XMSS_PARAM_SET`, `CKA_LEAF_INDEX` (range 0x80000101–0x80000105)
+  - All 5 LMS tree-height parameter sets (H5/H10/H15/H20/H25) and 4 LMOTS Winternitz
+    parameter sets (W1/W2/W4/W8) via `CKP_*` constants mirroring SP 800-208 Table 1
+  - Key exhaustion: `CKR_KEY_EXHAUSTED` (0x203) returned on sign attempt past capacity
+    — LMS: pre-check via `CKA_LEAF_INDEX ≥ 2^H`; HSS: callback_fired pattern
+  - `C_Sign` / `C_Verify` dispatch for `CKM_LMS` and `CKM_HSS` via early-return path
+    before standard object-value lookup; state atomically persisted via PKCS#11 callback
+  - `CK_HSS_KEY_PAIR_GEN_PARAMS` struct (68 bytes) in `vendor_mechanisms.h` for HSS keygen
+  - New C++ header `src/lib/vendor_mechanisms.h` — all vendor CKM/CKA/CKP constants,
+    mirrored in `rust/src/constants.rs` and `src/wasm/softhsm/constants.ts`
+  - Mechanism entries in `prepareSupportedMechanisms()` and `C_GetMechanismInfo` for
+    CKM_LMS_KEY_PAIR_GEN, CKM_HSS_KEY_PAIR_GEN, CKM_LMS, CKM_HSS
+  - TypeScript helpers in `src/wasm/softhsm/stateful.ts`: `hsm_generateLMSKeyPair`,
+    `hsm_generateHSSKeyPair`, `hsm_lmsSign`, `hsm_lmsVerify`, `hsm_lmsGetLeafIndex`,
+    `hsm_hssSign`, `hsm_hssVerify`
+
+- **G11 — Keccak-256 (Ethereum address derivation)**
+  - `CKM_KECCAK_256` (vendor 0x80000010) — Rust engine only via tiny-keccak 2.0
+  - Streaming `C_DigestInit` / `C_DigestUpdate` / `C_DigestFinal` + one-shot `C_Digest`
+  - C++ engine returns `CKR_MECHANISM_INVALID` (non-standard Keccak padding not in OpenSSL)
+  - `DigestCtx::Keccak256(Vec<u8>)` variant in the Rust digest state machine
+  - TypeScript helper `hsm_keccak256` in `src/wasm/softhsm/stateful.ts`
+  - Mechanism entry in `prepareSupportedMechanisms()` for `CKM_KECCAK_256` (Rust engine only)
+
+---
+
+## [0.4.3] — 2026-04-02
+
+### Added
+
+- **X448 Diffie-Hellman** (PKCS#11 v3.2 §6.7, RFC 7748 §6.2) via x448 0.14 crate
+  - `CKM_EC_MONTGOMERY_KEY_PAIR_GEN` now dispatches X25519 vs X448 by last OID byte
+  - RFC 7748 clamping applied at keygen; 56-byte shared secret from `diffie_hellman()`
+  - `build_x448_spki()` helper: AlgId OID 1.3.101.111 (id-X448, RFC 8410)
+- **X9.63 KDF SHA3 variants** (PKCS#11 v3.2 §5.2.12)
+  - `CKD_SHA3_256_KDF` and `CKD_SHA3_512_KDF` counter-mode KDF loops
+- **C_GetMechanismInfo**: Montgomery key-size range extended to 255–448
+
+---
+
 ## [0.4.1] — 2026-03-29
 
 ### Security

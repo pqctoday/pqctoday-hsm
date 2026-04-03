@@ -50,6 +50,7 @@
 #include "cryptoki.h"
 #include "SlotManager.h"
 #include "odd.h"
+#include "vendor_mechanisms.h"
 
 #if defined(WITH_OPENSSL)
 #include "OSSLCryptoFactory.h"
@@ -478,6 +479,17 @@ void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE
 	// ML-KEM (FIPS 203, PKCS#11 v3.2)
 	t["CKM_ML_KEM_KEY_PAIR_GEN"]	= CKM_ML_KEM_KEY_PAIR_GEN;
 	t["CKM_ML_KEM"]			= CKM_ML_KEM;
+
+	// LMS / HSS stateful hash-based signatures (G10)
+	// CKM_HSS / CKM_HSS_KEY_PAIR_GEN are standard PKCS#11 v3.2 §6.14
+	// CKM_LMS / CKM_LMS_KEY_PAIR_GEN are vendor extensions for single-level keygen
+	t["CKM_HSS_KEY_PAIR_GEN"]	= CKM_HSS_KEY_PAIR_GEN;
+	t["CKM_HSS"]			= CKM_HSS;
+	t["CKM_LMS_KEY_PAIR_GEN"]	= CKM_LMS_KEY_PAIR_GEN;
+	t["CKM_LMS"]			= CKM_LMS;
+
+	// Keccak-256 (G11 — vendor, Rust engine only; C++ returns CKR_MECHANISM_INVALID)
+	t["CKM_KECCAK_256"]		= CKM_KECCAK_256;
 
 	t["CKM_CONCATENATE_DATA_AND_BASE"] = CKM_CONCATENATE_DATA_AND_BASE;
 	t["CKM_CONCATENATE_BASE_AND_DATA"] = CKM_CONCATENATE_BASE_AND_DATA;
@@ -928,6 +940,26 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 			pInfo->ulMinKeySize = 128;
 			pInfo->ulMaxKeySize = 256;
 			pInfo->flags = CKF_ENCAPSULATE | CKF_DECAPSULATE;
+			break;
+		// LMS / HSS stateful hash-based signatures (G10)
+		// Standard PKCS#11 v3.2 §6.14 entries (HSS + keygen)
+		case CKM_HSS_KEY_PAIR_GEN:
+		case CKM_LMS_KEY_PAIR_GEN:  // vendor — single-level LMS
+			pInfo->ulMinKeySize = 0;
+			pInfo->ulMaxKeySize = 0;
+			pInfo->flags = CKF_GENERATE_KEY_PAIR;
+			break;
+		case CKM_HSS:
+		case CKM_LMS:  // vendor — single-level LMS sign/verify
+			pInfo->ulMinKeySize = 0;
+			pInfo->ulMaxKeySize = 0;
+			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			break;
+		// Keccak-256 (G11 — vendor, Rust engine only)
+		case CKM_KECCAK_256:
+			pInfo->ulMinKeySize = 0;
+			pInfo->ulMaxKeySize = 0;
+			pInfo->flags = CKF_DIGEST;
 			break;
 	    case CKM_CONCATENATE_DATA_AND_BASE:
 	    case CKM_CONCATENATE_BASE_AND_DATA:

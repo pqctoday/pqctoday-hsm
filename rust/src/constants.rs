@@ -3,14 +3,19 @@ use wasm_bindgen::prelude::*;
 // ── PKCS#11 Return Values ────────────────────────────────────────────────────
 
 pub const CKR_OK: u32 = 0x0000_0000;
+pub const CKR_HOST_MEMORY: u32 = 0x0000_0002;
+pub const CKR_GENERAL_ERROR: u32 = 0x0000_0005;
 pub const CKR_FUNCTION_FAILED: u32 = 0x0000_0006;
 pub const CKR_ARGUMENTS_BAD: u32 = 0x0000_0007;
 pub const CKR_DATA_INVALID: u32 = 0x0000_0020;
 pub const CKR_KEY_TYPE_INCONSISTENT: u32 = 0x0000_0063;
 pub const CKR_MECHANISM_INVALID: u32 = 0x0000_0070;
+pub const CKR_MECHANISM_PARAM_INVALID: u32 = 0x0000_0071;
 pub const CKR_OBJECT_HANDLE_INVALID: u32 = 0x0000_0082;
 pub const CKR_OPERATION_NOT_INITIALIZED: u32 = 0x0000_0091;
 pub const CKR_SIGNATURE_INVALID: u32 = 0x0000_00C0;
+pub const CKR_TEMPLATE_INCOMPLETE: u32 = 0x0000_00D0;
+pub const CKR_TEMPLATE_INCONSISTENT: u32 = 0x0000_00D1;
 pub const CKR_KEY_UNEXTRACTABLE: u32 = 0x0000_006A;
 pub const CKR_KEY_FUNCTION_NOT_PERMITTED: u32 = 0x0000_0068;
 pub const CKR_BUFFER_TOO_SMALL: u32 = 0x0000_0150;
@@ -25,6 +30,8 @@ pub const CKA_PUBLIC_EXPONENT: u32 = 0x0000_0122; // PKCS#11 v3.2 §2.1.2 — RS
 pub const CKA_VALUE_LEN: u32 = 0x0000_0161;
 pub const CKA_EC_PARAMS: u32 = 0x0000_0180;
 pub const CKA_EC_POINT: u32 = 0x0000_0181;
+pub const CKA_BIP32_CHAIN_CODE: u32 = 0x0000_1021;
+pub const CKA_BIP32_CHILD_INDEX: u32 = 0x0000_1022;
 pub const CKA_PUBLIC_KEY_INFO: u32 = 0x0000_0129; // PKCS#11 v3.2 — DER SubjectPublicKeyInfo
 pub const CKA_PARAMETER_SET: u32 = 0x0000_061d;
 
@@ -45,6 +52,12 @@ pub const CKK_EC_MONTGOMERY: u32 = 0x0000_0041; // X25519 (PKCS#11 v3.2 §6.7)
 pub const CKK_ML_KEM: u32 = 0x0000_0049;
 pub const CKK_ML_DSA: u32 = 0x0000_004a;
 pub const CKK_SLH_DSA: u32 = 0x0000_004b;
+// Stateful hash-based signature key types (PKCS#11 v3.2 §6.14)
+pub const CKK_HSS: u32 = 0x0000_0046;  // HSS/LMS multi-level (standard)
+pub const CKK_XMSS: u32 = 0x0000_0047; // XMSS single-tree (standard)
+pub const CKK_XMSSMT: u32 = 0x0000_0048; // XMSS^MT multi-tree (standard)
+// Vendor: single-level LMS (not in PKCS#11 v3.2 standard; same numeric space as CKK is separate from CKM)
+pub const CKK_LMS: u32 = 0x8000_0001;
 
 // ── PKCS#11 Semantic Attribute Types ─────────────────────────────────────────
 
@@ -168,6 +181,11 @@ pub const CKF_HKDF_SALT_DATA: u32 = 0x0000_0002;
 pub const CK_SP800_108_BYTE_ARRAY: u32 = 0x0000_0004;
 
 // EC
+// ----- HD Derivation (BIP32 / SLIP10) -----
+pub const CKM_BIP32_MASTER_DERIVE: u32 = 0x0000_105B;
+pub const CKM_BIP32_CHILD_DERIVE: u32 = 0x0000_105C;
+pub const CKF_BIP32_HARDENED: u32 = 0x8000_0000;
+
 pub const CKM_EC_KEY_PAIR_GEN: u32 = 0x0000_1040;
 pub const CKM_ECDSA_SHA256: u32 = 0x0000_1044;
 pub const CKM_ECDSA_SHA384: u32 = 0x0000_1045;
@@ -303,6 +321,15 @@ pub const SUPPORTED_MECHS: &[u32] = &[
     CKM_HKDF_DERIVE,
     CKM_SP800_108_COUNTER_KDF,
     CKM_SP800_108_FEEDBACK_KDF,
+    // Stateful hash-based signatures (G10)
+    CKM_HSS_KEY_PAIR_GEN,
+    CKM_HSS,
+    CKM_XMSS_KEY_PAIR_GEN,
+    CKM_XMSS,
+    CKM_LMS_KEY_PAIR_GEN,
+    CKM_LMS,
+    // Keccak-256 digest (G11 — Rust engine only)
+    CKM_KECCAK_256,
 ];
 
 #[wasm_bindgen(js_name = _C_GetMechanismList)]
@@ -330,3 +357,55 @@ pub fn C_GetMechanismList(_slot_id: u32, p_mechanism_list: *mut u32, pul_count: 
 // single-shot operations. DigestUpdate/DigestFinal are fully implemented above.
 
 pub const CKR_FUNCTION_NOT_SUPPORTED: u32 = 0x0000_0054;
+pub const CKR_KEY_EXHAUSTED: u32 = 0x0000_0203; // PKCS#11 v3.2 — stateful key has no remaining signatures
+
+// ── Stateful Signature Mechanisms (G10) ─────────────────────────────────────
+
+// HSS/LMS standard mechanisms (PKCS#11 v3.2 §6.14)
+pub const CKM_HSS_KEY_PAIR_GEN: u32 = 0x0000_4032;
+pub const CKM_HSS: u32 = 0x0000_4033;
+pub const CKM_XMSS_KEY_PAIR_GEN: u32 = 0x0000_4034;
+pub const CKM_XMSS: u32 = 0x0000_4036;
+
+// Vendor: single-level LMS (not in PKCS#11 v3.2 standard CKM range)
+pub const CKM_LMS_KEY_PAIR_GEN: u32 = 0x8000_0001;
+pub const CKM_LMS: u32 = 0x8000_0002;
+
+// Vendor: Keccak-256 digest (G11 — Ethereum address derivation, Rust engine only)
+pub const CKM_KECCAK_256: u32 = 0x8000_0010;
+
+// ── Stateful Key Attributes (vendor, G10) ────────────────────────────────────
+// Range: 0x80000101–0x80000105 (offset from CKM vendor range to avoid confusion)
+
+pub const CKA_STATEFUL_KEY_STATE: u32 = 0x8000_0101; // raw serialised private key blob
+pub const CKA_LMS_PARAM_SET: u32 = 0x8000_0102;      // CKP_LMS_SHA256_M32_H* value
+pub const CKA_LMOTS_PARAM_SET: u32 = 0x8000_0103;    // CKP_LMOTS_SHA256_N32_W* value
+pub const CKA_XMSS_PARAM_SET: u32 = 0x8000_0104;     // CKP_XMSS_* value
+pub const CKA_LEAF_INDEX: u32 = 0x8000_0105;          // current leaf index (u64, little-endian)
+
+// Standard multi-level HSS level-type attribute (PKCS#11 v3.2 §6.14)
+pub const CKA_HSS_LMS_TYPE: u32 = 0x0000_0618;
+
+// ── LMS / LMOTS Parameter Set Constants ─────────────────────────────────────
+// Values match PKCS#11 v3.2 §6.14 table (tree-height based naming)
+// NOTE: hbs-lms LmsAlgorithm enum uses RFC 8554 type IDs — use ckp_to_lms_algo() in lms.rs
+
+pub const CKP_LMS_SHA256_M32_H5: u32 = 5;
+pub const CKP_LMS_SHA256_M32_H10: u32 = 10;
+pub const CKP_LMS_SHA256_M32_H15: u32 = 15;
+pub const CKP_LMS_SHA256_M32_H20: u32 = 20;
+pub const CKP_LMS_SHA256_M32_H25: u32 = 25;
+
+pub const CKP_LMOTS_SHA256_N32_W1: u32 = 1;
+pub const CKP_LMOTS_SHA256_N32_W2: u32 = 2;
+pub const CKP_LMOTS_SHA256_N32_W4: u32 = 4;
+pub const CKP_LMOTS_SHA256_N32_W8: u32 = 8;
+
+// ── XMSS Parameter Set Constants ─────────────────────────────────────────────
+
+pub const CKP_XMSS_SHA2_10_256: u32 = 0x01;
+pub const CKP_XMSS_SHA2_16_256: u32 = 0x02;
+pub const CKP_XMSS_SHA2_20_256: u32 = 0x03;
+pub const CKP_XMSS_SHAKE_10_256: u32 = 0x11;
+pub const CKP_XMSS_SHAKE_16_256: u32 = 0x12;
+pub const CKP_XMSS_SHAKE_20_256: u32 = 0x13;

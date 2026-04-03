@@ -727,6 +727,10 @@ pub fn C_GenerateKeyPair(
                     .as_ref()
                     .is_some_and(|b| b.len() >= 7 && b[b.len() - 1] == 0x22);
 
+                let is_secp256k1 = ec_params
+                    .as_ref()
+                    .is_some_and(|b| b.len() >= 7 && b[b.len() - 1] == 0x0a);
+
                 let mut pub_attrs = HashMap::new();
                 let mut prv_attrs = HashMap::new();
                 store_algo_family(&mut pub_attrs, ALGO_ECDSA);
@@ -774,6 +778,25 @@ pub fn C_GenerateKeyPair(
                     // SubjectPublicKeyInfo DER for P-384 (97-byte uncompressed point)
                     // 30 76 30 10 06 07 2a86 48ce3d0201 06 05 2b81 0400 22 03 62 00 <97 bytes>
                     let spki = build_ec_spki_p384(&vk_bytes);
+                    pub_attrs.insert(CKA_PUBLIC_KEY_INFO, spki);
+                } else if is_secp256k1 {
+                    store_param_set(&mut pub_attrs, CURVE_K256);
+                    store_param_set(&mut prv_attrs, CURVE_K256);
+                    let sk = with_rng!(rng, { k256::ecdsa::SigningKey::random(&mut rng) });
+                    let vk = k256::ecdsa::VerifyingKey::from(&sk);
+                    prv_attrs.insert(CKA_VALUE, sk.to_bytes().to_vec());
+                    let vk_bytes = vk.to_encoded_point(false).as_bytes().to_vec();
+                    let mut ec_point = Vec::with_capacity(2 + vk_bytes.len());
+                    ec_point.push(0x04u8);
+                    ec_point.push(vk_bytes.len() as u8);
+                    ec_point.extend_from_slice(&vk_bytes);
+                    pub_attrs.insert(CKA_EC_POINT, ec_point);
+                    // OID: 1.3.132.0.10 (secp256k1) = 0x06 0x05 0x2b 0x81 0x04 0x00 0x0a
+                    let alg_id: &[u8] = &[
+                        0x30, 0x10, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+                        0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x0a,
+                    ];
+                    let spki = build_spki_from_parts(alg_id, &vk_bytes);
                     pub_attrs.insert(CKA_PUBLIC_KEY_INFO, spki);
                 } else {
                     store_param_set(&mut pub_attrs, CURVE_P256);
@@ -971,6 +994,143 @@ pub fn C_GenerateKeyPair(
                 finalize_private_key_attrs(&mut prv_attrs);
                 compute_kcv(&mut pub_attrs);
                 compute_kcv(&mut prv_attrs);
+                *ph_public_key = allocate_handle(pub_attrs);
+                *ph_private_key = allocate_handle(prv_attrs);
+                CKR_OK
+            }
+
+            // ── LMS single-level keygen (vendor CKM_LMS_KEY_PAIR_GEN) ─────────
+            CKM_LMS_KEY_PAIR_GEN => {
+                let lms_param = get_attr_ulong(
+                    p_public_key_template,
+                    ul_public_key_attribute_count,
+                    CKA_LMS_PARAM_SET,
+                )
+                .unwrap_or(CKP_LMS_SHA256_M32_H5);
+                let lmots_param = get_attr_ulong(
+                    p_public_key_template,
+                    ul_public_key_attribute_count,
+                    CKA_LMOTS_PARAM_SET,
+                )
+                .unwrap_or(CKP_LMOTS_SHA256_N32_W4);
+                let (pub_bytes, priv_bytes) =
+                    match crate::crypto::lms::lms_keygen(lms_param, lmots_param) {
+                        Ok(pair) => pair,
+                        Err(_) => return CKR_FUNCTION_FAILED,
+                    };
+                let max_leaves = crate::crypto::lms::lms_param_max_leaves(lms_param)
+                    .unwrap_or(1u64 << 5);
+
+                let mut pub_attrs = HashMap::new();
+                let mut prv_attrs = HashMap::new();
+                // Public key attributes
+                store_ulong(&mut pub_attrs, CKA_CLASS, CKO_PUBLIC_KEY);
+                store_ulong(&mut pub_attrs, CKA_KEY_TYPE, CKK_LMS);
+                store_ulong(&mut pub_attrs, CKA_LMS_PARAM_SET, lms_param);
+                store_ulong(&mut pub_attrs, CKA_LMOTS_PARAM_SET, lmots_param);
+                store_ulong(&mut pub_attrs, CKA_KEY_GEN_MECHANISM, CKM_LMS_KEY_PAIR_GEN);
+                store_bool(&mut pub_attrs, CKA_TOKEN, false);
+                store_bool(&mut pub_attrs, CKA_PRIVATE, false);
+                store_bool(&mut pub_attrs, CKA_VERIFY, true);
+                store_bool(&mut pub_attrs, CKA_LOCAL, true);
+                pub_attrs.insert(CKA_VALUE, pub_bytes);
+                // Private key attributes
+                store_ulong(&mut prv_attrs, CKA_CLASS, CKO_PRIVATE_KEY);
+                store_ulong(&mut prv_attrs, CKA_KEY_TYPE, CKK_LMS);
+                store_ulong(&mut prv_attrs, CKA_LMS_PARAM_SET, lms_param);
+                store_ulong(&mut prv_attrs, CKA_LMOTS_PARAM_SET, lmots_param);
+                store_ulong(&mut prv_attrs, CKA_KEY_GEN_MECHANISM, CKM_LMS_KEY_PAIR_GEN);
+                store_bool(&mut prv_attrs, CKA_TOKEN, false);
+                store_bool(&mut prv_attrs, CKA_PRIVATE, true);
+                store_bool(&mut prv_attrs, CKA_SENSITIVE, true);
+                store_bool(&mut prv_attrs, CKA_EXTRACTABLE, false);
+                store_bool(&mut prv_attrs, CKA_SIGN, true);
+                store_bool(&mut prv_attrs, CKA_LOCAL, true);
+                prv_attrs.insert(CKA_STATEFUL_KEY_STATE, priv_bytes);
+                // CKA_LEAF_INDEX stored as u64 LE
+                prv_attrs.insert(CKA_LEAF_INDEX, 0u64.to_le_bytes().to_vec());
+                // Max leaves stored as informational — not a standard attr, use value_len slot
+                prv_attrs.insert(CKA_VALUE_LEN, max_leaves.to_le_bytes().to_vec());
+                absorb_template_attrs(
+                    &mut pub_attrs,
+                    p_public_key_template,
+                    ul_public_key_attribute_count,
+                );
+                absorb_template_attrs(
+                    &mut prv_attrs,
+                    p_private_key_template,
+                    ul_private_key_attribute_count,
+                );
+                *ph_public_key = allocate_handle(pub_attrs);
+                *ph_private_key = allocate_handle(prv_attrs);
+                CKR_OK
+            }
+
+            // ── HSS multi-level keygen (PKCS#11 v3.2 §6.14 CKM_HSS_KEY_PAIR_GEN) ─
+            CKM_HSS_KEY_PAIR_GEN => {
+                // CK_MECHANISM layout (WASM32): mechType(4) + pParameter(4) + ulParameterLen(4)
+                // CK_HSS_KEY_PAIR_GEN_PARAMS: ulLevels(4) + ulLmsParamSet[8](32) + ulLmotsParamSet[8](32) = 68B
+                let p_param_ptr = *(p_mechanism.add(4) as *const u32) as usize as *const u32;
+                let param_len = *(p_mechanism.add(8) as *const u32);
+                if p_param_ptr.is_null() || param_len < 68 {
+                    return CKR_MECHANISM_PARAM_INVALID;
+                }
+                let levels = *p_param_ptr as usize;
+                if levels == 0 || levels > 8 {
+                    return CKR_MECHANISM_PARAM_INVALID;
+                }
+                let lms_params: Vec<u32> = (0..levels)
+                    .map(|i| *p_param_ptr.add(1 + i))
+                    .collect();
+                let lmots_params: Vec<u32> = (0..levels)
+                    .map(|i| *p_param_ptr.add(1 + 8 + i))
+                    .collect();
+
+                let (pub_bytes, priv_bytes) =
+                    match crate::crypto::lms::hss_keygen(levels, &lms_params, &lmots_params) {
+                        Ok(pair) => pair,
+                        Err(_) => return CKR_FUNCTION_FAILED,
+                    };
+
+                let mut pub_attrs = HashMap::new();
+                let mut prv_attrs = HashMap::new();
+                // Public key attributes
+                store_ulong(&mut pub_attrs, CKA_CLASS, CKO_PUBLIC_KEY);
+                store_ulong(&mut pub_attrs, CKA_KEY_TYPE, CKK_HSS);
+                store_ulong(&mut pub_attrs, CKA_HSS_LMS_TYPE, levels as u32);
+                store_ulong(&mut pub_attrs, CKA_LMS_PARAM_SET, lms_params[0]);
+                store_ulong(&mut pub_attrs, CKA_LMOTS_PARAM_SET, lmots_params[0]);
+                store_ulong(&mut pub_attrs, CKA_KEY_GEN_MECHANISM, CKM_HSS_KEY_PAIR_GEN);
+                store_bool(&mut pub_attrs, CKA_TOKEN, false);
+                store_bool(&mut pub_attrs, CKA_PRIVATE, false);
+                store_bool(&mut pub_attrs, CKA_VERIFY, true);
+                store_bool(&mut pub_attrs, CKA_LOCAL, true);
+                pub_attrs.insert(CKA_VALUE, pub_bytes);
+                // Private key attributes
+                store_ulong(&mut prv_attrs, CKA_CLASS, CKO_PRIVATE_KEY);
+                store_ulong(&mut prv_attrs, CKA_KEY_TYPE, CKK_HSS);
+                store_ulong(&mut prv_attrs, CKA_HSS_LMS_TYPE, levels as u32);
+                store_ulong(&mut prv_attrs, CKA_LMS_PARAM_SET, lms_params[0]);
+                store_ulong(&mut prv_attrs, CKA_LMOTS_PARAM_SET, lmots_params[0]);
+                store_ulong(&mut prv_attrs, CKA_KEY_GEN_MECHANISM, CKM_HSS_KEY_PAIR_GEN);
+                store_bool(&mut prv_attrs, CKA_TOKEN, false);
+                store_bool(&mut prv_attrs, CKA_PRIVATE, true);
+                store_bool(&mut prv_attrs, CKA_SENSITIVE, true);
+                store_bool(&mut prv_attrs, CKA_EXTRACTABLE, false);
+                store_bool(&mut prv_attrs, CKA_SIGN, true);
+                store_bool(&mut prv_attrs, CKA_LOCAL, true);
+                prv_attrs.insert(CKA_STATEFUL_KEY_STATE, priv_bytes);
+                prv_attrs.insert(CKA_LEAF_INDEX, 0u64.to_le_bytes().to_vec());
+                absorb_template_attrs(
+                    &mut pub_attrs,
+                    p_public_key_template,
+                    ul_public_key_attribute_count,
+                );
+                absorb_template_attrs(
+                    &mut prv_attrs,
+                    p_private_key_template,
+                    ul_private_key_attribute_count,
+                );
                 *ph_public_key = allocate_handle(pub_attrs);
                 *ph_private_key = allocate_handle(prv_attrs);
                 CKR_OK
@@ -1446,6 +1606,62 @@ pub fn C_Sign(
             return CKR_OK;
         }
 
+        // ── LMS / HSS stateful sign — separate path (uses CKA_STATEFUL_KEY_STATE) ───
+        if mech == CKM_LMS || mech == CKM_HSS {
+            let priv_bytes = match get_object_attr_bytes(hkey, CKA_STATEFUL_KEY_STATE) {
+                Some(v) => v,
+                None => return CKR_KEY_TYPE_INCONSISTENT,
+            };
+            let msg = std::slice::from_raw_parts(p_data, ul_data_len as usize);
+
+            // Capture hkey for the state-update closure (WASM single-threaded, no Send needed)
+            let mut new_state: Option<Vec<u8>> = None;
+            let mut update_fn = |new_priv: &[u8]| -> Result<(), ()> {
+                new_state = Some(new_priv.to_vec());
+                Ok(())
+            };
+
+            let sign_result = if mech == CKM_LMS {
+                let lms_param = get_object_attr_u32(hkey, CKA_LMS_PARAM_SET)
+                    .unwrap_or(CKP_LMS_SHA256_M32_H5);
+                let max_leaves = crate::crypto::lms::lms_param_max_leaves(lms_param)
+                    .unwrap_or(1u64 << 5);
+                let leaf_index = get_object_attr_u64(hkey, CKA_LEAF_INDEX).unwrap_or(0);
+                crate::crypto::lms::lms_sign(leaf_index, max_leaves, &priv_bytes, msg, &mut update_fn)
+            } else {
+                crate::crypto::lms::hss_sign(&priv_bytes, msg, &mut update_fn)
+            };
+
+            let rv = match sign_result {
+                Ok(sig) => {
+                    // Persist updated state atomically (callback already ran successfully)
+                    if let Some(new_priv_bytes) = new_state {
+                        set_object_attr_bytes(hkey, CKA_STATEFUL_KEY_STATE, new_priv_bytes);
+                        // Increment leaf index for LMS (HSS manages this internally)
+                        if mech == CKM_LMS {
+                            let old_idx = get_object_attr_u64(hkey, CKA_LEAF_INDEX).unwrap_or(0);
+                            set_object_attr_bytes(
+                                hkey,
+                                CKA_LEAF_INDEX,
+                                (old_idx + 1).to_le_bytes().to_vec(),
+                            );
+                        }
+                    }
+                    if (*pul_signature_len as usize) < sig.len() {
+                        *pul_signature_len = sig.len() as u32;
+                        SIGN_STATE.with(|s| s.borrow_mut().remove(&h_session));
+                        return CKR_BUFFER_TOO_SMALL;
+                    }
+                    std::ptr::copy_nonoverlapping(sig.as_ptr(), p_signature, sig.len());
+                    *pul_signature_len = sig.len() as u32;
+                    CKR_OK
+                }
+                Err(e) => e,
+            };
+            SIGN_STATE.with(|s| s.borrow_mut().remove(&h_session));
+            return rv;
+        }
+
         let sk_bytes = match get_object_value(hkey) {
             Some(v) => v,
             None => return CKR_ARGUMENTS_BAD,
@@ -1569,6 +1785,23 @@ pub fn C_Verify(
     };
 
     unsafe {
+        // ── LMS / HSS stateful verify — separate path (public key in CKA_VALUE) ───
+        if mech == CKM_LMS || mech == CKM_HSS {
+            let pub_bytes = match get_object_value(hkey) {
+                Some(v) => v,
+                None => return CKR_KEY_TYPE_INCONSISTENT,
+            };
+            let msg = std::slice::from_raw_parts(p_data, ul_data_len as usize);
+            let sig_bytes = std::slice::from_raw_parts(p_signature, ul_signature_len as usize);
+            let ok = if mech == CKM_LMS {
+                crate::crypto::lms::lms_verify(&pub_bytes, msg, sig_bytes)
+            } else {
+                crate::crypto::lms::hss_verify(&pub_bytes, msg, sig_bytes)
+            };
+            VERIFY_STATE.with(|s| s.borrow_mut().remove(&h_session));
+            return if ok { CKR_OK } else { CKR_SIGNATURE_INVALID };
+        }
+
         // CKA_VALUE: raw key bytes for symmetric/asymmetric keys (RSA, HMAC, ML-DSA,
         //            SLH-DSA, EdDSA).  May be absent for EC public keys.
         let pk_bytes = get_object_value(hkey).unwrap_or_default();
@@ -2202,6 +2435,7 @@ pub fn C_DigestInit(h_session: u32, p_mechanism: *mut u8) -> u32 {
             CKM_SHA512 => DigestCtx::Sha512(sha2::Sha512::new()),
             CKM_SHA3_256 => DigestCtx::Sha3_256(sha3::Sha3_256::new()),
             CKM_SHA3_512 => DigestCtx::Sha3_512(sha3::Sha3_512::new()),
+            CKM_KECCAK_256 => DigestCtx::Keccak256(Vec::new()),
             _ => return CKR_MECHANISM_INVALID,
         };
         DIGEST_STATE.with(|s| {
@@ -2229,6 +2463,7 @@ pub fn C_DigestUpdate(h_session: u32, p_part: *mut u8, ul_part_len: u32) -> u32 
                     DigestCtx::Sha512(h) => h.update(data),
                     DigestCtx::Sha3_256(h) => h.update(data),
                     DigestCtx::Sha3_512(h) => h.update(data),
+                    DigestCtx::Keccak256(buf) => crate::crypto::keccak::keccak256_update(buf, data),
                 }
             }
         });
@@ -2249,6 +2484,7 @@ pub fn C_DigestFinal(h_session: u32, p_digest: *mut u8, pul_digest_len: *mut u32
                     DigestCtx::Sha512(_) => 64,
                     DigestCtx::Sha3_256(_) => 32,
                     DigestCtx::Sha3_512(_) => 64,
+                    DigestCtx::Keccak256(_) => 32,
                 })
             });
             return match len {
@@ -2272,6 +2508,7 @@ pub fn C_DigestFinal(h_session: u32, p_digest: *mut u8, pul_digest_len: *mut u32
             DigestCtx::Sha512(h) => h.finalize().to_vec(),
             DigestCtx::Sha3_256(h) => h.finalize().to_vec(),
             DigestCtx::Sha3_512(h) => h.finalize().to_vec(),
+            DigestCtx::Keccak256(buf) => crate::crypto::keccak::keccak256_finalize(&buf).to_vec(),
         };
         if (*pul_digest_len as usize) < hash.len() {
             *pul_digest_len = hash.len() as u32;
@@ -2302,6 +2539,7 @@ pub fn C_Digest(
                     DigestCtx::Sha512(_) => 64,
                     DigestCtx::Sha3_256(_) => 32,
                     DigestCtx::Sha3_512(_) => 64,
+                    DigestCtx::Keccak256(_) => 32,
                 })
             });
             return match len {
@@ -2445,6 +2683,83 @@ pub fn C_DeriveKey(
             if !can_derive {
                 return CKR_KEY_FUNCTION_NOT_PERMITTED;
             }
+        }
+
+        if mech_type == CKM_BIP32_MASTER_DERIVE || mech_type == CKM_BIP32_CHILD_DERIVE {
+            let mut attrs = std::collections::HashMap::new();
+            let tmpl_ptr = p_template as *mut u32;
+            for i in 0..ul_attribute_count {
+                let attr_type = *tmpl_ptr.add((i * 3) as usize);
+                let val_ptr = *tmpl_ptr.add((i * 3 + 1) as usize) as usize as *const u8;
+                let val_len = *tmpl_ptr.add((i * 3 + 2) as usize);
+                if !val_ptr.is_null() && val_len > 0 {
+                    let mut v = vec![0u8; val_len as usize];
+                    std::ptr::copy_nonoverlapping(val_ptr, v.as_mut_ptr(), val_len as usize);
+                    attrs.insert(attr_type, v);
+                }
+            }
+
+            let ec_params = match attrs.get(&CKA_EC_PARAMS) {
+                Some(v) => v.clone(),
+                None => return CKR_TEMPLATE_INCONSISTENT,
+            };
+            
+            let curve = match crate::crypto::HDCurve::from_oid(&ec_params) {
+                Some(c) => c,
+                None => return CKR_KEY_TYPE_INCONSISTENT,
+            };
+
+            let (priv_key, chain_code) = if mech_type == CKM_BIP32_MASTER_DERIVE {
+                let seed = match get_object_value(h_base_key) {
+                    Some(v) => v,
+                    None => return CKR_OBJECT_HANDLE_INVALID,
+                };
+                match crate::crypto::derive_master_node(&seed, curve) {
+                    Ok(res) => res,
+                    Err(e) => return e,
+                }
+            } else {
+                let parent_priv = match get_object_value(h_base_key) {
+                    Some(v) => v,
+                    None => return CKR_OBJECT_HANDLE_INVALID,
+                };
+                let parent_chain_code = OBJECTS.with(|o| {
+                    if let Some(o_attrs) = o.borrow().get(&h_base_key) {
+                        if let Some(v) = o_attrs.get(&CKA_BIP32_CHAIN_CODE) {
+                            return v.clone();
+                        }
+                    }
+                    vec![]
+                });
+                if parent_chain_code.is_empty() {
+                    return CKR_KEY_TYPE_INCONSISTENT;
+                }
+                
+                let p_param = *(p_mechanism.add(4) as *const u32) as usize as *const u32;
+                if p_param.is_null() {
+                    return CKR_ARGUMENTS_BAD;
+                }
+                let flags = *p_param.add(1);
+                let index = *p_param.add(2);
+                
+                match crate::crypto::derive_child_node(&parent_priv, &parent_chain_code, index, flags != 0, curve) {
+                    Ok(res) => res,
+                    Err(e) => return e,
+                }
+            };
+
+            store_ulong(&mut attrs, CKA_CLASS, CKO_PRIVATE_KEY);
+            store_ulong(&mut attrs, CKA_KEY_TYPE, CKK_EC);
+            attrs.insert(CKA_VALUE, priv_key);
+            attrs.insert(CKA_BIP32_CHAIN_CODE, chain_code);
+            
+            store_bool(&mut attrs, CKA_TOKEN, false);
+            store_bool(&mut attrs, CKA_PRIVATE, true);
+            store_bool(&mut attrs, CKA_SENSITIVE, true);
+            store_bool(&mut attrs, CKA_EXTRACTABLE, false);
+            
+            *ph_key = allocate_handle(attrs);
+            return CKR_OK;
         }
 
         let key_value: Vec<u8> = match mech_type {

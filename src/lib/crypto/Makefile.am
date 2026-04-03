@@ -24,6 +24,7 @@ libsofthsm_crypto_la_SOURCES =	AESKey.cpp \
 				ECPrivateKey.cpp \
 				EDPublicKey.cpp \
 				EDPrivateKey.cpp \
+				HDWalletDerivation.cpp \
 				HashAlgorithm.cpp \
 				MacAlgorithm.cpp \
 				RSAParameters.cpp \
