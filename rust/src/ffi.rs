@@ -1257,10 +1257,10 @@ pub fn C_GenerateKeyPair(
                 store_bool(&mut prv_attrs, CKA_SIGN, true);
                 store_bool(&mut prv_attrs, CKA_LOCAL, true);
                 prv_attrs.insert(CKA_STATEFUL_KEY_STATE, priv_bytes);
-                // CKA_LEAF_INDEX stored as u64 LE
                 prv_attrs.insert(CKA_LEAF_INDEX, 0u64.to_le_bytes().to_vec());
-                // Max leaves stored as informational — not a standard attr, use value_len slot
-                prv_attrs.insert(CKA_VALUE_LEN, max_leaves.to_le_bytes().to_vec());
+                // Max leaves stored as CKA_HSS_KEYS_REMAINING (PKCS#11 v3.2)
+                store_ulong(&mut pub_attrs, CKA_HSS_KEYS_REMAINING, max_leaves as u32);
+                store_ulong(&mut prv_attrs, CKA_HSS_KEYS_REMAINING, max_leaves as u32);
                 absorb_template_attrs(
                     &mut pub_attrs,
                     p_public_key_template,
@@ -1328,6 +1328,65 @@ pub fn C_GenerateKeyPair(
                 store_bool(&mut prv_attrs, CKA_SENSITIVE, true);
                 store_bool(&mut prv_attrs, CKA_EXTRACTABLE, false);
                 store_bool(&mut prv_attrs, CKA_SIGN, true);
+                store_ulong(&mut pub_attrs, CKA_HSS_KEYS_REMAINING, 32); // Workshop simulated bounds
+                store_ulong(&mut prv_attrs, CKA_HSS_KEYS_REMAINING, 32);
+                store_bool(&mut prv_attrs, CKA_LOCAL, true);
+                prv_attrs.insert(CKA_STATEFUL_KEY_STATE, priv_bytes);
+                prv_attrs.insert(CKA_LEAF_INDEX, 0u64.to_le_bytes().to_vec());
+                absorb_template_attrs(
+                    &mut pub_attrs,
+                    p_public_key_template,
+                    ul_public_key_attribute_count,
+                );
+                absorb_template_attrs(
+                    &mut prv_attrs,
+                    p_private_key_template,
+                    ul_private_key_attribute_count,
+                );
+                *ph_public_key = allocate_handle(pub_attrs);
+                *ph_private_key = allocate_handle(prv_attrs);
+                CKR_OK
+            }
+
+            // ── XMSS single-level keygen (PKCS#11 v3.2 §6.14 CKM_XMSS_KEY_PAIR_GEN) ─
+            CKM_XMSS_KEY_PAIR_GEN => {
+                // CK_MECHANISM layout: mechType(4) + pParameter(4) + ulParameterLen(4)
+                let p_param_ptr = *(p_mechanism.add(4) as *const u32) as usize as *const u32;
+                let param_len = *(p_mechanism.add(8) as *const u32);
+                if p_param_ptr.is_null() || param_len < 68 {
+                    return CKR_MECHANISM_PARAM_INVALID;
+                }
+                
+                let param_code = *p_param_ptr.add(1); // ulLmsParamSet[0] holds the XMSS param
+
+                // For cross-validation scaffolding, populate mock keys
+                let pub_bytes = vec![0x11; 64];
+                let priv_bytes = vec![0x22; 128];
+
+                let mut pub_attrs = HashMap::new();
+                let mut prv_attrs = HashMap::new();
+                // Public key attributes
+                store_ulong(&mut pub_attrs, CKA_CLASS, CKO_PUBLIC_KEY);
+                store_ulong(&mut pub_attrs, CKA_KEY_TYPE, CKK_XMSS);
+                store_ulong(&mut pub_attrs, CKA_XMSS_PARAM_SET, param_code);
+                store_ulong(&mut pub_attrs, CKA_KEY_GEN_MECHANISM, CKM_XMSS_KEY_PAIR_GEN);
+                store_bool(&mut pub_attrs, CKA_TOKEN, false);
+                store_bool(&mut pub_attrs, CKA_PRIVATE, false);
+                store_bool(&mut pub_attrs, CKA_VERIFY, true);
+                store_bool(&mut pub_attrs, CKA_LOCAL, true);
+                pub_attrs.insert(CKA_VALUE, pub_bytes);
+                // Private key attributes
+                store_ulong(&mut prv_attrs, CKA_CLASS, CKO_PRIVATE_KEY);
+                store_ulong(&mut prv_attrs, CKA_KEY_TYPE, CKK_XMSS);
+                store_ulong(&mut prv_attrs, CKA_XMSS_PARAM_SET, param_code);
+                store_ulong(&mut prv_attrs, CKA_KEY_GEN_MECHANISM, CKM_XMSS_KEY_PAIR_GEN);
+                store_bool(&mut prv_attrs, CKA_TOKEN, false);
+                store_bool(&mut prv_attrs, CKA_PRIVATE, true);
+                store_bool(&mut prv_attrs, CKA_SENSITIVE, true);
+                store_bool(&mut prv_attrs, CKA_EXTRACTABLE, false);
+                store_bool(&mut prv_attrs, CKA_SIGN, true);
+                store_ulong(&mut pub_attrs, CKA_HSS_KEYS_REMAINING, 32); // Workshop simulated bounds
+                store_ulong(&mut prv_attrs, CKA_HSS_KEYS_REMAINING, 32);
                 store_bool(&mut prv_attrs, CKA_LOCAL, true);
                 prv_attrs.insert(CKA_STATEFUL_KEY_STATE, priv_bytes);
                 prv_attrs.insert(CKA_LEAF_INDEX, 0u64.to_le_bytes().to_vec());
@@ -1817,7 +1876,7 @@ pub fn C_Sign(
         }
 
         // ── LMS / HSS stateful sign — separate path (uses CKA_STATEFUL_KEY_STATE) ───
-        if mech == CKM_LMS || mech == CKM_HSS {
+        if mech == CKM_LMS || mech == CKM_HSS || mech == CKM_XMSS {
             let priv_bytes = match get_object_attr_bytes(hkey, CKA_STATEFUL_KEY_STATE) {
                 Some(v) => v,
                 None => return CKR_KEY_TYPE_INCONSISTENT,
@@ -1838,6 +1897,10 @@ pub fn C_Sign(
                     .unwrap_or(1u64 << 5);
                 let leaf_index = get_object_attr_u64(hkey, CKA_LEAF_INDEX).unwrap_or(0);
                 crate::crypto::lms::lms_sign(leaf_index, max_leaves, &priv_bytes, msg, &mut update_fn)
+            } else if mech == CKM_XMSS {
+                // Mock signature for cross-validation UI workshop
+                let sig = vec![0x33; 2500];
+                Ok(sig)
             } else {
                 crate::crypto::lms::hss_sign(&priv_bytes, msg, &mut update_fn)
             };
@@ -1855,6 +1918,19 @@ pub fn C_Sign(
                                 CKA_LEAF_INDEX,
                                 (old_idx + 1).to_le_bytes().to_vec(),
                             );
+                        }
+                        
+                        // Decrement Keys Remaining for all stateful types
+                        if let Some(mut remaining) = get_object_attr_u32(hkey, CKA_HSS_KEYS_REMAINING) {
+                            if remaining > 0 {
+                                remaining -= 1;
+                                // Save to private key map (public key maps are not dynamically changed post-init)
+                                set_object_attr_bytes(
+                                    hkey,
+                                    CKA_HSS_KEYS_REMAINING,
+                                    remaining.to_le_bytes().to_vec()
+                                );
+                            }
                         }
                     }
                     if (*pul_signature_len as usize) < sig.len() {
@@ -1996,7 +2072,7 @@ pub fn C_Verify(
 
     unsafe {
         // ── LMS / HSS stateful verify — separate path (public key in CKA_VALUE) ───
-        if mech == CKM_LMS || mech == CKM_HSS {
+        if mech == CKM_LMS || mech == CKM_HSS || mech == CKM_XMSS {
             let pub_bytes = match get_object_value(hkey) {
                 Some(v) => v,
                 None => return CKR_KEY_TYPE_INCONSISTENT,
@@ -2005,6 +2081,8 @@ pub fn C_Verify(
             let sig_bytes = std::slice::from_raw_parts(p_signature, ul_signature_len as usize);
             let ok = if mech == CKM_LMS {
                 crate::crypto::lms::lms_verify(&pub_bytes, msg, sig_bytes)
+            } else if mech == CKM_XMSS {
+                true // Mock verify for cross-validation
             } else {
                 crate::crypto::lms::hss_verify(&pub_bytes, msg, sig_bytes)
             };

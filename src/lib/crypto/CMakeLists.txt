@@ -90,7 +90,46 @@ set(SOURCES
     OSSLSHA512.cpp
     OSSLSHA3.cpp
     OSSLUtil.cpp
+
+    # Stateful Stateful Signatures (LMS/HSS and XMSS)
+    stateful/hash-sigs/endian.c
+    stateful/hash-sigs/hash.c
+    stateful/hash-sigs/hss.c
+    stateful/hash-sigs/hss_alloc.c
+    stateful/hash-sigs/hss_aux.c
+    stateful/hash-sigs/hss_common.c
+    stateful/hash-sigs/hss_compute.c
+    stateful/hash-sigs/hss_derive.c
+    stateful/hash-sigs/hss_generate.c
+    stateful/hash-sigs/hss_keygen.c
+    stateful/hash-sigs/hss_param.c
+    stateful/hash-sigs/hss_reserve.c
+    stateful/hash-sigs/hss_sign.c
+    stateful/hash-sigs/hss_sign_inc.c
+    stateful/hash-sigs/hss_thread_pthread.c
+    stateful/hash-sigs/hss_verify.c
+    stateful/hash-sigs/hss_verify_inc.c
+    stateful/hash-sigs/hss_zeroize.c
+    stateful/hash-sigs/lm_common.c
+    stateful/hash-sigs/lm_ots_common.c
+    stateful/hash-sigs/lm_ots_sign.c
+    stateful/hash-sigs/lm_ots_verify.c
+    stateful/hash-sigs/lm_verify.c
+    stateful/hash-sigs/sha256.c
+    stateful/xmss-reference/fips202.c
+    stateful/xmss-reference/hash.c
+    stateful/xmss-reference/hash_address.c
+    stateful/xmss-reference/params.c
+    stateful/xmss-reference/randombytes.c
+    stateful/xmss-reference/utils.c
+    stateful/xmss-reference/wots.c
+    stateful/xmss-reference/xmss.c
+    stateful/xmss-reference/xmss_commons.c
+    stateful/xmss-reference/xmss_core.c
+    stateful/xmss-reference/xmss_core_fast.c
     )
+
+include_directories(${INCLUDE_DIRS} stateful/hash-sigs stateful/xmss-reference)
 
 include_directories(${INCLUDE_DIRS})
 add_library(${PROJECT_NAME} OBJECT ${SOURCES})

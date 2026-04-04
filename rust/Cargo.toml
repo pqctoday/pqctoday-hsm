@@ -49,6 +49,7 @@ hbs-lms = "0.1.1"
 
 # Keccak-256 (G11 — Ethereum address derivation)
 tiny-keccak = { version = "2.0", features = ["keccak"] }
+xmss = "0.1.0-pre.0"
 
 [profile.release]
 # Optimize purely for size in WASM

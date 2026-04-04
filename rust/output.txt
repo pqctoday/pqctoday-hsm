@@ -1,0 +1,46 @@
+warning: unused import: `std::sync::atomic::AtomicU32`
+ --> src/crypto/handlers.rs:3:5
+  |
+3 | use std::sync::atomic::AtomicU32;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `std::sync::atomic::Ordering`
+ --> src/ffi.rs:6:5
+  |
+6 | use std::sync::atomic::Ordering;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `p256::elliptic_curve::group::ff::PrimeField`
+ --> src/crypto/bip32.rs:6:5
+  |
+6 | use p256::elliptic_curve::group::ff::PrimeField as P256PrimeField;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused variable: `t`
+   --> src/ffi.rs:125:22
+    |
+125 |             .filter(|t| !token_present_bool || true) // SoftHSM ...
+    |                      ^ help: if this is intentional, prefix it with an underscore: `_t`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/ffi.rs:267:9
+    |
+267 |     let mut err = 0;
+    |         ----^^^
+    |         |
+    |         help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `err`
+   --> src/ffi.rs:267:9
+    |
+267 |     let mut err = 0;
+    |         ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_err`
+
+warning: `softhsmrustv3` (lib) generated 6 warnings (run `cargo fix --lib -p softhsmrustv3` to apply 5 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.04s

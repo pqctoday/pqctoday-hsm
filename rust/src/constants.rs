@@ -408,6 +408,7 @@ pub const CKA_LEAF_INDEX: u32 = 0x8000_0105;          // current leaf index (u64
 
 // Standard multi-level HSS level-type attribute (PKCS#11 v3.2 §6.14)
 pub const CKA_HSS_LMS_TYPE: u32 = 0x0000_0618;
+pub const CKA_HSS_KEYS_REMAINING: u32 = 0x0000_061c;
 
 // ── LMS / LMOTS Parameter Set Constants ─────────────────────────────────────
 // Values match PKCS#11 v3.2 §6.14 table (tree-height based naming)
