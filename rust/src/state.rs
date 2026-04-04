@@ -9,6 +9,7 @@ use crate::crypto::*;
 thread_local! {
     pub static OBJECTS: RefCell<HashMap<u32, Attributes>> = RefCell::new(HashMap::new());
     pub static NEXT_HANDLE: RefCell<u32> = const { RefCell::new(100) };
+    pub static NEXT_SESSION_HANDLE: RefCell<u32> = const { RefCell::new(1) };
     pub static SIGN_STATE: RefCell<HashMap<u32, (u32, u32, Vec<u8>, bool)>> = RefCell::new(HashMap::new());
     pub static VERIFY_STATE: RefCell<HashMap<u32, (u32, u32, Vec<u8>, bool)>> = RefCell::new(HashMap::new());
     pub static ENCRYPT_STATE: RefCell<HashMap<u32, EncryptCtx>> = RefCell::new(HashMap::new());
@@ -19,6 +20,62 @@ thread_local! {
     /// across all operations, cleared in C_Finalize. Uses IETF ChaCha20 (RFC 8439)
     /// to match the C++ OpenSSL EVP_chacha20 implementation.
     pub static ACVP_RNG: RefCell<Option<ChaCha20Rng>> = RefCell::new(None);
+    
+    // PKCS#11 v3.2 token and session tracking
+    pub static SESSIONS: RefCell<HashMap<u32, SessionState>> = RefCell::new(HashMap::new());
+    pub static TOKEN_STORE: RefCell<HashMap<u32, TokenState>> = RefCell::new(HashMap::new());
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LoginState {
+    Public,
+    User,
+    SO,
+}
+
+#[derive(Clone)]
+pub struct TokenState {
+    pub slot_id: u32,
+    pub initialized: bool,
+    pub label: [u8; 32],
+    pub login_state: LoginState,
+    pub so_pin_salt: [u8; 16],
+    pub so_pin_hash: [u8; 32],
+    pub user_pin_salt: Option<[u8; 16]>,
+    pub user_pin_hash: Option<[u8; 32]>,
+}
+
+#[derive(Clone)]
+pub struct SessionState {
+    pub slot_id: u32,
+    pub rw_session: bool,
+}
+
+pub fn hash_pin(pin: &[u8], salt: &[u8; 16]) -> [u8; 32] {
+    use pbkdf2::pbkdf2_hmac;
+    use sha2::Sha256;
+    let mut hash = [0u8; 32];
+    pbkdf2_hmac::<Sha256>(pin, salt, 10000, &mut hash);
+    hash
+}
+
+pub fn init_token_store() {
+    TOKEN_STORE.with(|ts| {
+        let mut store = ts.borrow_mut();
+        if store.is_empty() {
+            // Provide an initial uninitialized token in slot 0
+            store.insert(0, TokenState {
+                slot_id: 0,
+                initialized: false,
+                label: [0x20; 32],
+                login_state: LoginState::Public,
+                so_pin_salt: [0u8; 16],
+                so_pin_hash: [0u8; 32],
+                user_pin_salt: None,
+                user_pin_hash: None,
+            });
+        }
+    });
 }
 
 pub struct EncryptCtx {

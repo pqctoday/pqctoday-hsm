@@ -183,20 +183,72 @@ const hSession = readUlong(hSessionPtr);
 console.log(`   Session handle: ${hSession}`);
 freePtr(hSessionPtr);
 
-console.log('\n── C_Login (User) ──');
+console.log('\n── C_Login Multi-Session Exclusivity Rules ──');
+// We have hSession which is RW. 
+console.log('   Test 1: SO login when RO session exists');
+const hSessROPtr = allocUlong();
+const roFlags = CKF_SERIAL_SESSION;
+check('C_OpenSession (RO)',
+    M._C_OpenSession(initedSlot, roFlags, 0, 0, hSessROPtr));
+const hSessRO = readUlong(hSessROPtr);
 const userPinStr = '87654321';
 const userPinPtr = writeStr(userPinStr);
-// C_InitPIN first (sets user PIN) — need a fresh pointer (soPinPtr was freed above)
 const soPinPtr2 = writeStr('12345678');
-check('C_Login(SO)',
-    M._C_Login(hSession, CKU_SO, soPinPtr2, soPinStr.length));
-M._free(soPinPtr2);
-check('C_InitPIN',
-    M._C_InitPIN(hSession, userPinPtr, userPinStr.length));
-check('C_Logout', M._C_Logout(hSession));
-check('C_Login(User)',
-    M._C_Login(hSession, CKU_USER, userPinPtr, userPinStr.length));
+
+// SO login should fail because a RO session exists
+let rv = M._C_Login(hSession, CKU_SO, soPinPtr2, 8);
+if (rv !== 0x000000B7 /* CKR_SESSION_READ_ONLY_EXISTS */) {
+    throw new Error(`FAIL: Expected CKR_SESSION_READ_ONLY_EXISTS (0xb7), got 0x${rv.toString(16)}`);
+}
+console.log('  ✓  SO login rejected due to RO session');
+
+check('C_CloseSession (RO)', M._C_CloseSession(hSessRO));
+
+console.log('   Test 2: CKR_USER_ANOTHER_ALREADY_LOGGED_IN enforcement');
+// Open a second RW session
+const hSessRW2Ptr = allocUlong();
+check('C_OpenSession (RW again)',
+    M._C_OpenSession(initedSlot, flags, 0, 0, hSessRW2Ptr));
+const hSessRW2 = readUlong(hSessRW2Ptr);
+
+// SO login on session 1
+check('C_Login(SO) on S1', M._C_Login(hSession, CKU_SO, soPinPtr2, 8));
+
+// Init User PIN
+check('C_InitPIN on S1', M._C_InitPIN(hSession, userPinPtr, userPinStr.length));
+
+// User login on session 2 -> should fail because SO is logged in
+rv = M._C_Login(hSessRW2, CKU_USER, userPinPtr, userPinStr.length);
+if (rv !== 0x00000104 /* CKR_USER_ANOTHER_ALREADY_LOGGED_IN */) {
+    throw new Error(`FAIL: Expected CKR_USER_ANOTHER_ALREADY_LOGGED_IN (0x104), got 0x${rv.toString(16)}`);
+}
+console.log('  ✓  User login rejected while SO logged in');
+
+check('C_Logout on S1', M._C_Logout(hSession));
+
+// User login on S2
+check('C_Login(USER) on S2', M._C_Login(hSessRW2, CKU_USER, userPinPtr, userPinStr.length));
+
+// SO login on S1 -> should fail because USER is logged in
+rv = M._C_Login(hSession, CKU_SO, soPinPtr2, 8);
+if (rv !== 0x00000104 /* CKR_USER_ANOTHER_ALREADY_LOGGED_IN */) {
+    throw new Error(`FAIL: Expected CKR_USER_ANOTHER_ALREADY_LOGGED_IN (0x104), got 0x${rv.toString(16)}`);
+}
+console.log('  ✓  SO login rejected while User logged in');
+
 M._free(userPinPtr);
+M._free(soPinPtr2);
+freePtr(hSessROPtr);
+freePtr(hSessRW2Ptr);
+
+check('C_CloseSession (S2)', M._C_CloseSession(hSessRW2));
+// Now User is still logged in globally (on the token), but if we want we can logout on S1.
+check('C_Logout (S1 fallback)', M._C_Logout(hSession));
+// Re-login as User on S1 for the rest of tests
+const userPinPtrFinal = writeStr(userPinStr);
+check('C_Login(User) final', M._C_Login(hSession, CKU_USER, userPinPtrFinal, userPinStr.length));
+M._free(userPinPtrFinal);
+
 
 console.log('\n── C_GenerateKeyPair (ML-KEM-768) ──');
 const pubTmpl = buildTemplate([

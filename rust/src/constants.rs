@@ -237,9 +237,32 @@ pub const CKP_SLH_DSA_SHAKE_256F: u32 = 0x0C;
 
 // ── PKCS#11 Session/Token Constants ─────────────────────────────────────────
 
+pub const CKS_RO_PUBLIC_SESSION: u32 = 0;
+pub const CKS_RO_USER_FUNCTIONS: u32 = 1;
+pub const CKS_RW_PUBLIC_SESSION: u32 = 2;
 pub const CKS_RW_USER_FUNCTIONS: u32 = 3;
+pub const CKS_RW_SO_FUNCTIONS: u32 = 4;
+
 pub const CKF_SERIAL_SESSION: u32 = 0x0000_0004;
 pub const CKF_RW_SESSION: u32 = 0x0000_0002;
+pub const CKR_SESSION_HANDLE_INVALID: u32 = 0x0000_00B3;
+pub const CKR_SESSION_EXISTS: u32 = 0x0000_00B6;
+pub const CKR_SESSION_READ_ONLY: u32 = 0x0000_00B5;
+pub const CKR_SESSION_READ_ONLY_EXISTS: u32 = 0x0000_00B7;
+pub const CKR_SESSION_READ_WRITE_SO_EXISTS: u32 = 0x0000_00B8;
+pub const CKR_USER_TYPE_INVALID: u32 = 0x0000_0103;
+pub const CKR_USER_ANOTHER_ALREADY_LOGGED_IN: u32 = 0x0000_0104;
+pub const CKR_USER_TOO_MANY_TYPES: u32 = 0x0000_0105;
+pub const CKR_USER_NOT_LOGGED_IN: u32 = 0x0000_0101;
+pub const CKR_USER_ALREADY_LOGGED_IN: u32 = 0x0000_0100;
+pub const CKR_USER_PIN_NOT_INITIALIZED: u32 = 0x0000_0102;
+pub const CKR_PIN_INCORRECT: u32 = 0x0000_00A0;
+pub const CKR_PIN_INVALID: u32 = 0x0000_00A1;
+pub const CKR_PIN_LEN_RANGE: u32 = 0x0000_00A2;
+pub const CKR_SLOT_ID_INVALID: u32 = 0x0000_0003;
+pub const CKU_SO: u32 = 0;
+pub const CKU_USER: u32 = 1;
+pub const CKU_CONTEXT_SPECIFIC: u32 = 2;
 
 // ── Mechanism Discovery ──────────────────────────────────────────────────────
 

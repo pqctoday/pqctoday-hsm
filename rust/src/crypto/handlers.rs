@@ -6,8 +6,6 @@ use wasm_bindgen::prelude::*;
 use crate::constants::*;
 use crate::state::*;
 
-/// Monotonically increasing session handle counter (PKCS#11 requires unique handles).
-pub static NEXT_SESSION_HANDLE: AtomicU32 = AtomicU32::new(1);
 
 // Install panic hook on WASM start — turns panics into console.error with stack traces
 #[wasm_bindgen(start)]

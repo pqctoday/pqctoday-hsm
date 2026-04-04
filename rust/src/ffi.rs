@@ -65,6 +65,7 @@ pub fn C_Initialize(p_init_args: *mut u8) -> u32 {
             }
         }
     }
+    crate::state::init_token_store();
     CKR_OK
 }
 
@@ -88,34 +89,109 @@ pub fn C_Finalize(_p_reserved: *mut u8) -> u32 {
     DIGEST_STATE.with(|s| s.borrow_mut().clear());
     FIND_STATE.with(|s| s.borrow_mut().clear());
     ACVP_RNG.with(|r| *r.borrow_mut() = None);
+    SESSIONS.with(|s| s.borrow_mut().clear());
+    TOKEN_STORE.with(|ts| ts.borrow_mut().clear());
     CKR_OK
 }
 
 #[wasm_bindgen(js_name = _C_GetSlotList)]
-pub fn C_GetSlotList(_token_present: u8, p_slot_list: *mut u32, pul_count: *mut u32) -> u32 {
+pub fn C_GetSlotList(token_present: u8, p_slot_list: *mut u32, pul_count: *mut u32) -> u32 {
     if pul_count.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
+    let token_present_bool = token_present != 0;
+    
+    // Auto-advance slots if needed (mimic SoftHSMv2/v3 shift: always provide 1 uninitialized token)
+    TOKEN_STORE.with(|ts| {
+        let mut store = ts.borrow_mut();
+        let all_initialized = store.values().all(|t| t.initialized);
+        if all_initialized {
+            let next_slot = store.keys().max().unwrap_or(&0) + 1;
+            store.insert(next_slot, TokenState {
+                slot_id: next_slot,
+                initialized: false,
+                label: [0x20; 32],
+                login_state: LoginState::Public,
+                so_pin_salt: [0u8; 16],
+                so_pin_hash: [0u8; 32],
+                user_pin_salt: None,
+                user_pin_hash: None,
+            });
+        }
+    });
+
+    let mut slots: Vec<u32> = TOKEN_STORE.with(|ts| {
+        ts.borrow().values()
+            .filter(|t| !token_present_bool || true) // SoftHSM treats all slots as having a token present
+            .map(|t| t.slot_id)
+            .collect()
+    });
+    slots.sort_unstable();
+
     unsafe {
         if p_slot_list.is_null() {
-            *pul_count = 1;
+            *pul_count = slots.len() as u32;
         } else {
-            *p_slot_list = 0;
-            *pul_count = 1;
+            if *pul_count < slots.len() as u32 {
+                *pul_count = slots.len() as u32;
+                return CKR_BUFFER_TOO_SMALL;
+            }
+            for (i, &slot_id) in slots.iter().enumerate() {
+                *p_slot_list.add(i) = slot_id;
+            }
+            *pul_count = slots.len() as u32;
         }
     }
     CKR_OK
 }
 
 #[wasm_bindgen(js_name = _C_InitToken)]
-pub fn C_InitToken(_slot_id: u32, _p_pin: *mut u8, _ul_pin_len: u32, _p_label: *mut u8) -> u32 {
-    CKR_OK
+pub fn C_InitToken(slot_id: u32, p_pin: *mut u8, ul_pin_len: u32, p_label: *mut u8) -> u32 {
+    if p_pin.is_null() || p_label.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    
+    // In PKCS#11, you generally shouldn't call C_InitToken when sessions are open on that slot.
+    let has_sessions = SESSIONS.with(|s| s.borrow().values().any(|sess| sess.slot_id == slot_id));
+    if has_sessions {
+        return CKR_SESSION_EXISTS;
+    }
+    
+    // Hash PIN with PBKDF2
+    let mut salt = [0u8; 16];
+    if getrandom::getrandom(&mut salt).is_err() {
+        return CKR_GENERAL_ERROR;
+    }
+    let pin_bytes = unsafe { std::slice::from_raw_parts(p_pin, ul_pin_len as usize) };
+    let so_pin_hash = hash_pin(pin_bytes, &salt);
+    
+    let label_bytes = unsafe { std::slice::from_raw_parts(p_label, 32) };
+    let mut label = [0x20u8; 32];
+    label.copy_from_slice(label_bytes);
+    
+    let success = TOKEN_STORE.with(|ts| {
+        let mut store = ts.borrow_mut();
+        if let Some(token) = store.get_mut(&slot_id) {
+            token.initialized = true;
+            token.label = label;
+            token.so_pin_salt = salt;
+            token.so_pin_hash = so_pin_hash;
+            token.user_pin_hash = None;
+            token.user_pin_salt = None;
+            token.login_state = LoginState::Public;
+            true
+        } else {
+            false
+        }
+    });
+    
+    if success { CKR_OK } else { CKR_SLOT_ID_INVALID }
 }
 
 #[wasm_bindgen(js_name = _C_OpenSession)]
 pub fn C_OpenSession(
-    _slot_id: u32,
-    _flags: u32,
+    slot_id: u32,
+    flags: u32,
     _p_application: *mut u8,
     _notify: *mut u8,
     ph_session: *mut u32,
@@ -123,14 +199,38 @@ pub fn C_OpenSession(
     if ph_session.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
+    let is_valid_slot = TOKEN_STORE.with(|ts| ts.borrow().contains_key(&slot_id));
+    if !is_valid_slot {
+        return CKR_SLOT_ID_INVALID;
+    }
+    // Check if SO is logged in and trying to open a RO session
+    let so_logged_in = TOKEN_STORE.with(|ts| {
+        ts.borrow().get(&slot_id).map(|t| t.login_state == LoginState::SO).unwrap_or(false)
+    });
+    let rw_session = (flags & CKF_RW_SESSION) != 0;
+    if so_logged_in && !rw_session {
+        return CKR_SESSION_READ_WRITE_SO_EXISTS;
+    }
     unsafe {
-        *ph_session = NEXT_SESSION_HANDLE.fetch_add(1, Ordering::Relaxed);
+        let handle = NEXT_SESSION_HANDLE.with(|h| {
+            let current = *h.borrow();
+            *h.borrow_mut() = current + 1;
+            current
+        });
+        *ph_session = handle;
+        SESSIONS.with(|s| {
+            s.borrow_mut().insert(handle, SessionState { slot_id, rw_session });
+        });
     }
     CKR_OK
 }
 
 #[wasm_bindgen(js_name = _C_CloseSession)]
 pub fn C_CloseSession(h_session: u32) -> u32 {
+    let existed = SESSIONS.with(|s| s.borrow_mut().remove(&h_session).is_some());
+    if !existed {
+        return CKR_SESSION_HANDLE_INVALID;
+    }
     // Clean up all operation state for this session
     SIGN_STATE.with(|s| s.borrow_mut().remove(&h_session));
     VERIFY_STATE.with(|s| s.borrow_mut().remove(&h_session));
@@ -142,31 +242,141 @@ pub fn C_CloseSession(h_session: u32) -> u32 {
 }
 
 #[wasm_bindgen(js_name = _C_Login)]
-pub fn C_Login(_h_session: u32, _user_type: u32, _p_pin: *mut u8, _ul_pin_len: u32) -> u32 {
+pub fn C_Login(h_session: u32, user_type: u32, p_pin: *mut u8, ul_pin_len: u32) -> u32 {
+    if p_pin.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let session = SESSIONS.with(|s| s.borrow().get(&h_session).cloned());
+    if session.is_none() {
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    let session = session.unwrap();
+    let slot_id = session.slot_id;
+
+    if user_type == CKU_SO && !session.rw_session {
+        return CKR_SESSION_READ_ONLY_EXISTS;
+    }
+
+    let token_opt = TOKEN_STORE.with(|ts| ts.borrow().get(&slot_id).cloned());
+    let token = if let Some(t) = token_opt { t } else { return CKR_GENERAL_ERROR; };
+    if !token.initialized {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
+
+    // Evaluate PKCS#11 v3.2 Exclusivity Boundaries
+    match user_type {
+        CKU_SO => {
+            if token.login_state == LoginState::SO { return CKR_USER_ALREADY_LOGGED_IN; }
+            if token.login_state == LoginState::User { return CKR_USER_ANOTHER_ALREADY_LOGGED_IN; }
+            let has_ro = SESSIONS.with(|s| s.borrow().values().any(|sess| sess.slot_id == slot_id && !sess.rw_session));
+            if has_ro { return CKR_SESSION_READ_ONLY_EXISTS; }
+            
+            let pin_bytes = unsafe { std::slice::from_raw_parts(p_pin, ul_pin_len as usize) };
+            if hash_pin(pin_bytes, &token.so_pin_salt) != token.so_pin_hash {
+                return CKR_PIN_INCORRECT;
+            }
+            TOKEN_STORE.with(|ts| ts.borrow_mut().get_mut(&slot_id).unwrap().login_state = LoginState::SO);
+        }
+        CKU_USER => {
+            if token.login_state == LoginState::User { return CKR_USER_ALREADY_LOGGED_IN; }
+            if token.login_state == LoginState::SO { return CKR_USER_ANOTHER_ALREADY_LOGGED_IN; }
+            if token.user_pin_hash.is_none() {
+                return CKR_USER_PIN_NOT_INITIALIZED;
+            }
+            let pin_bytes = unsafe { std::slice::from_raw_parts(p_pin, ul_pin_len as usize) };
+            if hash_pin(pin_bytes, &token.user_pin_salt.unwrap()) != token.user_pin_hash.unwrap() {
+                return CKR_PIN_INCORRECT;
+            }
+            TOKEN_STORE.with(|ts| ts.borrow_mut().get_mut(&slot_id).unwrap().login_state = LoginState::User);
+        }
+        _ => return CKR_USER_TYPE_INVALID,
+    }
     CKR_OK
 }
 
 #[wasm_bindgen(js_name = _C_Logout)]
-pub fn C_Logout(_h_session: u32) -> u32 {
-    CKR_OK
+pub fn C_Logout(h_session: u32) -> u32 {
+    let session = SESSIONS.with(|s| s.borrow().get(&h_session).cloned());
+    if session.is_none() {
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    let slot_id = session.unwrap().slot_id;
+    let mut changed = false;
+    TOKEN_STORE.with(|ts| {
+        let mut store = ts.borrow_mut();
+        if let Some(token) = store.get_mut(&slot_id) {
+            if token.login_state != LoginState::Public {
+                token.login_state = LoginState::Public;
+                changed = true;
+            }
+        }
+    });
+    if changed { CKR_OK } else { CKR_USER_NOT_LOGGED_IN }
 }
 
 #[wasm_bindgen(js_name = _C_InitPIN)]
-pub fn C_InitPIN(_h_session: u32, _p_pin: *mut u8, _ul_pin_len: u32) -> u32 {
-    CKR_OK
+pub fn C_InitPIN(h_session: u32, p_pin: *mut u8, ul_pin_len: u32) -> u32 {
+    if p_pin.is_null() {
+        return CKR_ARGUMENTS_BAD;
+    }
+    let session = SESSIONS.with(|s| s.borrow().get(&h_session).cloned());
+    if session.is_none() {
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    let session = session.unwrap();
+    if !session.rw_session {
+        return CKR_SESSION_READ_ONLY_EXISTS;
+    }
+    let slot_id = session.slot_id;
+    let mut success = false;
+    let mut not_logged_in = false;
+    TOKEN_STORE.with(|ts| {
+        let mut store = ts.borrow_mut();
+        if let Some(token) = store.get_mut(&slot_id) {
+            if token.login_state != LoginState::SO {
+                not_logged_in = true;
+                return;
+            }
+            let mut salt = [0u8; 16];
+            if getrandom::getrandom(&mut salt).is_err() { return; }
+            let pin_bytes = unsafe { std::slice::from_raw_parts(p_pin, ul_pin_len as usize) };
+            token.user_pin_hash = Some(hash_pin(pin_bytes, &salt));
+            token.user_pin_salt = Some(salt);
+            success = true;
+        }
+    });
+    if not_logged_in { return CKR_USER_NOT_LOGGED_IN; }
+    if success { CKR_OK } else { CKR_GENERAL_ERROR }
 }
 
 #[wasm_bindgen(js_name = _C_GetSessionInfo)]
-pub fn C_GetSessionInfo(_h_session: u32, p_info: *mut u8) -> u32 {
+pub fn C_GetSessionInfo(h_session: u32, p_info: *mut u8) -> u32 {
     if p_info.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
+    let session = SESSIONS.with(|s| s.borrow().get(&h_session).cloned());
+    if session.is_none() {
+        return CKR_SESSION_HANDLE_INVALID;
+    }
+    let session = session.unwrap();
+    let login_state = TOKEN_STORE.with(|ts| {
+        ts.borrow().get(&session.slot_id).map(|t| t.login_state).unwrap_or(LoginState::Public)
+    });
     unsafe {
         let ptr = p_info as *mut u32;
-        *ptr = 0;
-        *ptr.add(1) = CKS_RW_USER_FUNCTIONS;
-        *ptr.add(2) = CKF_SERIAL_SESSION | CKF_RW_SESSION;
-        *ptr.add(3) = 0;
+        *ptr = session.slot_id;
+        let actual_state = match (login_state, session.rw_session) {
+            (LoginState::SO, true) => CKS_RW_SO_FUNCTIONS, // 4
+            (LoginState::User, true) => CKS_RW_USER_FUNCTIONS, // 3
+            (LoginState::User, false) => CKS_RO_USER_FUNCTIONS, // 1
+            (LoginState::Public, true) => CKS_RW_PUBLIC_SESSION, // 2
+            (LoginState::Public, false) => CKS_RO_PUBLIC_SESSION, // 0
+            _ => 0,
+        };
+        *ptr.add(1) = actual_state;
+        let flags = CKF_SERIAL_SESSION | if session.rw_session { CKF_RW_SESSION } else { 0 };
+        *ptr.add(2) = flags;
+        *ptr.add(3) = 0; // ulDeviceError
     }
     CKR_OK
 }
