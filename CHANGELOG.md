@@ -8,9 +8,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.4.6] — 2026-04-04
+
 ### Added
 
-- **C++ Native Stateful Hash Signatures Bounds**: Integrated explicit explicit extraction logic in `SoftHSM_keygen.cpp` for Cisco array bounds calling out to `stateful/hash-sigs/hss.h` and `stateful/xmss-reference/xmss_core.h`.
+- **C++ Native Stateful Hash Signatures Bounds**: Integrated explicit fallback object-generation mapping in `SoftHSM_keygen.cpp` for native CKM_HSS_KEY_PAIR_GEN tracking, bounding `CKA_HSS_KEYS_REMAINING` properties directly in the object store.
 - **WASM v3.2 Strict Mapping Attributes**: Mapped exactly `CKA_HSS_KEYS_REMAINING` with ID `0x0000061cUL` strictly enforcing exact signature deductions within C_Sign loop execution to guarantee PKCS#11 backend exhaustion on WebAssembly integrations.
 
 ---

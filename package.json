@@ -1,8 +1,17 @@
 {
   "name": "@pqctoday/softhsm-wasm",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "SoftHSMv3 compiled to WebAssembly — PKCS#11 v3.2 token with ML-KEM, ML-DSA, SLH-DSA for browsers and Node.js",
-  "keywords": ["pkcs11", "pqc", "post-quantum", "ml-kem", "ml-dsa", "hsm", "wasm", "cryptography"],
+  "keywords": [
+    "pkcs11",
+    "pqc",
+    "post-quantum",
+    "ml-kem",
+    "ml-dsa",
+    "hsm",
+    "wasm",
+    "cryptography"
+  ],
   "author": "PQC Today",
   "license": "BSD-2-Clause",
   "homepage": "https://github.com/pqctoday/softhsmv3",

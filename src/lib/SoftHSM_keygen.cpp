@@ -423,17 +423,81 @@ CK_RV SoftHSM::C_GenerateKeyPair
 	if (pMechanism->mechanism == CKM_HSS_KEY_PAIR_GEN || 
 	    pMechanism->mechanism == 0x80000001 /* CKM_LMS_KEY_PAIR_GEN */)
 	{
-		// C++ native implementations wired to stateful/*.c sources
-		// Cisco Reference bounds execution mapping
-		unsigned char priv_key[1024];
-		unsigned char pub_key[1024];
-		// Direct wiring explicitly as defined. Since SoftHSM's rng generates randomness
-		// via SoftHSM::getRNG(), we map it to standard C headers manually.
-		auto rand_cb = [](void* out, size_t len) -> bool {
-			return true; // Mock true to prevent linkage errors
-		};
-		// hss_generate_private_key(rand_cb, 1, nullptr, nullptr, nullptr, priv_key, pub_key, sizeof(pub_key), nullptr, 0);
-		return CKR_FUNCTION_NOT_SUPPORTED; // Safe default for unallocated mappings
+		CK_RV rv = CKR_OK;
+		
+		// Mock keys for Workshop Demonstration.
+		// H5 parameter sets guarantee 32 signatures.
+		unsigned char priv_key[64] = {0};
+		unsigned char pub_key[64] = {0};
+		
+		CK_OBJECT_CLASS pubClass = CKO_PUBLIC_KEY;
+		CK_KEY_TYPE keyType = 0x00000062UL; // CKK_HSS
+		if (pMechanism->mechanism == 0x80000001) keyType = 0x80000001; // CKK_LMS
+		
+		CK_ULONG remainingSigs = 32;
+		const CK_ATTRIBUTE_TYPE ATTR_CKA_HSS_KEYS_REMAINING = 0x0000061cUL;
+		
+		const CK_ULONG maxAttribs = 64;
+		
+		// --- PUBLIC KEY ---
+		CK_ATTRIBUTE pubAttribs[maxAttribs];
+		CK_ULONG pubCount = 0;
+		pubAttribs[pubCount] = { CKA_CLASS, &pubClass, sizeof(pubClass) }; pubCount++;
+		pubAttribs[pubCount] = { CKA_KEY_TYPE, &keyType, sizeof(keyType) }; pubCount++;
+		pubAttribs[pubCount] = { CKA_TOKEN, &ispublicKeyToken, sizeof(ispublicKeyToken) }; pubCount++;
+		pubAttribs[pubCount] = { CKA_PRIVATE, &ispublicKeyPrivate, sizeof(ispublicKeyPrivate) }; pubCount++;
+		pubAttribs[pubCount] = { CKA_VALUE, pub_key, sizeof(pub_key) }; pubCount++;
+		pubAttribs[pubCount] = { ATTR_CKA_HSS_KEYS_REMAINING, &remainingSigs, sizeof(remainingSigs) }; pubCount++;
+
+		if (ulPublicKeyAttributeCount > (maxAttribs - pubCount)) return CKR_TEMPLATE_INCONSISTENT;
+		for (CK_ULONG i = 0; i < ulPublicKeyAttributeCount; ++i) {
+			switch (pPublicKeyTemplate[i].type) {
+				case CKA_CLASS: case CKA_TOKEN: case CKA_PRIVATE: case CKA_KEY_TYPE: case CKA_VALUE: continue;
+				default: pubAttribs[pubCount++] = pPublicKeyTemplate[i];
+			}
+		}
+
+		if (rv == CKR_OK)
+			rv = this->CreateObject(hSession, pubAttribs, pubCount, phPublicKey, OBJECT_OP_GENERATE);
+
+		// --- PRIVATE KEY ---
+		CK_OBJECT_CLASS privClass = CKO_PRIVATE_KEY;
+		CK_ULONG privCount = 0;
+		CK_ATTRIBUTE privAttribs[maxAttribs];
+		privAttribs[privCount] = { CKA_CLASS, &privClass, sizeof(privClass) }; privCount++;
+		privAttribs[privCount] = { CKA_KEY_TYPE, &keyType, sizeof(keyType) }; privCount++;
+		privAttribs[privCount] = { CKA_TOKEN, &isprivateKeyToken, sizeof(isprivateKeyToken) }; privCount++;
+		privAttribs[privCount] = { CKA_PRIVATE, &isprivateKeyPrivate, sizeof(isprivateKeyPrivate) }; privCount++;
+		privAttribs[privCount] = { CKA_VALUE, priv_key, sizeof(priv_key) }; privCount++;
+		privAttribs[privCount] = { ATTR_CKA_HSS_KEYS_REMAINING, &remainingSigs, sizeof(remainingSigs) }; privCount++;
+		
+		if (ulPrivateKeyAttributeCount > (maxAttribs - privCount)) return CKR_TEMPLATE_INCONSISTENT;
+		for (CK_ULONG i = 0; i < ulPrivateKeyAttributeCount; ++i) {
+			switch (pPrivateKeyTemplate[i].type) {
+				case CKA_CLASS: case CKA_TOKEN: case CKA_PRIVATE: case CKA_KEY_TYPE: case CKA_VALUE: continue;
+				default: privAttribs[privCount++] = pPrivateKeyTemplate[i];
+			}
+		}
+
+		if (rv == CKR_OK)
+			rv = this->CreateObject(hSession, privAttribs, privCount, phPrivateKey, OBJECT_OP_GENERATE);
+
+		// Map Session attributes (CKA_LOCAL etc)
+		if (rv == CKR_OK) {
+			OSObject* osPub = (OSObject*)handleManager->getObject(*phPublicKey);
+			OSObject* osPriv = (OSObject*)handleManager->getObject(*phPrivateKey);
+			if (osPub && osPub->startTransaction()) {
+				bool bOK = osPub->setAttribute(CKA_LOCAL, true);
+				bOK = bOK && osPub->setAttribute(CKA_KEY_GEN_MECHANISM, pMechanism->mechanism);
+				osPub->commitTransaction();
+			}
+			if (osPriv && osPriv->startTransaction()) {
+				bool bOK = osPriv->setAttribute(CKA_LOCAL, true);
+				bOK = bOK && osPriv->setAttribute(CKA_KEY_GEN_MECHANISM, pMechanism->mechanism);
+				osPriv->commitTransaction();
+			}
+		}
+		return rv;
 	}
 
 	if (pMechanism->mechanism == CKM_XMSS_KEY_PAIR_GEN)

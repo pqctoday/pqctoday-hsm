@@ -115,7 +115,6 @@ set(SOURCES
     stateful/hash-sigs/lm_ots_sign.c
     stateful/hash-sigs/lm_ots_verify.c
     stateful/hash-sigs/lm_verify.c
-    stateful/hash-sigs/sha256.c
     stateful/xmss-reference/fips202.c
     stateful/xmss-reference/hash.c
     stateful/xmss-reference/hash_address.c
@@ -125,7 +124,6 @@ set(SOURCES
     stateful/xmss-reference/wots.c
     stateful/xmss-reference/xmss.c
     stateful/xmss-reference/xmss_commons.c
-    stateful/xmss-reference/xmss_core.c
     stateful/xmss-reference/xmss_core_fast.c
     )
 
