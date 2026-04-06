@@ -18,6 +18,7 @@ pub const CKR_TEMPLATE_INCOMPLETE: u32 = 0x0000_00D0;
 pub const CKR_TEMPLATE_INCONSISTENT: u32 = 0x0000_00D1;
 pub const CKR_KEY_UNEXTRACTABLE: u32 = 0x0000_006A;
 pub const CKR_KEY_FUNCTION_NOT_PERMITTED: u32 = 0x0000_0068;
+pub const CKR_ATTRIBUTE_TYPE_INVALID: u32 = 0x0000_0012; // PKCS#11 §11.7 — attribute not present on object
 pub const CKR_BUFFER_TOO_SMALL: u32 = 0x0000_0150;
 
 // ── PKCS#11 Attribute Types ──────────────────────────────────────────────────
@@ -392,13 +393,14 @@ pub const CKM_XMSS: u32 = 0x0000_4036;
 pub const CKM_KECCAK_256: u32 = 0x8000_0010;
 
 // ── Stateful Key Attributes (vendor, G10) ────────────────────────────────────
-// Range: 0x80000101–0x80000105 (offset from CKM vendor range to avoid confusion)
+// Range: 0x80000101–0x80000106 (offset from CKM vendor range to avoid confusion)
 
 pub const CKA_STATEFUL_KEY_STATE: u32 = 0x8000_0101; // raw serialised private key blob
 pub const CKA_LMS_PARAM_SET: u32 = 0x8000_0102;      // CKP_LMS_SHA256_M32_H* value
 pub const CKA_LMOTS_PARAM_SET: u32 = 0x8000_0103;    // CKP_LMOTS_SHA256_N32_W* value
 pub const CKA_XMSS_PARAM_SET: u32 = 0x8000_0104;     // CKP_XMSS_* value
 pub const CKA_LEAF_INDEX: u32 = 0x8000_0105;          // current leaf index (u64, little-endian)
+pub const CKA_XMSS_KEYS_REMAINING: u32 = 0x8000_0106; // remaining XMSS signature operations (u32, LE)
 
 // Standard multi-level HSS level-type attribute (PKCS#11 v3.2 §6.14)
 pub const CKA_HSS_LMS_TYPE: u32 = 0x0000_0618;

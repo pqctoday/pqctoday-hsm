@@ -180,6 +180,7 @@ pub fn hss_keygen(
 // ── HSS multi-level sign ────────────────────────────────────────────────────
 
 pub fn hss_sign(
+    lms_param: u32,
     priv_key_bytes: &[u8],
     message: &[u8],
     update_fn: &mut dyn FnMut(&[u8]) -> Result<(), ()>,
@@ -192,7 +193,18 @@ pub fn hss_sign(
         update_fn(new_state)
     };
 
-    match lms::sign::<Sha256_256>(message, priv_key_bytes, &mut wrapped_update, None) {
+    // Dispatch based on hash family (determines OUTPUT_SIZE for key deserialization).
+    // Using the wrong type causes from_binary_representation to fail (size mismatch)
+    // which is silently misidentified as CKR_KEY_EXHAUSTED.
+    let result = match lms_param {
+        0x05..=0x09 => lms::sign::<Sha256_256>(message, priv_key_bytes, &mut wrapped_update, None),
+        0x0A..=0x0E => lms::sign::<Sha256_192>(message, priv_key_bytes, &mut wrapped_update, None),
+        0x0F..=0x13 => lms::sign::<Shake256_256>(message, priv_key_bytes, &mut wrapped_update, None),
+        0x14..=0x18 => lms::sign::<Shake256_192>(message, priv_key_bytes, &mut wrapped_update, None),
+        _ => lms::sign::<Sha256_256>(message, priv_key_bytes, &mut wrapped_update, None),
+    };
+
+    match result {
         Ok(sig) => Ok(sig.as_ref().to_vec()),
         Err(_) => {
             if !callback_fired {

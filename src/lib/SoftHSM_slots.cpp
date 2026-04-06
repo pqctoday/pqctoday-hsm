@@ -931,15 +931,16 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 			pInfo->ulMaxKeySize = 256;
 			pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
-		// ML-KEM (FIPS 203)
+		// ML-KEM (FIPS 203) — sizes are encapsulation key bytes (not security bits)
+		// ML-KEM-512=800B, ML-KEM-768=1184B, ML-KEM-1024=1568B
 		case CKM_ML_KEM_KEY_PAIR_GEN:
-			pInfo->ulMinKeySize = 128;
-			pInfo->ulMaxKeySize = 256;
+			pInfo->ulMinKeySize = 800;
+			pInfo->ulMaxKeySize = 1568;
 			pInfo->flags = CKF_GENERATE_KEY_PAIR;
 			break;
 		case CKM_ML_KEM:
-			pInfo->ulMinKeySize = 128;
-			pInfo->ulMaxKeySize = 256;
+			pInfo->ulMinKeySize = 800;
+			pInfo->ulMaxKeySize = 1568;
 			pInfo->flags = CKF_ENCAPSULATE | CKF_DECAPSULATE;
 			break;
 		// LMS / HSS stateful hash-based signatures (G10)

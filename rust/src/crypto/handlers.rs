@@ -673,19 +673,21 @@ pub fn get_sig_len(mech: u32, hkey: u32) -> u32 {
             CKP_SLH_DSA_SHA2_256S | CKP_SLH_DSA_SHAKE_256S => 29792,
             _ => 49856,
         },
+        // XMSS — sig = idx(4) + random(n) + WOTS+_sig(len*n) + auth_path(h*n); n=32, len=67 (w=16)
+        CKM_XMSS => {
+            let xmss_param = get_object_attr_u32(hkey, CKA_XMSS_PARAM_SET)
+                .unwrap_or(CKP_XMSS_SHA2_10_256);
+            let h: u32 = match xmss_param {
+                CKP_XMSS_SHA2_16_256 | CKP_XMSS_SHAKE_16_256 => 16,
+                CKP_XMSS_SHA2_20_256 | CKP_XMSS_SHAKE_20_256 => 20,
+                _ => 10,
+            };
+            4 + 32 + 67 * 32 + h * 32
+        }
         // LMS/HSS — size depends on param set; compute from key attributes.
         // Formula (RFC 8554): LMOTS sig = 4+n+p*n; LMS sig = 4+lmots_sig+4+h*n; HSS sig = 4+Npub*pub_size+Nsig*lms_sig
         // For n=32: LMOTS(W1)=4+32+265*32=8724, LMOTS(W4)=4+32+67*32=2180, LMOTS(W8)=4+32+34*32=1124
         // LMS(H5/W4)=2348, LMS(H25/W4)=8188; HSS(L=8,H5/W4) ≈ 8*(2348+52)+4 = 19204
-        // Return an upper bound based on LMS param set and levels; the actual write sets pul_sig_len precisely.
-        CKM_HSS => {
-            let lms_param = get_object_attr_u32(hkey, CKA_LMS_PARAM_SET)
-                .unwrap_or(CKP_LMS_SHA256_M32_H5);
-            let lmots_param = get_object_attr_u32(hkey, CKA_LMOTS_PARAM_SET)
-                .unwrap_or(CKP_LMOTS_SHA256_N32_W4);
-            // Works for both single-level LMS (levels=1) and multi-level HSS
-            lms_single_sig_len(lms_param, lmots_param)
-        }
         CKM_HSS => {
             let lms_param = get_object_attr_u32(hkey, CKA_LMS_PARAM_SET)
                 .unwrap_or(CKP_LMS_SHA256_M32_H5);
@@ -710,32 +712,44 @@ pub fn get_sig_len(mech: u32, hkey: u32) -> u32 {
 /// Compute the byte length of a single-level LMS signature (RFC 8554 §5.4).
 /// n=32 (SHA-256/M32), p depends on W.
 pub fn lms_single_sig_len(lms_param: u32, lmots_param: u32) -> u32 {
-    let n = 32u32;
-    let p = match lmots_param {
-        CKP_LMOTS_SHA256_N32_W1 => 265u32,
-        CKP_LMOTS_SHA256_N32_W2 => 133,
-        CKP_LMOTS_SHA256_N32_W4 => 67,
-        CKP_LMOTS_SHA256_N32_W8 => 34,
+    // Derive n (hash output bytes) from LMS IANA type ID range (SP 800-208 §4):
+    //   0x05–0x09: SHA-256/M32, 0x0F–0x13: SHAKE-256/M32 → n=32
+    //   0x0A–0x0E: SHA-256/M24, 0x14–0x18: SHAKE-256/M24 → n=24
+    let n: u32 = match lms_param {
+        0x05..=0x09 | 0x0F..=0x13 => 32,
+        0x0A..=0x0E | 0x14..=0x18 => 24,
+        _ => 32,
+    };
+    // p = LMOTS chain count per (n, W). SP 800-208 Appendix B.
+    let p: u32 = match lmots_param {
+        0x01 | 0x09 => 265, // N32 W1 (SHA-256 / SHAKE-256)
+        0x02 | 0x0A => 133, // N32 W2
+        0x03 | 0x0B => 67,  // N32 W4
+        0x04 | 0x0C => 34,  // N32 W8
+        0x05 | 0x0D => 200, // N24 W1
+        0x06 | 0x0E => 101, // N24 W2
+        0x07 | 0x0F => 51,  // N24 W4
+        0x08 | 0x10 => 26,  // N24 W8
         _ => 67,
     };
-    let h = match lms_param {
-        CKP_LMS_SHA256_M32_H5  => 5u32,
-        CKP_LMS_SHA256_M32_H10 => 10,
-        CKP_LMS_SHA256_M32_H15 => 15,
-        CKP_LMS_SHA256_M32_H20 => 20,
-        CKP_LMS_SHA256_M32_H25 => 25,
+    // h = tree height (same offset pattern in each range of 5)
+    let h: u32 = match lms_param {
+        0x05 | 0x0A | 0x0F | 0x14 => 5,
+        0x06 | 0x0B | 0x10 | 0x15 => 10,
+        0x07 | 0x0C | 0x11 | 0x16 => 15,
+        0x08 | 0x0D | 0x12 | 0x17 => 20,
+        0x09 | 0x0E | 0x13 | 0x18 => 25,
         _ => 5,
     };
-    let lmots_sig_len = 4 + n + p * n;           // typecode + C + y[]
-    let lms_sig_len = 4 + lmots_sig_len + 4 + h * n; // q + ots_sig + typecode + path[]
-    lms_sig_len
+    let lmots_sig_len = 4 + n + p * n;               // typecode + C + y[]
+    4 + lmots_sig_len + 4 + h * n                    // q + ots_sig + typecode + path[]
 }
 
 /// Compute the byte length of an HSS signature (RFC 8554 §6.3).
 /// LMS public key size = 4+16+32 = 52 bytes.
 pub fn hss_sig_len(levels: u32, lms_param: u32, lmots_param: u32) -> u32 {
     let lms_sig = lms_single_sig_len(lms_param, lmots_param);
-    let lms_pub = 52u32; // typecode(4) + I(16) + T[1](32)
+    let lms_pub = 56u32; // lms_type(4) + lmots_type(4) + I(16) + T[1](32) — RFC 8554 §5.4
     let l = levels.max(1);
     // HSS sig: Nspk(4) + (L-1)*(pub + sig) + 1*sig
     4 + (l - 1) * (lms_pub + lms_sig) + lms_sig

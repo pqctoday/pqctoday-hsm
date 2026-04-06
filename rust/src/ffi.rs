@@ -122,7 +122,7 @@ pub fn C_GetSlotList(token_present: u8, p_slot_list: *mut u32, pul_count: *mut u
 
     let mut slots: Vec<u32> = TOKEN_STORE.with(|ts| {
         ts.borrow().values()
-            .filter(|t| !token_present_bool || true) // SoftHSM treats all slots as having a token present
+            .filter(|t| !token_present_bool || t.initialized)
             .map(|t| t.slot_id)
             .collect()
     });
@@ -1262,8 +1262,16 @@ pub fn C_GenerateKeyPair(
                 store_bool(&mut prv_attrs, CKA_SENSITIVE, true);
                 store_bool(&mut prv_attrs, CKA_EXTRACTABLE, false);
                 store_bool(&mut prv_attrs, CKA_SIGN, true);
-                store_ulong(&mut pub_attrs, CKA_HSS_KEYS_REMAINING, 32); // Workshop simulated bounds
-                store_ulong(&mut prv_attrs, CKA_HSS_KEYS_REMAINING, 32);
+                // Total HSS capacity = ∏(2^H_i) for each level, capped at u32::MAX per PKCS#11 v3.2 §6.14.
+                let mut total_sigs: u64 = 1u64;
+                for &p in &lms_params {
+                    if let Some(leaves) = crate::crypto::lms::lms_param_max_leaves(p) {
+                        total_sigs = total_sigs.saturating_mul(leaves);
+                    }
+                }
+                let total_sigs = total_sigs.min(u32::MAX as u64) as u32;
+                store_ulong(&mut pub_attrs, CKA_HSS_KEYS_REMAINING, total_sigs);
+                store_ulong(&mut prv_attrs, CKA_HSS_KEYS_REMAINING, total_sigs);
                 store_bool(&mut prv_attrs, CKA_LOCAL, true);
                 prv_attrs.insert(CKA_STATEFUL_KEY_STATE, priv_bytes);
                 prv_attrs.insert(CKA_LEAF_INDEX, 0u64.to_le_bytes().to_vec());
@@ -1333,8 +1341,11 @@ pub fn C_GenerateKeyPair(
                 store_bool(&mut prv_attrs, CKA_SENSITIVE, true);
                 store_bool(&mut prv_attrs, CKA_EXTRACTABLE, false);
                 store_bool(&mut prv_attrs, CKA_SIGN, true);
-                store_ulong(&mut pub_attrs, CKA_HSS_KEYS_REMAINING, 32); // Workshop simulated bounds
-                store_ulong(&mut prv_attrs, CKA_HSS_KEYS_REMAINING, 32);
+                // XMSS capacity = 2^H from the parameter set (PKCS#11 v3.2 §6.15).
+                // Tracked under the vendor attribute CKA_XMSS_KEYS_REMAINING, separate from CKA_HSS_KEYS_REMAINING.
+                let xmss_max_sigs = crate::crypto::xmss_bridge::xmss_param_max_sigs(xmss_param);
+                store_ulong(&mut pub_attrs, CKA_XMSS_KEYS_REMAINING, xmss_max_sigs);
+                store_ulong(&mut prv_attrs, CKA_XMSS_KEYS_REMAINING, xmss_max_sigs);
                 store_bool(&mut prv_attrs, CKA_LOCAL, true);
                 prv_attrs.insert(CKA_STATEFUL_KEY_STATE, priv_bytes);
                 prv_attrs.insert(CKA_LEAF_INDEX, 0u64.to_le_bytes().to_vec());
@@ -1624,15 +1635,23 @@ pub fn C_DecapsulateKey(
 pub fn C_GetAttributeValue(_h_session: u32, h_object: u32, p_template: *mut u8, count: u32) -> u32 {
     let attrs = OBJECTS.with(|o| o.borrow().get(&h_object).cloned());
     if let Some(obj_attrs) = attrs {
-        let sensitive = read_bool_attr(&obj_attrs, CKA_SENSITIVE);
-        let extractable = read_bool_attr(&obj_attrs, CKA_EXTRACTABLE);
+        // PKCS#11 v3.2 §4.7: CKA_VALUE access restrictions apply only to private and
+        // secret keys. Public keys (CKO_PUBLIC_KEY) are always fully readable.
+        let class = obj_attrs.get(&CKA_CLASS)
+            .filter(|v| v.len() >= 4)
+            .map(|v| u32::from_le_bytes([v[0], v[1], v[2], v[3]]))
+            .unwrap_or(CKO_PUBLIC_KEY);
+        let is_private_or_secret = class == CKO_PRIVATE_KEY || class == CKO_SECRET_KEY;
+        let sensitive = is_private_or_secret && read_bool_attr(&obj_attrs, CKA_SENSITIVE);
+        let extractable = !is_private_or_secret || read_bool_attr(&obj_attrs, CKA_EXTRACTABLE);
+        let mut had_missing = false;
         unsafe {
             let tmpl_ptr = p_template as *mut u32;
             for i in 0..count {
                 let attr_type = *tmpl_ptr.add((i * 3) as usize);
                 let val_ptr = *tmpl_ptr.add((i * 3 + 1) as usize) as usize as *mut u8;
                 let val_len_ptr = tmpl_ptr.add((i * 3 + 2) as usize);
-                // Block CKA_VALUE access for sensitive or non-extractable keys
+                // Block CKA_VALUE access for sensitive or non-extractable private/secret keys
                 if attr_type == CKA_VALUE && (sensitive || !extractable) {
                     *val_len_ptr = 0xFFFFFFFF; // CK_UNAVAILABLE_INFORMATION
                     continue;
@@ -1646,10 +1665,16 @@ pub fn C_GetAttributeValue(_h_session: u32, h_object: u32, p_template: *mut u8, 
                     } else {
                         return CKR_BUFFER_TOO_SMALL;
                     }
+                } else {
+                    // PKCS#11 v3.2 §5.7.5: attribute not present on this object →
+                    // set ulValueLen = CK_UNAVAILABLE_INFORMATION
+                    *val_len_ptr = 0xFFFFFFFF;
+                    had_missing = true;
                 }
             }
         }
-        CKR_OK
+        // Per §5.7.5: return CKR_ATTRIBUTE_TYPE_INVALID if ANY attribute was absent
+        if had_missing { CKR_ATTRIBUTE_TYPE_INVALID } else { CKR_OK }
     } else {
         CKR_ARGUMENTS_BAD
     }
@@ -1849,35 +1874,51 @@ pub fn C_Sign(
                     Err(e) => Err(e),
                 }
             } else {
-                crate::crypto::lms::hss_sign(&priv_bytes, msg, &mut update_fn)
+                let lms_param = get_object_attr_u32(hkey, CKA_LMS_PARAM_SET).unwrap_or(0x05);
+                crate::crypto::lms::hss_sign(lms_param, &priv_bytes, msg, &mut update_fn)
             };
 
             let rv = match sign_result {
                 Ok(sig) => {
                     // Persist updated state atomically (callback already ran successfully)
-                    if let Some(new_priv_bytes) = new_state {
-                        set_object_attr_bytes(hkey, CKA_STATEFUL_KEY_STATE, new_priv_bytes);
-                        // Increment leaf index for LMS (HSS manages this internally)
+                    if let Some(ref new_priv_bytes) = new_state {
+                        set_object_attr_bytes(hkey, CKA_STATEFUL_KEY_STATE, new_priv_bytes.clone());
+
                         if mech == CKM_HSS {
+                            // HSS: increment leaf index (managed externally; hss library handles internal state)
                             let old_idx = get_object_attr_u64(hkey, CKA_LEAF_INDEX).unwrap_or(0);
                             set_object_attr_bytes(
                                 hkey,
                                 CKA_LEAF_INDEX,
                                 (old_idx + 1).to_le_bytes().to_vec(),
                             );
-                        }
-                        
-                        // Decrement Keys Remaining for all stateful types
-                        if let Some(mut remaining) = get_object_attr_u32(hkey, CKA_HSS_KEYS_REMAINING) {
-                            if remaining > 0 {
-                                remaining -= 1;
-                                // Save to private key map (public key maps are not dynamically changed post-init)
-                                set_object_attr_bytes(
-                                    hkey,
-                                    CKA_HSS_KEYS_REMAINING,
-                                    remaining.to_le_bytes().to_vec()
-                                );
+                            // HSS: decrement CKA_HSS_KEYS_REMAINING by 1 per sign (PKCS#11 v3.2 §6.14)
+                            if let Some(mut remaining) = get_object_attr_u32(hkey, CKA_HSS_KEYS_REMAINING) {
+                                if remaining > 0 {
+                                    remaining -= 1;
+                                    set_object_attr_bytes(
+                                        hkey,
+                                        CKA_HSS_KEYS_REMAINING,
+                                        remaining.to_le_bytes().to_vec(),
+                                    );
+                                }
                             }
+                        } else {
+                            // XMSS: derive remaining from the updated signing key state.
+                            // The xmss crate stores the leaf index as big-endian bytes at offset 4
+                            // inside the serialised signing key. Reading it directly is more accurate
+                            // than a simple -1 decrement (the crate may skip leaves internally).
+                            let xmss_param = get_object_attr_u32(hkey, CKA_XMSS_PARAM_SET)
+                                .unwrap_or(CKP_XMSS_SHA2_10_256);
+                            let remaining = crate::crypto::xmss_bridge::xmss_keys_remaining(
+                                xmss_param,
+                                new_priv_bytes,
+                            );
+                            set_object_attr_bytes(
+                                hkey,
+                                CKA_XMSS_KEYS_REMAINING,
+                                remaining.to_le_bytes().to_vec(),
+                            );
                         }
                     }
                     if (*pul_signature_len as usize) < sig.len() {
