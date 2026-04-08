@@ -41,10 +41,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cryptographic decapsulation failures. Enables callers to distinguish between parameter
   errors and cryptographic rejection.
 
-- **`wasm-bindgen` version alignment**: Downgraded `wasm-bindgen` from `0.2.117` to `0.2.92`
-  in `rust/Cargo.toml` to match the installed `wasm-bindgen-cli` toolchain version. No
-  functional API changes.
-
 ### Added
 
 - **`p11_v32_compliance_test` build target**: Added CMake target for the standalone PKCS#11

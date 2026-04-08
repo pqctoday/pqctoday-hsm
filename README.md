@@ -435,7 +435,7 @@ From `rust/Cargo.toml`:
 | `x25519-dalek` 2.0 | X25519 key agreement |
 | `aes` + `aes-gcm` + `cbc` + `aes-kw` | AES modes |
 | `sha2`, `sha3`, `hmac` | Digest and MAC |
-| `wasm-bindgen` 0.2.92 | WASM ↔ JS bridge |
+| `wasm-bindgen` 0.2.117 | WASM ↔ JS bridge |
 | `getrandom` 0.2 (js feature) | Browser-compatible CSPRNG |
 
 ### Building the Rust Engine
