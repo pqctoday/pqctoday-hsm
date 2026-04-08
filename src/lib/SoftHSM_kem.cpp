@@ -272,7 +272,7 @@ CK_RV SoftHSM::C_EncapsulateKey
 		}
 	}
 
-	rv = this->CreateObject(hSession, secretAttribs, secretAttribsCount, phKey, OBJECT_OP_GENERATE);
+	rv = this->CreateObject(hSession, secretAttribs, secretAttribsCount, phKey, OBJECT_OP_DERIVE);
 	if (rv != CKR_OK) return rv;
 
 	OSObject* osobject = (OSObject*)handleManager->getObject(*phKey);
@@ -397,7 +397,9 @@ CK_RV SoftHSM::C_DecapsulateKey
 	{
 		mlkem->recyclePrivateKey(privateKey);
 		CryptoFactory::i()->recycleAsymmetricAlgorithm(mlkem);
-		return CKR_GENERAL_ERROR;
+		if (ulCiphertextLen != 768 && ulCiphertextLen != 1088 && ulCiphertextLen != 1568)
+			return CKR_ENCRYPTED_DATA_LEN_RANGE;
+		return CKR_ENCRYPTED_DATA_INVALID;
 	}
 
 	mlkem->recyclePrivateKey(privateKey);
@@ -457,7 +459,7 @@ CK_RV SoftHSM::C_DecapsulateKey
 		}
 	}
 
-	rv = this->CreateObject(hSession, secretAttribs, secretAttribsCount, phKey, OBJECT_OP_GENERATE);
+	rv = this->CreateObject(hSession, secretAttribs, secretAttribsCount, phKey, OBJECT_OP_DERIVE);
 	if (rv != CKR_OK) return rv;
 
 	OSObject* osobject = (OSObject*)handleManager->getObject(*phKey);

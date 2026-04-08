@@ -489,8 +489,6 @@ rust/
     softhsmrustv3.js
     softhsmrustv3.d.ts
   test_harness.js      # Standalone integration test
-  tests/
-    pqc_api_test.rs    # Native Rust unit tests
 tests/
   parity-wasm.mjs      # Cross-engine C++ ↔ Rust parity verification
 softhsmrustv3design.md  # Detailed architecture design document

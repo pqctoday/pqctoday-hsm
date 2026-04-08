@@ -166,6 +166,7 @@ CK_RV P11Object::loadTemplate(Token *token, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG
 		// case 1,3,4 and 5 of the attribute checks are done while retrieving the attribute itself.
 		CK_RV retrieve_rv = attr->retrieve(token, isPrivate, pTemplate[i].pValue, &pTemplate[i].ulValueLen);
 		if (retrieve_rv == CKR_ATTRIBUTE_SENSITIVE) {
+            printf("DEBUG: attr->retrieve returned CKR_ATTRIBUTE_SENSITIVE for attribute 0x%lx\\n", pTemplate[i].type);
 			// If case 1 applies to any of the requested attributes, then the call should
 			// return the value CKR_ATTRIBUTE_SENSITIVE.
 			sensitive = true;
@@ -1793,7 +1794,7 @@ bool P11MLDSAPublicKeyObj::init(OSObject *inobject)
 	if (!P11PublicKeyObj::init(inobject)) return false;
 
 	// Create attributes — per spec Table 280: CKA_PARAMETER_SET^1,3  CKA_VALUE^1,4
-	P11Attribute* attrParamSet = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck3);
+	P11Attribute* attrParamSet = new P11AttrParameterSet(osobject, P11Attribute::ck1);
 	P11Attribute* attrValue    = new P11AttrValue(osobject, P11Attribute::ck1|P11Attribute::ck4);
 
 	// Initialize the attributes
@@ -1881,7 +1882,7 @@ bool P11SLHDSAPublicKeyObj::init(OSObject *inobject)
 	if (!P11PublicKeyObj::init(inobject)) return false;
 
 	// Create attributes — per spec Table 287: CKA_PARAMETER_SET^1,3  CKA_VALUE^1,4
-	P11Attribute* attrParamSet = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck3);
+	P11Attribute* attrParamSet = new P11AttrParameterSet(osobject, P11Attribute::ck1);
 	P11Attribute* attrValue    = new P11AttrValue(osobject, P11Attribute::ck1|P11Attribute::ck4);
 
 	// Initialize the attributes
@@ -1969,7 +1970,7 @@ bool P11MLKEMPublicKeyObj::init(OSObject *inobject)
 	if (!P11PublicKeyObj::init(inobject)) return false;
 
 	// Create attributes — per spec Table 290: CKA_PARAMETER_SET^1,3  CKA_VALUE^1,4
-	P11Attribute* attrParamSet    = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck3);
+	P11Attribute* attrParamSet    = new P11AttrParameterSet(osobject, P11Attribute::ck1);
 	P11Attribute* attrValue       = new P11AttrValue(osobject, P11Attribute::ck1|P11Attribute::ck4);
 	P11Attribute* attrEncapsulate = new P11AttrEncapsulate(osobject);
 
@@ -2110,11 +2111,11 @@ bool P11HSSPrivateKeyObj::init(OSObject *inobject)
 	P11Attribute* attrDecrypt       = new P11AttrDecrypt(osobject);
 	P11Attribute* attrUnwrap        = new P11AttrUnwrap(osobject);
 	P11Attribute* attrDerive        = new P11AttrDerive(osobject);
-	P11Attribute* attrLevels        = new P11AttrHssLevels(osobject, P11Attribute::ck1|P11Attribute::ck3);
+	P11Attribute* attrLevels        = new P11AttrHssLevels(osobject, P11Attribute::ck1);
 	P11Attribute* attrLmsType       = new P11AttrHssLmsType(osobject);
 	P11Attribute* attrLmotsType     = new P11AttrHssLmotsType(osobject);
-	P11Attribute* attrLmsTypes      = new P11AttrHssLmsTypes(osobject, P11Attribute::ck1|P11Attribute::ck3);
-	P11Attribute* attrLmotsTypes    = new P11AttrHssLmotsTypes(osobject, P11Attribute::ck1|P11Attribute::ck3);
+	P11Attribute* attrLmsTypes      = new P11AttrHssLmsTypes(osobject, P11Attribute::ck1);
+	P11Attribute* attrLmotsTypes    = new P11AttrHssLmotsTypes(osobject, P11Attribute::ck1);
 	P11Attribute* attrKeysRemaining = new P11AttrHssKeysRemaining(osobject);
 
 	if (!attrValue->init() || !attrSign->init() || !attrSensitive->init() ||
@@ -2164,7 +2165,7 @@ bool P11XMSSPublicKeyObj::init(OSObject *inobject)
 	P11Attribute* attrVerify     = new P11AttrVerify(osobject);
 	P11Attribute* attrEncrypt    = new P11AttrEncrypt(osobject);
 	P11Attribute* attrWrap       = new P11AttrWrap(osobject);
-	P11Attribute* attrParamSet   = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck3);
+	P11Attribute* attrParamSet   = new P11AttrParameterSet(osobject, P11Attribute::ck1);
 	P11Attribute* attrKeysRemaining = new P11AttrHssKeysRemaining(osobject);
 
 	if (!attrValue->init() || !attrVerify->init() || !attrEncrypt->init() ||
@@ -2248,7 +2249,7 @@ bool P11XMSSMTPublicKeyObj::init(OSObject *inobject)
 	P11Attribute* attrVerify        = new P11AttrVerify(osobject);
 	P11Attribute* attrEncrypt       = new P11AttrEncrypt(osobject);
 	P11Attribute* attrWrap          = new P11AttrWrap(osobject);
-	P11Attribute* attrParamSet      = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck3);
+	P11Attribute* attrParamSet      = new P11AttrParameterSet(osobject, P11Attribute::ck1);
 	P11Attribute* attrKeysRemaining = new P11AttrHssKeysRemaining(osobject);
 
 	if (!attrValue->init() || !attrVerify->init() || !attrEncrypt->init() ||

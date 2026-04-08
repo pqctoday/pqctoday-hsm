@@ -10,6 +10,48 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.18] — 2026-04-08
+
+### Fixed
+
+- **PKCS#11 v3.2 public key `CKA_PARAMETER_SET` attribute flags — C++ engine**: Removed
+  erroneous `ck3` (MUST NOT be in `C_GenerateKeyPair` template) from `CKA_PARAMETER_SET` on
+  ML-DSA, SLH-DSA, ML-KEM, XMSS, and XMSS-MT public key objects. Public keys use `ck1` only
+  (MUST be in `C_CreateObject` template) per PKCS#11 v3.2 Tables 280, 287, 290, 273, 275.
+  The `ck3` flag was incorrectly preventing callers from supplying `CKA_PARAMETER_SET` in
+  `C_GenerateKeyPair` public key templates.
+
+- **HSS private key attribute flags — C++ engine**: Removed `ck3` from `CKA_HSS_LEVELS`,
+  `CKA_HSS_LMS_TYPES`, and `CKA_HSS_LMOTS_TYPES` private key attributes. These attributes
+  use `ck1` only — the `ck3` flag incorrectly rejected caller-supplied values during keygen.
+
+- **`CKA_PUBLIC_KEY_INFO` transparency — C++ engine**: Added `P11AttrPublicKeyInfo::retrieve()`
+  override that always passes `isPrivate=false` to the base retrieval, ensuring
+  `CKA_PUBLIC_KEY_INFO` is returned in clear regardless of the object's private flag.
+  Per PKCS#11 v3.2 §4.14: "The value of this attribute can be retrieved by any application."
+
+- **KEM derived key operation type — C++ engine**: `C_EncapsulateKey` and `C_DecapsulateKey`
+  now create the output shared-secret key object with `OBJECT_OP_DERIVE` instead of
+  `OBJECT_OP_GENERATE`. KEM-produced secrets are derived keys, not generated keys — this
+  affects which template validation rules apply (§5.18.5 vs §5.18.3).
+
+- **`C_DecapsulateKey` error codes — C++ engine**: Replaced `CKR_GENERAL_ERROR` with
+  spec-compliant error codes: `CKR_ENCRYPTED_DATA_LEN_RANGE` when the ciphertext length does
+  not match any ML-KEM variant (768/1088/1568 bytes), and `CKR_ENCRYPTED_DATA_INVALID` for
+  cryptographic decapsulation failures. Enables callers to distinguish between parameter
+  errors and cryptographic rejection.
+
+- **`wasm-bindgen` version alignment**: Downgraded `wasm-bindgen` from `0.2.117` to `0.2.92`
+  in `rust/Cargo.toml` to match the installed `wasm-bindgen-cli` toolchain version. No
+  functional API changes.
+
+### Added
+
+- **`p11_v32_compliance_test` build target**: Added CMake target for the standalone PKCS#11
+  v3.2 compliance test executable (native builds only, excluded from Emscripten).
+
+---
+
 ## [0.4.17] — 2026-04-08
 
 ### Fixed

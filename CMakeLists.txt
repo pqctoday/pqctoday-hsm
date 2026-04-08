@@ -149,3 +149,8 @@ if(EMSCRIPTEN)
 else()
     add_subdirectory(src)
 endif()
+
+if(NOT EMSCRIPTEN)
+    add_executable(p11_v32_compliance_test p11_v32_compliance_test.cpp)
+    target_link_libraries(p11_v32_compliance_test dl)
+endif()

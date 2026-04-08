@@ -924,6 +924,13 @@ bool P11AttrPublicKeyInfo::setDefault()
 	return osobject->setAttribute(type, attr);
 }
 
+// CKA_PUBLIC_KEY_INFO is always returned in clear — not sensitive per PKCS#11 v3.2 §4.14
+CK_RV P11AttrPublicKeyInfo::retrieve(Token* token, bool /*isPrivate*/, CK_VOID_PTR pValue, CK_ULONG_PTR pulValueLen)
+{
+	// Ignore the object's isPrivate status, CKA_PUBLIC_KEY_INFO is never stored encrypted
+	return P11Attribute::retrieve(token, false, pValue, pulValueLen);
+}
+
 /*****************************************
  * CKA_ID
  *****************************************/

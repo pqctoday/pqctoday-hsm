@@ -352,6 +352,9 @@ public:
 protected:
 	// Set the default value of the attribute
 	virtual bool setDefault();
+
+	// CKA_PUBLIC_KEY_INFO is always public — not sensitive per PKCS#11 v3.2 §4.14
+	virtual CK_RV retrieve(Token* token, bool isPrivate, CK_VOID_PTR pValue, CK_ULONG_PTR pulValueLen);
 };
 
 /*****************************************
