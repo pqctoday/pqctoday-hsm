@@ -110,8 +110,10 @@ pub const CKM_ML_KEM: u32 = 0x0000_0017;
 // PQC - DSA
 pub const CKM_ML_DSA_KEY_PAIR_GEN: u32 = 0x0000_001C;
 pub const CKM_ML_DSA: u32 = 0x0000_001D;
+pub const CKM_HASH_ML_DSA: u32 = 0x0000_001F;
 pub const CKM_SLH_DSA_KEY_PAIR_GEN: u32 = 0x0000_002D;
 pub const CKM_SLH_DSA: u32 = 0x0000_002E;
+pub const CKM_HASH_SLH_DSA: u32 = 0x0000_0034;
 
 // CKH_ hedge/determinism constants (PKCS#11 v3.2 §7.3)
 pub const CKH_DETERMINISTIC_REQUIRED: u32 = 0x0000_0002;
@@ -283,6 +285,7 @@ pub const SUPPORTED_MECHS: &[u32] = &[
     // ML-DSA (FIPS 204) — pure + pre-hash
     CKM_ML_DSA_KEY_PAIR_GEN,
     CKM_ML_DSA,
+    CKM_HASH_ML_DSA,
     CKM_HASH_ML_DSA_SHA224,
     CKM_HASH_ML_DSA_SHA256,
     CKM_HASH_ML_DSA_SHA384,
@@ -296,6 +299,7 @@ pub const SUPPORTED_MECHS: &[u32] = &[
     // SLH-DSA (FIPS 205) — pure + pre-hash
     CKM_SLH_DSA_KEY_PAIR_GEN,
     CKM_SLH_DSA,
+    CKM_HASH_SLH_DSA,
     CKM_HASH_SLH_DSA_SHA224,
     CKM_HASH_SLH_DSA_SHA256,
     CKM_HASH_SLH_DSA_SHA384,
@@ -339,6 +343,7 @@ pub const SUPPORTED_MECHS: &[u32] = &[
     CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
     CKM_EC_MONTGOMERY_KEY_DERIVE,
     CKM_EDDSA,
+    CKM_EDDSA_PH,
     // AES
     CKM_AES_KEY_GEN,
     CKM_AES_CBC_PAD,

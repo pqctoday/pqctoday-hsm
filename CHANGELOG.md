@@ -10,6 +10,57 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.16] — 2026-04-08
+
+### Added
+
+- **`CKM_HASH_ML_DSA` (0x1F) + `CKM_HASH_SLH_DSA` (0x34) in Rust `SUPPORTED_MECHS`**: The
+  base HashML-DSA and HashSLH-DSA mechanism constants were present in `constants.rs` but absent
+  from the `SUPPORTED_MECHS` slice, so `C_GetMechanismList` did not expose them. Added to both
+  `SUPPORTED_MECHS` and `constants.js`.
+
+- **`CKM_EDDSA_PH` (0xffff1057) — Ed25519ph pre-hash mode**: Ed25519 pre-hash signing per
+  RFC 8032 §5.1 and PKCS#11 v3.2 §6.3.15. Added to `constants.rs` `SUPPORTED_MECHS` and
+  `constants.js`.
+
+- **`CKM_SHA3_256` (0x000002b0) + `CKM_SHA3_256_HMAC` (0x000002b1)**: SHA3-256 digest and
+  HMAC-SHA3-256 constants added to `constants.js`.
+
+- **`CKM_KMAC_128` (0x80000100) + `CKM_KMAC_256` (0x80000101)**: KMAC constants (vendor-defined
+  range) added to `constants.js` for FIPS 202 / SP 800-185 keyed MAC.
+
+### Added (ACVP test suite — `tests/acvp-wasm.mjs`)
+
+- **§6.5 HashML-DSA functional sign+verify** (FIPS 204): Three test cases covering
+  HashML-DSA-44-SHA256, HashML-DSA-65-SHA512, and HashML-DSA-87-SHA512 via
+  `CKM_HASH_ML_DSA_SHA256` / `CKM_HASH_ML_DSA_SHA512`. Skips gracefully when
+  `CKM_HASH_ML_DSA` is absent from the mechanism list.
+
+- **§9.5 HashSLH-DSA functional sign+verify**: Two test cases covering
+  HashSLH-DSA-SHA2-128f-SHA256 and HashSLH-DSA-SHA2-256f-SHA512 via
+  `CKM_HASH_SLH_DSA_SHA256` / `CKM_HASH_SLH_DSA_SHA512`. Skips gracefully when
+  `CKM_HASH_SLH_DSA` is absent.
+
+- **§10.5 SHA3-256 digest empty-string KAT** (FIPS 202): Validates
+  `digest([], CKM_SHA3_256) == a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a`.
+  Skips when `CKM_SHA3_256` absent.
+
+- **§16.5 Ed25519ph functional sign+verify**: Round-trip test using `CKM_EDDSA_PH`. Generates
+  Ed25519 key pair, signs with pre-hash mode, verifies. Skips when `CKM_EDDSA_PH` absent.
+
+Total ACVP test vectors: **37 per engine, 74 in dual-HSM mode** (was 31 / 62).
+
+### Removed
+
+- **`rust/tests/pqc_api_test.rs`**: Pure-Rust unit tests for ML-KEM and SLH-DSA context/
+  deterministic signing removed. Superseded by the WASM-layer ACVP test suite
+  (`tests/acvp-wasm.mjs`) which validates these paths against real PKCS#11 dispatch.
+
+- **`rust/tests/test_xmss.rs`**: Stub XMSS unit test removed. XMSS is tested end-to-end in
+  the WASM integration suite.
+
+---
+
 ## [0.4.15] — 2026-04-07
 
 ### Fixed

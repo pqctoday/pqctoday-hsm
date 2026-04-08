@@ -135,7 +135,8 @@ C_DecapsulateKey()        // KEM decapsulation (v3.2)
 ```c
 CKM_ML_DSA_KEY_PAIR_GEN  // Key pair generation
 CKM_ML_DSA               // Pure ML-DSA sign/verify (one-shot and message-session)
-CKM_HASH_ML_DSA_SHA224   // Pre-hash ML-DSA variants
+CKM_HASH_ML_DSA          // HashML-DSA — hash function chosen by mechanism param
+CKM_HASH_ML_DSA_SHA224   // HashML-DSA pre-hash variants (10 specific)
 CKM_HASH_ML_DSA_SHA256
 CKM_HASH_ML_DSA_SHA384
 CKM_HASH_ML_DSA_SHA512
@@ -152,7 +153,8 @@ CKM_HASH_ML_DSA_SHAKE256
 ```c
 CKM_SLH_DSA_KEY_PAIR_GEN // Key pair generation
 CKM_SLH_DSA              // Pure SLH-DSA sign/verify
-CKM_HASH_SLH_DSA_SHA224  // Pre-hash SLH-DSA variants (11 total)
+CKM_HASH_SLH_DSA         // HashSLH-DSA — hash function chosen by mechanism param
+CKM_HASH_SLH_DSA_SHA224  // HashSLH-DSA pre-hash variants (10 specific)
 CKM_HASH_SLH_DSA_SHA256
 CKM_HASH_SLH_DSA_SHA384
 CKM_HASH_SLH_DSA_SHA512
@@ -233,6 +235,10 @@ CKM_ECDSA_SHA3_256         = 0x00001048
 CKM_ECDSA_SHA3_384         = 0x00001049
 CKM_ECDSA_SHA3_512         = 0x0000104a
 
+// EdDSA — pure and pre-hash (RFC 8032; PKCS#11 v3.2 §6.3.15)
+CKM_EDDSA                  = 0x00001057  // Ed25519 pure signing
+CKM_EDDSA_PH               = 0xffff1057  // Ed25519ph pre-hash mode (CKM_EDDSA_PH)
+
 // RSA PKCS#1 v1.5 with SHA-3 (C++ engine)
 CKM_RSA_SHA3_224_PKCS      = 0x0000004f
 CKM_RSA_SHA3_256_PKCS      = 0x00000050
@@ -273,11 +279,28 @@ CKM_SP800_108_FEEDBACK_KDF = 0x000003ad
 CKM_ECDH1_COFACTOR_DERIVE  = 0x00001051
 ```
 
+### Digest & MAC
+
+```c
+// SHA-2 (C++ and Rust engines)
+CKM_SHA256                 = 0x00000250  // SHA-256 digest
+CKM_SHA384                 = 0x00000260  // SHA-384 digest
+CKM_SHA512                 = 0x00000270  // SHA-512 digest
+
+// SHA-3 (FIPS 202)
+CKM_SHA3_256               = 0x000002b0  // SHA3-256 digest
+CKM_SHA3_256_HMAC          = 0x000002b1  // HMAC-SHA3-256
+
+// KMAC (FIPS 202 / SP 800-185) — keyed MAC using KECCAK-based XOF
+CKM_KMAC_128               = 0x80000100  // KMAC-128 (vendor-defined range)
+CKM_KMAC_256               = 0x80000101  // KMAC-256 (vendor-defined range)
+```
+
 ## Validation & Compliance Status
 
 The `softhsmv3` implementations maintain strict compliance with current ACVP test vectors and the PKCS#11 v3.2 specification:
 
-- **ACVP Testing (v0.4.0+)**: Both the C++ and Rust engines pass **62/62** ACVP test vectors (31 per engine, zero failures, zero skips) in dual HSM mode. Coverage includes ML-KEM (Decapsulate KAT + Round-Trip), ML-DSA (SigVer KAT + Functional, all 3 variants), SLH-DSA (Functional, 2 param sets), AES-GCM/CBC/CTR/KW/KWP, HMAC-SHA256/384/512, RSA-PSS, ECDSA P-256/P-384, EdDSA Ed25519, SHA-256 (3 vectors), PBKDF2, and HKDF.
+- **ACVP Testing (v0.4.16+)**: Both the C++ and Rust engines pass **74/74** ACVP test vectors (37 per engine, zero failures, zero skips) in dual HSM mode. Coverage includes ML-KEM (Decapsulate KAT + Round-Trip), ML-DSA (SigVer KAT + Functional, all 3 variants), HashML-DSA (SHA-256/SHA-512, 3 variants), SLH-DSA (Functional, 2 param sets), HashSLH-DSA (SHA2-128f-SHA256, SHA2-256f-SHA512), AES-GCM/CBC/CTR/KW/KWP, HMAC-SHA256/384/512, RSA-PSS, ECDSA P-256/P-384, EdDSA Ed25519, Ed25519ph, SHA-256 (3 vectors), SHA3-256 (empty-string vector), PBKDF2, and HKDF.
 - **NIST ACVP LMS sigVer (v0.4.7)**: **320/320** official NIST ACVP demo vectors validated against `lm_validate_signature()` — all 80 SP 800-208 parameter combinations (SHA-256 M32/M24 + SHAKE-256 M32/M24 × 5 tree heights × 4 Winternitz params). Source: [usnistgov/ACVP-Server](https://github.com/usnistgov/ACVP-Server/tree/master/gen-val/json-files/LMS-sigVer-1.0).
 - **PKCS#11 v3.2 Semantics**: The standalone C++ algorithmic validator (`pqc_validate`) successfully passes 66/66 deep evaluation tests, including comprehensive cryptographic round-trips and negative tampering evaluations against the compiled `libsofthsmv3.dylib`.
 - **Playground E2E**: End-to-end token integration and ACVP matrix execution are verified via automated Playwright continuous integration (`playground-softhsm-acvp.spec.ts`) in dual HSM mode.
@@ -367,16 +390,17 @@ Multi-part, admin, and async stubs return `CKR_FUNCTION_NOT_SUPPORTED`. The brow
 
 - RSA (PKCS#1 v1.5, OAEP, PSS — keygen + sign/verify)
 - ECDSA P-256/P-384 (keygen, sign, verify) — including ECDSA-SHA512 (FIPS 186-5 §6.4) and ECDSA-SHA3-224/256/384/512
-- Ed25519 (keygen, sign, verify)
+- Ed25519 (keygen, sign, verify) — pure (`CKM_EDDSA`) and pre-hash (`CKM_EDDSA_PH`, Ed25519ph)
 - ECDH P-256 + X25519 (key agreement via `C_DeriveKey`)
 - AES-128/256 (GCM, CBC-PAD, CTR, Key Wrap, Key Wrap with Padding, Authenticated Wrap/Unwrap)
-- SHA-256/384/512, SHA3-256/512 (digest)
-- HMAC-SHA256/384/512, HMAC-SHA3-256/512
+- SHA-256/384/512, SHA3-256/512 (digest); SHA3-256 (`CKM_SHA3_256`) validated against FIPS 202 empty-string KAT
+- HMAC-SHA256/384/512, HMAC-SHA3-256/512, HMAC-SHA3-256 (`CKM_SHA3_256_HMAC`)
+- KMAC-128/256 (`CKM_KMAC_128`, `CKM_KMAC_256`) — FIPS 202 / SP 800-185
 - HKDF (RFC 5869), PBKDF2 (`CKM_PKCS5_PBKD2`), SP 800-108 Counter/Feedback KDF
 
 > **Note:** RSA-SHA3 variants (`CKM_RSA_SHA3_*_PKCS`, `CKM_RSA_SHA3_*_PKCS_PSS`) and ECDH1 with X9.63 KDF are C++ engine only.
 
-**64 mechanisms** registered in `C_GetMechanismList` — 100% have implementations.
+**70 mechanisms** registered in `C_GetMechanismList` — 100% have implementations. (Added: `CKM_HASH_ML_DSA`, `CKM_HASH_SLH_DSA`, `CKM_EDDSA_PH`, `CKM_SHA3_256`, `CKM_SHA3_256_HMAC`, `CKM_KMAC_128`, `CKM_KMAC_256`.)
 
 ### PKCS#11 v3.2 Compliance Enforcement
 

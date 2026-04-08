@@ -211,6 +211,26 @@ async function runSuite(engineName) {
       }
     }
 
+    // ── 6.5. HashML-DSA Pre-Hash Functional Sign+Verify (FIPS 204) ──────
+    if (mechs.size > 0 && !mechs.has(CK.CKM_HASH_ML_DSA)) {
+      addResult(`hmldsa-f-44`, 'HashML-DSA-SHA256', 'Hash-then-Sign Functional', 'SKIP', 'mechanism not supported')
+    } else {
+      for (const v of [44, 65, 87]) {
+        let algo, mech
+        if (v === 44) { algo = 'HashML-DSA-44-SHA256'; mech = CK.CKM_HASH_ML_DSA_SHA256 }
+        else if (v === 65) { algo = 'HashML-DSA-65-SHA512'; mech = CK.CKM_HASH_ML_DSA_SHA512 }
+        else { algo = 'HashML-DSA-87-SHA512'; mech = CK.CKM_HASH_ML_DSA_SHA512 }
+        try {
+          const { pubHandle, privHandle } = generateMLDSAKeyPair(M, hSession, v)
+          const sig = sign(M, hSession, privHandle, 'ACVP NIST PQC Hash test', mech)
+          const ok = verify(M, hSession, pubHandle, 'ACVP NIST PQC Hash test', sig, mech)
+          addResult(`hmldsa-f-${v}`, algo, 'Hash-then-Sign Functional', ok ? 'PASS' : 'FAIL', `sig[${sig.length}B]`)
+        } catch (e) {
+          addResult(`hmldsa-f-${v}`, algo, 'Hash-then-Sign Functional', 'FAIL', e.message)
+        }
+      }
+    }
+
     // ── 7. ML-KEM Decapsulation KAT (FIPS 203) — 3 variants ──────────────
     for (const group of mlkemVec.testGroups) {
       const test = group.tests[0]
@@ -269,6 +289,26 @@ async function runSuite(engineName) {
       }
     }
 
+    // ── 9.5. HashSLH-DSA Pre-Hash Functional Sign+Verify ─────────────────
+    if (mechs.size > 0 && !mechs.has(CK.CKM_HASH_SLH_DSA)) {
+      addResult(`hslhdsa-tgt`, 'HashSLH-DSA-SHA2', 'Hash-then-Sign Functional', 'SKIP', 'mechanism not supported')
+    } else {
+      for (const { ckp, name, mech } of [
+        { ckp: CK.CKP_SLH_DSA_SHA2_128F, name: 'HashSLH-DSA-SHA2-128f-SHA256', mech: CK.CKM_HASH_SLH_DSA_SHA256 },
+        { ckp: CK.CKP_SLH_DSA_SHA2_256F, name: 'HashSLH-DSA-SHA2-256f-SHA512', mech: CK.CKM_HASH_SLH_DSA_SHA512 },
+      ]) {
+        try {
+          const { pubHandle, privHandle } = generateSLHDSAKeyPair(M, hSession, ckp)
+          // For pre-hash, we use exactly the same msg, but dispatch using sign() to specify the exact HASH mechanism
+          const sig = sign(M, hSession, privHandle, 'ACVP HashSLH-DSA context test', mech)
+          const ok = verify(M, hSession, pubHandle, 'ACVP HashSLH-DSA context test', sig, mech)
+          addResult(`hslhdsa-${name}`, name, 'Hash-then-Sign Functional', ok ? 'PASS' : 'FAIL', `sig[${sig.length}B]`)
+        } catch (e) {
+          addResult(`hslhdsa-${name}`, name, 'Hash-then-Sign Functional', 'FAIL', e.message)
+        }
+      }
+    }
+
     // ── 10. SHA-256 Digest KAT (FIPS 180-4) — 3 test cases ───────────────
     if (mechs.size > 0 && !mechs.has(CK.CKM_SHA256)) {
       addResult('sha256', 'SHA-256', 'Digest KAT', 'SKIP', 'mechanism not supported')
@@ -282,6 +322,23 @@ async function runSuite(engineName) {
         } catch (e) {
           addResult(`sha256-${test.tcId}`, 'SHA-256', `Digest KAT tc=${test.tcId}`, 'FAIL', e.message)
         }
+      }
+    }
+
+    // ── 10.5. SHA-3-256 Digest Functional (FIPS 202) ─────────────────────
+    if (mechs.size > 0 && !mechs.has(CK.CKM_SHA3_256)) {
+      addResult('sha3_256', 'SHA3-256', 'Digest Functional', 'SKIP', 'mechanism not supported')
+    } else {
+      try {
+        // Standard test vector for empty string SHA3-256: 
+        // a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a
+        const msg = new Uint8Array(0)
+        const expected = hexToBytes('a7ffc6f8bf1ed76651c14756a061d662f580ff4de43b49fa82d80a4b80f8434a')
+        const d = digest(M, hSession, msg, CK.CKM_SHA3_256)
+        const ok = arrEq(d, expected)
+        addResult('sha3_256', 'SHA3-256', 'Digest Empty Vector', ok ? 'PASS' : 'FAIL', `MD[${d.length}B]`)
+      } catch (e) {
+        addResult('sha3_256', 'SHA3-256', 'Digest Empty Vector', 'FAIL', e.message)
       }
     }
 
@@ -375,6 +432,21 @@ async function runSuite(engineName) {
         addResult('eddsa', 'EdDSA Ed25519', 'Functional Sign+Verify', ok ? 'PASS' : 'FAIL', `sig[${sig.length}B]`)
       } catch (e) {
         addResult('eddsa', 'EdDSA Ed25519', 'Functional Sign+Verify', 'FAIL', e.message)
+      }
+    }
+
+    // ── 16.5. EdDSA_PH Functional Sign+Verify (Ed25519ph) ────────────────
+    if (mechs.size > 0 && !mechs.has(CK.CKM_EDDSA_PH)) {
+      addResult('eddsaph', 'Ed25519ph', 'Pre-hash Functional', 'SKIP', 'mechanism not supported')
+    } else {
+      try {
+        const { pubHandle, privHandle } = generateEdDSAKeyPair(M, hSession, 'Ed25519')
+        const msg = 'ACVP Ed25519ph pre-hash functional test'
+        const sig = sign(M, hSession, privHandle, msg, CK.CKM_EDDSA_PH)
+        const ok = verify(M, hSession, pubHandle, msg, sig, CK.CKM_EDDSA_PH)
+        addResult('eddsaph', 'Ed25519ph', 'Pre-hash Functional', ok ? 'PASS' : 'FAIL', `sig[${sig.length}B]`)
+      } catch (e) {
+        addResult('eddsaph', 'Ed25519ph', 'Pre-hash Functional', 'FAIL', e.message)
       }
     }
 
