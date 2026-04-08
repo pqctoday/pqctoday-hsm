@@ -553,6 +553,10 @@ Internal state uses thread-local `RefCell<HashMap<u32, HashMap<u32, Vec<u8>>>>` 
   - [x] C++ + Rust: XMSS/XMSS^MT registered in `C_GetMechanismInfo` with `CKF_SIGN | CKF_VERIFY`
   - [x] Rust: `Sha256_192`, `Shake256_256`, `Shake256_192` hash type dispatch in LMS keygen
   - [x] NIST ACVP LMS sigVer: 320/320 demo vectors validated (all 80 parameter combinations)
+- [x] Phase 15: BIP32 `CKA_EXTRACTABLE` template compliance (v0.4.12)
+  - [x] Rust: `C_DeriveKey` BIP32 dispatch now reads `CKA_EXTRACTABLE` from caller's template (per §5.18.5 general rules)
+  - [x] Rust: Derived keys honour caller-specified extractability instead of hardcoding `sensitive=true`
+  - [x] HD Wallet flows can now extract derived key bytes for address derivation without `CKR_ATTRIBUTE_SENSITIVE`
 - [x] Phase 14: CKM_ECDSA raw (pre-hashed) Rust engine parity (v0.4.11)
   - [x] Rust: `CKM_ECDSA` (0x1041) constant + `SUPPORTED_MECHS` entry — PKCS#11 v3.2 §6.3.12
   - [x] Rust: `sign_ecdsa` — `PrehashSigner` arms for P-256 (`CURVE_P256`), P-384 (`CURVE_P384`), secp256k1 (`CURVE_K256`)

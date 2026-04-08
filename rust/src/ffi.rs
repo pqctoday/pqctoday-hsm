@@ -3147,15 +3147,21 @@ pub fn C_DeriveKey(
                 }
             };
 
+            // Respect CKA_EXTRACTABLE from the caller's template (default: false / sensitive)
+            let extractable = attrs.get(&CKA_EXTRACTABLE)
+                .and_then(|v| v.first())
+                .map(|&b| b != 0)
+                .unwrap_or(false);
+
             store_ulong(&mut attrs, CKA_CLASS, CKO_PRIVATE_KEY);
             store_ulong(&mut attrs, CKA_KEY_TYPE, CKK_EC);
             attrs.insert(CKA_VALUE, priv_key);
             attrs.insert(CKA_BIP32_CHAIN_CODE, chain_code);
-            
+
             store_bool(&mut attrs, CKA_TOKEN, false);
             store_bool(&mut attrs, CKA_PRIVATE, true);
-            store_bool(&mut attrs, CKA_SENSITIVE, true);
-            store_bool(&mut attrs, CKA_EXTRACTABLE, false);
+            store_bool(&mut attrs, CKA_SENSITIVE, !extractable);
+            store_bool(&mut attrs, CKA_EXTRACTABLE, extractable);
             
             *ph_key = allocate_handle(attrs);
             return CKR_OK;
