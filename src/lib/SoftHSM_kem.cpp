@@ -283,8 +283,8 @@ CK_RV SoftHSM::C_EncapsulateKey
 		return CKR_FUNCTION_FAILED;
 
 	bool bOK = true;
-	// PKCS#11 v3.2 §4.3: CKA_LOCAL=TRUE for keys derived by C_EncapsulateKey
-	bOK = bOK && osobject->setAttribute(CKA_LOCAL, true);
+	// PKCS#11 v3.2 §5.18.8: encapsulated keys are not locally generated
+	bOK = bOK && osobject->setAttribute(CKA_LOCAL, false);
 	bOK = bOK && osobject->setAttribute(CKA_ALWAYS_SENSITIVE, false);
 	bOK = bOK && osobject->setAttribute(CKA_NEVER_EXTRACTABLE, false);
 
@@ -398,8 +398,8 @@ CK_RV SoftHSM::C_DecapsulateKey
 		mlkem->recyclePrivateKey(privateKey);
 		CryptoFactory::i()->recycleAsymmetricAlgorithm(mlkem);
 		if (ulCiphertextLen != 768 && ulCiphertextLen != 1088 && ulCiphertextLen != 1568)
-			return CKR_ENCRYPTED_DATA_LEN_RANGE;
-		return CKR_ENCRYPTED_DATA_INVALID;
+			return CKR_WRAPPED_KEY_LEN_RANGE;
+		return CKR_WRAPPED_KEY_INVALID;
 	}
 
 	mlkem->recyclePrivateKey(privateKey);
@@ -470,9 +470,9 @@ CK_RV SoftHSM::C_DecapsulateKey
 		return CKR_FUNCTION_FAILED;
 
 	bool bOK = true;
-	// PKCS#11 v3.2 §4.3: CKA_LOCAL=TRUE for keys derived by C_DecapsulateKey
-	bOK = bOK && osobject->setAttribute(CKA_LOCAL, true);
-	bOK = bOK && osobject->setAttribute(CKA_ALWAYS_SENSITIVE, keyObj->getBooleanValue(CKA_ALWAYS_SENSITIVE, false));
+	// PKCS#11 v3.2 §5.18.9: decapsulated keys are not locally generated
+	bOK = bOK && osobject->setAttribute(CKA_LOCAL, false);
+	bOK = bOK && osobject->setAttribute(CKA_ALWAYS_SENSITIVE, false);
 	bOK = bOK && osobject->setAttribute(CKA_NEVER_EXTRACTABLE, false);
 
 	// Store the shared secret as CKA_VALUE (encrypted if isPrivate)

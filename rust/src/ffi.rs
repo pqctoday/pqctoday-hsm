@@ -1531,10 +1531,12 @@ pub fn C_EncapsulateKey(
                 store_ulong(&mut ss_attrs, CKA_VALUE_LEN, ss.as_slice().len() as u32);
                 store_bool(&mut ss_attrs, CKA_TOKEN, false);   // PKCS#11 v3.2 §4.1 default
                 store_bool(&mut ss_attrs, CKA_PRIVATE, false); // PKCS#11 v3.2 §4.1 default
-                store_bool(&mut ss_attrs, CKA_LOCAL, true); // PKCS#11 v3.2 §4.3 — locally derived by C_EncapsulateKey
+                store_bool(&mut ss_attrs, CKA_LOCAL, false); // PKCS#11 v3.2 §5.18.8 — KEM keys are not locally generated
                 store_ulong(&mut ss_attrs, CKA_KEY_GEN_MECHANISM, CKM_ML_KEM); // PKCS#11 v3.2 §4.3
                 absorb_template_attrs(&mut ss_attrs, _p_template, _ul_attribute_count);
-                finalize_private_key_attrs(&mut ss_attrs); // sets CKA_ALWAYS_SENSITIVE + CKA_NEVER_EXTRACTABLE
+                // PKCS#11 v3.2 §5.18.8: unconditionally CK_FALSE for encapsulated keys
+                store_bool(&mut ss_attrs, CKA_ALWAYS_SENSITIVE, false);
+                store_bool(&mut ss_attrs, CKA_NEVER_EXTRACTABLE, false);
                 *ph_key = allocate_handle(ss_attrs);
             }};
         }
@@ -1615,10 +1617,12 @@ pub fn C_DecapsulateKey(
                 store_ulong(&mut ss_attrs, CKA_VALUE_LEN, ss.as_slice().len() as u32);
                 store_bool(&mut ss_attrs, CKA_TOKEN, false);   // PKCS#11 v3.2 §4.1 default
                 store_bool(&mut ss_attrs, CKA_PRIVATE, false); // PKCS#11 v3.2 §4.1 default
-                store_bool(&mut ss_attrs, CKA_LOCAL, true); // PKCS#11 v3.2 §4.3 — locally derived by C_DecapsulateKey
+                store_bool(&mut ss_attrs, CKA_LOCAL, false); // PKCS#11 v3.2 §5.18.9 — KEM keys are not locally generated
                 store_ulong(&mut ss_attrs, CKA_KEY_GEN_MECHANISM, CKM_ML_KEM); // PKCS#11 v3.2 §4.3
                 absorb_template_attrs(&mut ss_attrs, _p_template, _ul_attribute_count);
-                finalize_private_key_attrs(&mut ss_attrs); // sets CKA_ALWAYS_SENSITIVE + CKA_NEVER_EXTRACTABLE
+                // PKCS#11 v3.2 §5.18.9: unconditionally CK_FALSE for decapsulated keys
+                store_bool(&mut ss_attrs, CKA_ALWAYS_SENSITIVE, false);
+                store_bool(&mut ss_attrs, CKA_NEVER_EXTRACTABLE, false);
                 *ph_key = allocate_handle(ss_attrs);
             }};
         }

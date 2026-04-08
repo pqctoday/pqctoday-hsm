@@ -1,6 +1,7 @@
-# PKCS#11 v3.2 Compliance Gap Analysis — softhsmv3 (v12)
+# PKCS#11 v3.2 Compliance Gap Analysis — softhsmv3 (v13)
 
-**Updated:** 2026-04-06 (v12 — SHA-256 ABI fix: `hash-sigs/sha256.h` now uses `USE_OPENSSL=1` so `hash_context` union uses OpenSSL's `SHA256_CTX` (112 B) matching the linked OpenSSL SHA256; eliminates WASM unreachable trap in `hss_validate_signature` during C_Verify)
+**Updated:** 2026-04-08 (v13 — KEM output key attribute compliance: `CKA_LOCAL=CK_FALSE`, `CKA_ALWAYS_SENSITIVE=CK_FALSE`, `CKA_NEVER_EXTRACTABLE=CK_FALSE` per §5.18.8/§5.18.9; `C_DecapsulateKey` error codes corrected to `CKR_WRAPPED_KEY_*` family; debug printf removed)
+**Prior:** 2026-04-06 (v12 — SHA-256 ABI fix: `hash-sigs/sha256.h` now uses `USE_OPENSSL=1` so `hash_context` union uses OpenSSL's `SHA256_CTX` (112 B) matching the linked OpenSSL SHA256; eliminates WASM unreachable trap in `hss_validate_signature` during C_Verify)
 **Prior:** 2026-04-06 (v11 — G-ATTR1a/b/c resolved: ML-DSA/SLH-DSA/ML-KEM public key `CKA_VALUE` now `ck1|ck4`; TypeScript template updated for XMSS `CKA_PARAMETER_SET`; all open items closed)
 **Prior:** 2026-04-01 (v9 — SLH-DSA context string G4 + deterministic mode G5 resolved, full C++/Rust/TypeScript parity)
 **Baseline:** Post-Phase-8 + G4 (SLH-DSA context string, FIPS 205 §9.2) + G5 (SLH-DSA deterministic mode, FIPS 205 §10) — all tracked gaps resolved
@@ -768,6 +769,45 @@ _None — all items resolved as of v11._
 - **Extra attributes on HSS objects:** `CKA_HSS_LMS_TYPES`/`CKA_HSS_LMOTS_TYPES` are registered on the public key object (not in Table 269); `CKA_HSS_LMS_TYPE`/`CKA_HSS_LMOTS_TYPE` are registered on the private key object (not in Table 270). These are optional (`checks=0` or `ck2|ck4`) so they cannot block any operation.
 - **`CKA_HSS_KEYS_REMAINING` flags:** Registered with `checks=0` on both HSS pub/priv objects; spec says `ck2|ck4`. Since `ck2` is not enforced in the store loop, this is functionally equivalent.
 - **`CKA_HSS_KEYS_REMAINING` on XMSS/XMSS-MT objects:** Not in spec Tables 273/275 but registered as optional. Non-blocking.
+
+---
+
+## §1.22 G-KEM1 — KEM Output Key Attribute Compliance (v13, 2026-04-08)
+
+### Background
+
+PKCS#11 v3.2 §5.18.8 (`C_EncapsulateKey`) and §5.18.9 (`C_DecapsulateKey`) specify that the output shared-secret key object MUST have:
+
+- `CKA_LOCAL = CK_FALSE` — KEM keys are not locally generated (unlike `C_GenerateKey`/`C_GenerateKeyPair`)
+- `CKA_ALWAYS_SENSITIVE = CK_FALSE` — unconditional, not inherited from any base key
+- `CKA_NEVER_EXTRACTABLE = CK_FALSE` — unconditional, not inherited from any base key
+
+This differs from `C_DeriveKey` (§5.18.5), which inherits `CKA_ALWAYS_SENSITIVE` and `CKA_NEVER_EXTRACTABLE` from the base key with mechanism-specific rules.
+
+### Issues Found (pre-existing, not a v0.4.18 regression)
+
+| Engine | Function | Attribute | Was | Should Be |
+|--------|----------|-----------|-----|-----------|
+| C++ | C_EncapsulateKey | `CKA_LOCAL` | `true` | `false` |
+| C++ | C_DecapsulateKey | `CKA_LOCAL` | `true` | `false` |
+| C++ | C_DecapsulateKey | `CKA_ALWAYS_SENSITIVE` | inherited from private key | `false` |
+| Rust | C_EncapsulateKey | `CKA_LOCAL` | `true` | `false` |
+| Rust | C_DecapsulateKey | `CKA_LOCAL` | `true` | `false` |
+| Rust | Both KEM ops | `CKA_ALWAYS_SENSITIVE` | derived via `finalize_private_key_attrs()` | `false` |
+| Rust | Both KEM ops | `CKA_NEVER_EXTRACTABLE` | derived via `finalize_private_key_attrs()` | `false` |
+
+### Resolution (v13, 2026-04-08)
+
+- **C++ engine:** `SoftHSM_kem.cpp` — both `C_EncapsulateKey` and `C_DecapsulateKey` now set `CKA_LOCAL=false`, `CKA_ALWAYS_SENSITIVE=false`, `CKA_NEVER_EXTRACTABLE=false` unconditionally.
+- **Rust engine:** `ffi.rs` — both KEM macros (`encap!` / `decap!`) now set `CKA_LOCAL=false` and explicitly set `CKA_ALWAYS_SENSITIVE=false`, `CKA_NEVER_EXTRACTABLE=false` instead of delegating to `finalize_private_key_attrs()`.
+
+### §1.22.1 G-KEM2 — C_DecapsulateKey Error Codes
+
+PKCS#11 v3.2 §5.18.9 return value list includes `CKR_WRAPPED_KEY_INVALID` and `CKR_WRAPPED_KEY_LEN_RANGE` but does NOT include `CKR_ENCRYPTED_DATA_INVALID` or `CKR_ENCRYPTED_DATA_LEN_RANGE`. The spec uses the unwrap error family for KEM, not the decrypt family.
+
+**Fixed (v13):** `C_DecapsulateKey` now returns `CKR_WRAPPED_KEY_LEN_RANGE` for invalid ciphertext length and `CKR_WRAPPED_KEY_INVALID` for cryptographic decapsulation failure.
+
+---
 
 ### How to Use This Document
 

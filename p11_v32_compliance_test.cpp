@@ -957,7 +957,7 @@ void test_fips_edge_constraints() {
             // Decap Truncated
             CK_OBJECT_HANDLE hSec2 = 0;
             rv = mlkemDecap(hSess, &encapMech, hKemPriv, NULL_PTR, 0, ct, ctLen - 1, &hSec2);
-            record_result("FIPS", "ML-KEM_Truncated_CT", (rv == CKR_ENCRYPTED_DATA_LEN_RANGE || rv == CKR_ENCRYPTED_DATA_INVALID || rv == CKR_ARGUMENTS_BAD) ? "PASS" : "FAIL", "RV=" + std::to_string(rv));
+            record_result("FIPS", "ML-KEM_Truncated_CT", (rv == CKR_WRAPPED_KEY_LEN_RANGE || rv == CKR_WRAPPED_KEY_INVALID || rv == CKR_ENCRYPTED_DATA_LEN_RANGE || rv == CKR_ENCRYPTED_DATA_INVALID || rv == CKR_ARGUMENTS_BAD) ? "PASS" : "FAIL", "RV=" + std::to_string(rv));
             
             // Decap Tampered
             ct[0] ^= 1;
