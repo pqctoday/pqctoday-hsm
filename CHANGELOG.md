@@ -10,6 +10,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.17] — 2026-04-08
+
+### Fixed
+
+- **Rust WASM binary now reflects v0.4.16 source changes**: v0.4.16 added `CKM_HASH_ML_DSA`,
+  `CKM_HASH_SLH_DSA`, and `CKM_EDDSA_PH` to `SUPPORTED_MECHS` in `rust/src/constants.rs` but
+  did not rebuild and commit the WASM binary. This release rebuilds the Rust crate (now at
+  `version = "0.4.17"` in `Cargo.toml`) and commits the new `softhsmrustv3_bg.wasm` and
+  `softhsmrustv3.js` artifacts. Browsers and Node.js consumers will now see all three mechanisms
+  in `C_GetMechanismList`.
+
+- **`wasm-bindgen` upgraded from `0.2.92` → `0.2.117`** (`rust/Cargo.toml`): Required to
+  match the installed `wasm-bindgen-cli` used to produce the shim. No functional API changes.
+
+---
+
 ## [0.4.16] — 2026-04-08
 
 ### Added
