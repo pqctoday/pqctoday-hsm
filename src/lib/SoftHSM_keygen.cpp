@@ -2132,6 +2132,10 @@ CK_RV SoftHSM::C_UnwrapKeyAuthenticated
 	cipher->recycleKey(aesKey);
 	CryptoFactory::i()->recycleSymmetricAlgorithm(cipher);
 	if (!ok) { keydata.wipe(); return CKR_WRAPPED_KEY_INVALID; } // auth tag mismatch
+	
+	// Fix Issue 44: OSSLEVPSymmetricAlgorithm dumps the entire AES-GCM plaintext in decryptFinal
+	keydata = discarded;
+	discarded.wipe();
 
 	// Build the secret-key creation template (mirrors C_UnwrapKey pattern)
 	const CK_ULONG maxAttribs = 32;

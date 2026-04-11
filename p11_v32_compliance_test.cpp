@@ -1007,6 +1007,154 @@ void test_fips_edge_constraints() {
     }
 }
 
+void test_authenticated_wrap() {
+    void* dlib = dlopen(opt_engine.c_str(), RTLD_NOW);
+    typedef CK_RV (*C_WrapKeyAuthenticated_t)(CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE, CK_OBJECT_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR);
+    typedef CK_RV (*C_UnwrapKeyAuthenticated_t)(CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_ATTRIBUTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_OBJECT_HANDLE_PTR);
+    
+    C_WrapKeyAuthenticated_t WrapAuth = (C_WrapKeyAuthenticated_t)dlsym(dlib, "C_WrapKeyAuthenticated");
+    C_UnwrapKeyAuthenticated_t UnwrapAuth = (C_UnwrapKeyAuthenticated_t)dlsym(dlib, "C_UnwrapKeyAuthenticated");
+    
+    if (!WrapAuth || !UnwrapAuth) {
+        record_result("AuthWrap", "Validation", "SKIP", "v3.2 Auth Wrap APIs missing");
+        return;
+    }
+    
+    // Generate AES wrapping key
+    CK_OBJECT_CLASS secClass = CKO_SECRET_KEY;
+    CK_KEY_TYPE ktype = CKK_AES;
+    CK_BBOOL bTrue = CK_TRUE, bFalse = CK_FALSE;
+    CK_ULONG valueLen = 32;
+    CK_ATTRIBUTE wrapTmpl[] = { 
+        { CKA_CLASS, &secClass, sizeof(secClass) },
+        { CKA_KEY_TYPE, &ktype, sizeof(ktype) },
+        { CKA_WRAP, &bTrue, sizeof(bTrue) },
+        { CKA_UNWRAP, &bTrue, sizeof(bTrue) },
+        { CKA_VALUE_LEN, &valueLen, sizeof(valueLen) },
+        { CKA_TOKEN, &bFalse, sizeof(bFalse) },
+        { CKA_EXTRACTABLE, &bTrue, sizeof(bTrue) }
+    };
+    CK_OBJECT_HANDLE hWrapKey = 0;
+    CK_MECHANISM mechGen = { 0x00001080UL /* CKM_AES_KEY_GEN */, NULL_PTR, 0 };
+    fl->C_GenerateKey(hSess, &mechGen, wrapTmpl, 7, &hWrapKey);
+    
+    // Generate target AES payload key
+    CK_ATTRIBUTE targetTmpl[] = { 
+        { CKA_CLASS, &secClass, sizeof(secClass) },
+        { CKA_KEY_TYPE, &ktype, sizeof(ktype) },
+        { CKA_VALUE_LEN, &valueLen, sizeof(valueLen) },
+        { CKA_EXTRACTABLE, &bTrue, sizeof(bTrue) },
+        { CKA_TOKEN, &bFalse, sizeof(bFalse) }
+    };
+    CK_OBJECT_HANDLE hTarget = 0;
+    fl->C_GenerateKey(hSess, &mechGen, targetTmpl, 5, &hTarget);
+    
+    if (!hWrapKey || !hTarget) {
+        record_result("AuthWrap", "KeySetup", "FAIL", "Failed to generate keys");
+        return;
+    }
+    
+    // Wrap
+    CK_BYTE iv[12] = {0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c};
+    CK_BYTE aad[] = "header";
+    CK_GCM_PARAMS gcmParams = { iv, 12, 0, 0, NULL_PTR, 128 /* 16 byte tag */ };
+    CK_MECHANISM wrapMech = { 0x00001087UL /* CKM_AES_GCM */, &gcmParams, sizeof(gcmParams) };
+    
+    CK_BYTE wrapped[256];
+    CK_ULONG wrappedLen = sizeof(wrapped);
+    CK_RV rv = WrapAuth(hSess, &wrapMech, hWrapKey, hTarget, aad, sizeof(aad)-1, wrapped, &wrappedLen);
+    record_result("AuthWrap", "C_WrapKeyAuthenticated", rv == CKR_OK ? "PASS" : "FAIL", "RV=" + std::to_string(rv));
+    
+    if (rv == CKR_OK) {
+        // Unwrap
+        CK_OBJECT_HANDLE hUnwrapped = 0;
+        CK_ATTRIBUTE unwrapTmpl[] = { 
+            { CKA_CLASS, &secClass, sizeof(secClass) },
+            { CKA_KEY_TYPE, &ktype, sizeof(ktype) },
+            { CKA_EXTRACTABLE, &bTrue, sizeof(bTrue) }
+        };
+        rv = UnwrapAuth(hSess, &wrapMech, hWrapKey, wrapped, wrappedLen, unwrapTmpl, 3, aad, sizeof(aad)-1, &hUnwrapped);
+        record_result("AuthWrap", "C_UnwrapKeyAuthenticated", rv == CKR_OK ? "PASS" : "FAIL", "RV=" + std::to_string(rv));
+        
+        // Assert payloads match (Issue 44 regression test)
+        if (rv == CKR_OK) {
+            CK_BYTE valTarget[100]; CK_ATTRIBUTE attrTarget = { CKA_VALUE, valTarget, sizeof(valTarget) };
+            CK_BYTE valUnwrap[100]; CK_ATTRIBUTE attrUnwrap = { CKA_VALUE, valUnwrap, sizeof(valUnwrap) };
+            fl->C_GetAttributeValue(hSess, hTarget, &attrTarget, 1);
+            fl->C_GetAttributeValue(hSess, hUnwrapped, &attrUnwrap, 1);
+            
+            if (attrTarget.ulValueLen == attrUnwrap.ulValueLen && memcmp(valTarget, valUnwrap, attrTarget.ulValueLen) == 0 && attrTarget.ulValueLen > 0) {
+                record_result("AuthWrap", "Value_Match", "PASS", "Unwrapped keys perfectly match");
+            } else {
+                record_result("AuthWrap", "Value_Match", "FAIL", "Unwrapped symmetric value mismatch (Issue 44 bug)");
+            }
+        }
+    }
+    
+    // =========================================================================
+    // NIST SP 800-38D AES-GCM Test Case 4 (Official Known Answer Test)
+    // =========================================================================
+    CK_BYTE nistKey[] = {0xfe,0xff,0xe9,0x92,0x86,0x65,0x73,0x1c,0x6d,0x6a,0x8f,0x94,0x67,0x30,0x83,0x08};
+    CK_BYTE nistIV[]  = {0xca,0xfe,0xba,0xbe,0xfa,0xce,0xdb,0xad,0xde,0xca,0xf8,0x88};
+    CK_BYTE nistPT[]  = {
+        0xd9,0x31,0x32,0x25,0xf8,0x84,0x06,0xe5,0xa5,0x59,0x09,0xc5,0xaf,0xf5,0x26,0x9a,
+        0x86,0xa7,0xa9,0x53,0x15,0x34,0xf7,0xda,0x2e,0x4c,0x30,0x3d,0x8a,0x31,0x8a,0x72,
+        0x1c,0x3c,0x0c,0x95,0x95,0x68,0x09,0x53,0x2f,0xcf,0x0e,0x24,0x49,0xa6,0xb5,0x25,
+        0xb1,0x6a,0xed,0xf5,0xaa,0x0d,0xe6,0x57,0xba,0x63,0x7b,0x39
+    };
+    CK_BYTE nistAAD[] = {
+        0xfe,0xed,0xfa,0xce,0xde,0xad,0xbe,0xef,0xfe,0xed,0xfa,0xce,0xde,0xad,0xbe,0xef,
+        0xab,0xad,0xda,0xd2
+    };
+    CK_BYTE nistCTandTag[] = {
+        // Ciphertext
+        0x42,0x83,0x1e,0xc2,0x21,0x77,0x74,0x24,0x4b,0x72,0x21,0xb7,0x84,0xd0,0xd4,0x9c,
+        0xe3,0xaa,0x21,0x2f,0x2c,0x02,0xa4,0xe0,0x35,0xc1,0x7e,0x23,0x29,0xac,0xa1,0x2e,
+        0x21,0xd5,0x14,0xb2,0x54,0x66,0x93,0x1c,0x7d,0x8f,0x6a,0x5a,0xac,0x84,0xaa,0x05,
+        0x1b,0xa3,0x0b,0x39,0x6a,0x0a,0xac,0x97,0x3d,0x58,0xe0,0x91,
+        // Tag
+        0x5b,0xc9,0x4f,0xbc,0x32,0x21,0xa5,0xdb,0x94,0xfa,0xe9,0x5a,0xe7,0x12,0x1a,0x47
+    };
+
+    // Create the unwrapping key from NIST KAT
+    CK_ATTRIBUTE nistKeyTmpl[] = {
+        { CKA_CLASS, &secClass, sizeof(secClass) },
+        { CKA_KEY_TYPE, &ktype, sizeof(ktype) },
+        { CKA_UNWRAP, &bTrue, sizeof(bTrue) },
+        { CKA_TOKEN, &bFalse, sizeof(bFalse) },
+        { CKA_VALUE, nistKey, sizeof(nistKey) }
+    };
+    CK_OBJECT_HANDLE hNistWrapKey = 0;
+    fl->C_CreateObject(hSess, nistKeyTmpl, 5, &hNistWrapKey);
+    
+    if (hNistWrapKey) {
+        CK_GCM_PARAMS nistGcmParams = { nistIV, sizeof(nistIV), 0, 0, NULL_PTR, 128 };
+        CK_MECHANISM nistMech = { 0x00001087UL /* CKM_AES_GCM */, &nistGcmParams, sizeof(nistGcmParams) };
+        
+        CK_OBJECT_HANDLE hNistTarget = 0;
+        CK_ATTRIBUTE unwrapTmplNist[] = { 
+            { CKA_CLASS, &secClass, sizeof(secClass) },
+            { CKA_KEY_TYPE, &ktype, sizeof(ktype) },
+            { CKA_EXTRACTABLE, &bTrue, sizeof(bTrue) }
+        };
+        CK_RV rvKat = UnwrapAuth(hSess, &nistMech, hNistWrapKey, nistCTandTag, sizeof(nistCTandTag), unwrapTmplNist, 3, nistAAD, sizeof(nistAAD), &hNistTarget);
+        
+        if (rvKat == CKR_OK) {
+            CK_BYTE valNist[100]; CK_ATTRIBUTE attrNist = { CKA_VALUE, valNist, sizeof(valNist) };
+            fl->C_GetAttributeValue(hSess, hNistTarget, &attrNist, 1);
+            if (attrNist.ulValueLen == sizeof(nistPT) && memcmp(valNist, nistPT, sizeof(nistPT)) == 0) {
+                record_result("AuthWrap", "NIST_SP800_38D_KAT", "PASS", "Unwrapped GCM payload perfectly matches NIST Test Case 4 PT");
+            } else {
+                record_result("AuthWrap", "NIST_SP800_38D_KAT", "FAIL", "Unwrapped material did not match NIST Test Case 4 PT");
+            }
+        } else {
+            record_result("AuthWrap", "NIST_SP800_38D_KAT", "FAIL", "Unwrap execution failed with RV=" + std::to_string(rvKat));
+        }
+    } else {
+        record_result("AuthWrap", "NIST_SP800_38D_KAT", "SKIP", "Failed to construct NIST Wrapping Key frame");
+    }
+}
+
 int main(int argc, char** argv) {
     parse_args(argc, argv);
     
@@ -1039,6 +1187,9 @@ int main(int argc, char** argv) {
     }
     if (opt_category == "all" || opt_category == "session") {
         refresh_session(); test_slot_session_management();
+    }
+    if (opt_category == "all" || opt_category == "authwrap") {
+        refresh_session(); test_authenticated_wrap();
     }
     
     // Quick inline test
