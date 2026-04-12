@@ -1131,6 +1131,135 @@ function shimWasmBindgen(mod, wasmMemory) {
   return shim
 }
 
+// ── HSS / LMS helpers (RFC 8554 + SP 800-208) ──────────────────────────────
+
+/**
+ * Build a CK_HSS_KEY_PAIR_GEN_PARAMS struct in WASM heap (68 bytes on WASM32).
+ * Layout: ulLevels(4) | ulLmsParamSet[8](32) | ulLmotsParamSet[8](32)
+ * lmsParams / lmotsParams are arrays of up to 8 CKP_LMS_* / CKP_LMOTS_* values.
+ * Returns { ptr, size } — caller must free ptr.
+ */
+export function buildHSSKeyGenParams(M, lmsParams, lmotsParams) {
+  const levels = lmsParams.length
+  if (levels < 1 || levels > 8) throw new Error(`HSS levels must be 1–8, got ${levels}`)
+  const ptr = M._malloc(68)
+  M.setValue(ptr + 0, levels, 'i32')
+  for (let i = 0; i < 8; i++) {
+    M.setValue(ptr + 4  + i * 4, i < lmsParams.length  ? lmsParams[i]  : 0, 'i32')
+    M.setValue(ptr + 36 + i * 4, i < lmotsParams.length ? lmotsParams[i] : 0, 'i32')
+  }
+  return { ptr, size: 68 }
+}
+
+/**
+ * Generate a single-level HSS key pair.
+ * lmsParamSet / lmotsParamSet are single CKP_LMS_* / CKP_LMOTS_* values.
+ * Returns { pubHandle, privHandle }.
+ */
+export function generateHSSKeyPair(M, hSession, lmsParamSet, lmotsParamSet) {
+  const hssParams = buildHSSKeyGenParams(M, [lmsParamSet], [lmotsParamSet])
+  const mech = buildMech(M, CK.CKM_HSS_KEY_PAIR_GEN, hssParams.ptr, hssParams.size)
+  const pubTpl = buildTemplate(M, [
+    { type: CK.CKA_CLASS,     value: CK.CKO_PUBLIC_KEY },
+    { type: CK.CKA_KEY_TYPE,  value: CK.CKK_HSS },
+    { type: CK.CKA_TOKEN,     value: false },
+    { type: CK.CKA_VERIFY,    value: true },
+  ])
+  const prvTpl = buildTemplate(M, [
+    { type: CK.CKA_CLASS,       value: CK.CKO_PRIVATE_KEY },
+    { type: CK.CKA_KEY_TYPE,    value: CK.CKK_HSS },
+    { type: CK.CKA_TOKEN,       value: false },
+    { type: CK.CKA_SIGN,        value: true },
+    { type: CK.CKA_EXTRACTABLE, value: false },
+    { type: CK.CKA_SENSITIVE,   value: true },
+  ])
+  const hPubPtr = allocUlong(M)
+  const hPrvPtr = allocUlong(M)
+  check('C_GenerateKeyPair(HSS)', M._C_GenerateKeyPair(
+    hSession, mech,
+    pubTpl.arrPtr, pubTpl.count,
+    prvTpl.arrPtr, prvTpl.count,
+    hPubPtr, hPrvPtr
+  ))
+  const pubHandle  = readUlong(M, hPubPtr)
+  const privHandle = readUlong(M, hPrvPtr)
+  freeTemplate(M, pubTpl)
+  freeTemplate(M, prvTpl)
+  M._free(mech)
+  M._free(hssParams.ptr)
+  freePtr(M, hPubPtr)
+  freePtr(M, hPrvPtr)
+  return { pubHandle, privHandle }
+}
+
+/** Sign msgBytes with an HSS private key. Returns signature Uint8Array. */
+export function hssSign(M, hSession, privHandle, msgBytes) {
+  const mechPtr = buildMech(M, CK.CKM_HSS)
+  check('C_SignInit(HSS)', M._C_SignInit(hSession, mechPtr, privHandle))
+  M._free(mechPtr)
+  const msgPtr = writeBytes(M, msgBytes)
+  // HSS signatures are large — allocate generously (SLH-DSA max ~50 KB; HSS H=5 ~2.5 KB)
+  const sigBufLen = 65536
+  const sigPtr = M._malloc(sigBufLen)
+  const sigLenPtr = allocUlong(M)
+  M.setValue(sigLenPtr, sigBufLen, 'i32')
+  check('C_Sign(HSS)', M._C_Sign(hSession, msgPtr, msgBytes.length, sigPtr, sigLenPtr))
+  const sigLen = readUlong(M, sigLenPtr)
+  const sig = new Uint8Array(M.HEAPU8.buffer, sigPtr, sigLen).slice()
+  M._free(msgPtr)
+  M._free(sigPtr)
+  freePtr(M, sigLenPtr)
+  return sig
+}
+
+/**
+ * Verify an HSS signature.
+ * Returns true on CKR_OK, false on CKR_SIGNATURE_INVALID, throws on other errors.
+ */
+export function hssVerify(M, hSession, pubHandle, msgBytes, sigBytes) {
+  const mechPtr = buildMech(M, CK.CKM_HSS)
+  check('C_VerifyInit(HSS)', M._C_VerifyInit(hSession, mechPtr, pubHandle))
+  M._free(mechPtr)
+  const msgPtr = writeBytes(M, msgBytes)
+  const sigPtr = writeBytes(M, sigBytes)
+  const rv = M._C_Verify(hSession, msgPtr, msgBytes.length, sigPtr, sigBytes.length)
+  M._free(msgPtr)
+  M._free(sigPtr)
+  if (rv === CK.CKR_OK) return true
+  if (rv === CK.CKR_SIGNATURE_INVALID) return false
+  throw new Error(`C_Verify(HSS) failed: 0x${rv.toString(16)}`)
+}
+
+/**
+ * Extract the raw public key bytes (CKA_VALUE) from an HSS public key object.
+ * Returns Uint8Array.
+ */
+export function hssGetPublicKeyBytes(M, hSession, pubHandle) {
+  return extractKeyValue(M, hSession, pubHandle)
+}
+
+/**
+ * Import an HSS public key from raw bytes for verification (cross-engine check).
+ * Uses C_CreateObject with CKK_HSS + CKA_VALUE + CKA_VERIFY=true.
+ * CKA_HSS_* attributes have ck2|ck4 — they must NOT appear in the template.
+ * Returns a key handle usable in C_VerifyInit / C_Verify.
+ */
+export function hssImportPublicKey(M, hSession, pubKeyBytes) {
+  const tpl = buildTemplate(M, [
+    { type: CK.CKA_CLASS,    value: CK.CKO_PUBLIC_KEY },
+    { type: CK.CKA_KEY_TYPE, value: CK.CKK_HSS },
+    { type: CK.CKA_TOKEN,    value: false },
+    { type: CK.CKA_VERIFY,   value: true },
+    { type: CK.CKA_VALUE,    value: pubKeyBytes },
+  ])
+  const hPtr = allocUlong(M)
+  check('C_CreateObject(HSS-pub)', M._C_CreateObject(hSession, tpl.arrPtr, tpl.count, hPtr))
+  const handle = readUlong(M, hPtr)
+  freeTemplate(M, tpl)
+  freePtr(M, hPtr)
+  return handle
+}
+
 /**
  * Load a WASM engine and return an Emscripten-compatible module object.
  * @param {'cpp'|'rust'} engine — which WASM build to load
@@ -1138,13 +1267,21 @@ function shimWasmBindgen(mod, wasmMemory) {
  */
 export async function loadEngine(engine) {
   if (engine === 'rust') {
-    const rustJsPath = path.resolve(WASM_DIR, 'rust/softhsmrustv3.js')
+    // wasm-pack 0.14 / wasm-bindgen 0.2.117 generates a split format:
+    //   softhsmrustv3.js      — thin re-export with static WASM import (breaks Node.js)
+    //   softhsmrustv3_bg.js   — all _C_* exports + __wbg_set_wasm()
+    //   softhsmrustv3_bg.wasm — WASM binary (imports only from './softhsmrustv3_bg.js')
+    // We initialise manually: import _bg.js, instantiate WASM with it as the import
+    // object, then wire with __wbg_set_wasm — same behaviour as the old initSync path.
+    const rustBgJsPath = path.resolve(WASM_DIR, 'rust/softhsmrustv3_bg.js')
     const rustWasmPath = path.resolve(WASM_DIR, 'rust/softhsmrustv3_bg.wasm')
     const wasmBytes = readFileSync(rustWasmPath)
-    const mod = await import(rustJsPath)
-    // initSync returns the raw WASM exports object (includes .memory)
-    const wasmExports = mod.initSync({ module: new WebAssembly.Module(wasmBytes) })
-    return shimWasmBindgen(mod, wasmExports.memory)
+    const bgMod = await import(rustBgJsPath)
+    const wasmModule = new WebAssembly.Module(wasmBytes)
+    const wasmInstance = new WebAssembly.Instance(wasmModule, { './softhsmrustv3_bg.js': bgMod })
+    bgMod.__wbg_set_wasm(wasmInstance.exports)
+    wasmInstance.exports.__wbindgen_start?.()
+    return shimWasmBindgen(bgMod, wasmInstance.exports.memory)
   }
   // Default: C++ Emscripten module (already has HEAPU8, setValue, getValue)
   const cppJsPath = path.resolve(WASM_DIR, 'softhsm.js')
