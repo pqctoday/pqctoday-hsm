@@ -50,7 +50,7 @@ bool OSSLEDDSA::sign(PrivateKey* privateKey, const ByteString& dataToSign,
 		     ByteString& signature, const AsymMech::Type mechanism,
 		     const void* /* param = NULL */, const size_t /* paramLen = 0 */)
 {
-	if (mechanism != AsymMech::EDDSA)
+	if (mechanism != AsymMech::EDDSA && mechanism != AsymMech::EDDSA_PH)
 	{
 		ERROR_MSG("Invalid mechanism supplied (%i)", mechanism);
 		return false;
@@ -85,7 +85,17 @@ bool OSSLEDDSA::sign(PrivateKey* privateKey, const ByteString& dataToSign,
 	signature.resize(len);
 	memset(&signature[0], 0, len);
 	EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-	if (!EVP_DigestSignInit(ctx, NULL, NULL, NULL, pkey))
+	bool init_ok = false;
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+	if (mechanism == AsymMech::EDDSA_PH) {
+		init_ok = EVP_DigestSignInit_ex(ctx, NULL, "Ed25519ph", NULL, NULL, pkey, NULL);
+	} else {
+		init_ok = EVP_DigestSignInit(ctx, NULL, NULL, NULL, pkey);
+	}
+#else
+	init_ok = EVP_DigestSignInit(ctx, NULL, NULL, NULL, pkey);
+#endif
+	if (!init_ok)
 	{
 		ERROR_MSG("EDDSA sign init failed (0x%08X)", ERR_get_error());
 		EVP_MD_CTX_free(ctx);
@@ -128,7 +138,7 @@ bool OSSLEDDSA::verify(PublicKey* publicKey, const ByteString& originalData,
 		       const ByteString& signature, const AsymMech::Type mechanism,
 		       const void* /* param = NULL */, const size_t /* paramLen = 0 */)
 {
-	if (mechanism != AsymMech::EDDSA)
+	if (mechanism != AsymMech::EDDSA && mechanism != AsymMech::EDDSA_PH)
 	{
 		ERROR_MSG("Invalid mechanism supplied (%i)", mechanism);
 		return false;
@@ -166,7 +176,17 @@ bool OSSLEDDSA::verify(PublicKey* publicKey, const ByteString& originalData,
 		return false;
 	}
 	EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-	if (!EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pkey))
+	bool init_ok = false;
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+	if (mechanism == AsymMech::EDDSA_PH) {
+		init_ok = EVP_DigestVerifyInit_ex(ctx, NULL, "Ed25519ph", NULL, NULL, pkey, NULL);
+	} else {
+		init_ok = EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pkey);
+	}
+#else
+	init_ok = EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pkey);
+#endif
+	if (!init_ok)
 	{
 		ERROR_MSG("EDDSA verify init failed (0x%08X)", ERR_get_error());
 		EVP_MD_CTX_free(ctx);

@@ -10,14 +10,17 @@ Because SoftHSMv3 was heavily modernized to support WebAssembly (WASM) and purel
 
 Before deploying SoftHSMv3 into a production pipeline, operators must understand the following structural shifts:
 
-### A. In-Memory Only (Ephemeral Vault)
-* **SoftHSMv2:** Managed an SQLite or flat-file state directory (`/var/lib/softhsm/tokens/`). Keys created by a CLI tool like `softhsm2-util` were permanently saved to the disk.
-* **SoftHSMv3:** The token vault exists **exclusively in RAM**. If the host process attached to `libsofthsm2.so` terminates, the vault and all cryptographic materials inside it are instantly destroyed.
+### A. Dual-Model Storage Architecture (RAM vs File-Backed)
+* **WASM / Default Native (Memory Model):** By default, the token vault exists **exclusively in RAM**. If the host process attached to `libsofthsm2.so` terminates, the vault and all cryptographic materials inside it are instantly destroyed.
+* **Persistent Native (File-Based Model):** You can compile the daemon utilizing `-DWITH_FILE_STORE=ON`. This natively attaches a persistent flat-file proxy mapped to `/var/lib/softhsm/tokens/` via `softhsm2.conf`. This behaves identically to SoftHSMv2, keeping Native Integration Testing parity intact and permanently saving CLI operations.
 
-### B. Broken CLI Workflows
-Because the token is ephemeral, using standalone command-line executions to configure the HSM will not work:
+### B. Stateful Signature Crash-Resilience
+For systems deploying XMSS or LMS operations, SoftHSMv3 actively flushes the `CKA_HSS_KEYS_REMAINING` attribute natively to disk (if `WITH_FILE_STORE=ON` is active) immediately upon generating a signature. This ensures the remaining state limits strictly survive unpredicted daemon crashes and subsequent process restarts.
+
+### C. CLI Workflows Under the Memory Model
+If you compile SoftHSMv3 **without** the flat-file persistence logic flag, using standalone command-line executions to configure the HSM will not work:
 ```bash
-# THIS WILL NO LONGER WORK AS EXPECTED:
+# THIS WILL CREATE A TOKEN THAT IMMEDIATELY DIES:
 softhsm2-util --init-token --slot 0 --label "ProdToken"
 pkcs11-tool --module libsofthsm2.so --keypairgen ...
 ```
@@ -76,11 +79,9 @@ ssl_certificate_key "pkcs11:token=ProdToken;object=MyPQCKey;type=private;";
 
 ---
 
-## 4. Workarounds for Key Import
+## 4. Workarounds for Key Import (Memory Model Only)
 
-Because keys are lost on restart, Ops architectures currently demand a "bootstrapper" process:
+If you chose to ignore `WITH_FILE_STORE=ON`, because keys are lost on restart, Ops architectures currently demand a "bootstrapper" process:
 1. The `p11-kit` server starts.
 2. A bootstrap script uses `pkcs11-tool` against the daemon socket to inject static keys or generate fresh keypairs.
 3. The dependent application (NGINX) is subsequently launched.
-
-**Roadmap Note:** Engineering issues have been created to re-integrate persistent flat-file backing into the v3 C++ core to alleviate this complex daemon requirement.

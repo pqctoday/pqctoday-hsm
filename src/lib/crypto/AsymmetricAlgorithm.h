@@ -107,6 +107,7 @@ struct AsymMech
 		ECDSA_SHA3_384,     // CKM_ECDSA_SHA3_384
 		ECDSA_SHA3_512,     // CKM_ECDSA_SHA3_512
 		EDDSA,
+		EDDSA_PH,           // Ed25519ph pre-hash signing (OpenSSL "Ed25519ph")
 		MLDSA,              // CKM_ML_DSA pure-message sign/verify (FIPS 204)
 		HASH_MLDSA,         // CKM_HASH_ML_DSA (generic, hash in param)
 		HASH_MLDSA_SHA224,  // CKM_HASH_ML_DSA_SHA224

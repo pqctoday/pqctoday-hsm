@@ -1205,6 +1205,8 @@ typedef CK_ULONG          CK_MECHANISM_TYPE;
 #define CKM_EC_EDWARDS_KEY_PAIR_GEN    0x00001055UL
 #define CKM_EC_MONTGOMERY_KEY_PAIR_GEN 0x00001056UL
 #define CKM_EDDSA                      0x00001057UL
+/* Our internal alias for Pre-hash EdDSA (phFlag=1) */
+#define CKM_EDDSA_PH                   0x80001057UL
 #define CKM_SP800_108_COUNTER_KDF      0x000003acUL
 #define CKM_SP800_108_FEEDBACK_KDF     0x000003adUL
 #define CKM_SP800_108_DOUBLE_PIPELINE_KDF 0x000003aeUL

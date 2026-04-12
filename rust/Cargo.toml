@@ -1,6 +1,6 @@
 [package]
 name = "softhsmrustv3"
-version = "0.4.20"
+version = "0.4.21"
 edition = "2021"
 description = "A native Rust WebAssembly clone of SoftHSMv3"
 

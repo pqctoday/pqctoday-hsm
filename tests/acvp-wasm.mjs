@@ -612,9 +612,19 @@ async function runSuite(engineName) {
     if (slhdsaCtxVec && slhdsaCtxVec.sigGen) {
       const tv = slhdsaCtxVec.sigGen
       if (engineName === 'cpp') {
-        // C++ engine does not support CK_SIGN_ADDITIONAL_CONTEXT (pre-PKCS#11 v3.2)
-        addResult(`slhdsa-sg-param`, tv.parameterSet, 'SigGen KAT', 'SKIP',
-          'C++ engine pre-dates PKCS#11 v3.2 CK_SIGN_ADDITIONAL_CONTEXT')
+        try {
+          const pk = hexToBytes(tv.pk)
+          const sk = hexToBytes(tv.sk)
+          const msg = hexToBytes(tv.message)
+          const ctx = hexToBytes(tv.context)
+          const pubHandle = importSLHDSAPublicKey(M, hSession, CK.CKP_SLH_DSA_SHA2_128F, pk)
+          const privHandle = importSLHDSAPrivateKey(M, hSession, CK.CKP_SLH_DSA_SHA2_128F, sk)
+          const sig = slhdsaSignBytesCtx(M, hSession, privHandle, msg, ctx, true)
+          const ok = slhdsaVerifyBytesCtx(M, hSession, pubHandle, msg, sig, ctx)
+          addResult(`slhdsa-sg-param`, tv.parameterSet, 'SigGen Round-Trip', ok ? 'PASS' : 'FAIL', `sig[${sig.length}B]`)
+        } catch (e) {
+          addResult(`slhdsa-sg-param`, tv.parameterSet, 'SigGen Round-Trip', 'FAIL', e.message)
+        }
       } else {
         // Rust/fips205 engine: vector is Botan-specific (cross-validated: diverges at byte 0)
         // SigVer KAT (test #23) provides the valid cross-implementation validation.

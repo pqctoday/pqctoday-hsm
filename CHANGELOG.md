@@ -10,6 +10,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.21] — 2026-04-12
+
+### Fixed
+
+- **ACVP Compliance**: Eliminated 22 residual ACVP SKIP tests.
+  - Rust Engine: Implemented custom SHAKE-256 N32 verifier in `lms.rs` to support SP 800-208 SHAKE type IDs, eliminating 20 LMS SHAKE skips.
+  - C++ Engine: Implemented `CKM_EDDSA_PH` (Ed25519ph) utilizing OpenSSL's `EVP_DigestSignInit_ex` for pre-hashed EdDSA algorithms, passing the Ed25519ph functional tests.
+  - C++ Engine: Converted SLH-DSA SigGen KAT from SKIP to an active signed+verified round-trip test.
+
+### Changed
+
+- **Developer documentation consolidated**: Removed stale `softhsmv3devguide.md` from the repository
+  root; all developer docs now live exclusively in `docs/softhsmv3devguide.md`. Added an **EdDSA
+  mechanism comparison table** (`CKM_EDDSA` pure-mode vs `CKM_EDDSA_PH` pre-hash encoding with
+  `CKM_EDDSA_PH = 0x80001057`) and a **SLH-DSA parameter set reference** (all 12 variants across
+  SHA2 and SHAKE families with signature-size and security-level summary). Updated the Rust engine
+  description to note the custom SHAKE-256 N32 verifier for SP 800-208 SHAKE IDs `0x0F–0x18`.
+- **`docs/softhsmv3opsguide.md`**: Restructured the storage section from "In-Memory Only" to
+  **Dual-Model Storage Architecture** (RAM-backed WASM/default vs file-backed native with
+  `-DWITH_FILE_STORE=ON`). Added **stateful-signature crash-resilience** guidance for HSS/LMS and
+  XMSS operations — `CKA_HSS_KEYS_REMAINING` is strictly persisted on every sign when the file
+  store is active, surviving process crashes. Updated CLI workflow section to clearly label
+  memory-model limitations.
+
+---
+
 ## [0.4.20] — 2026-04-12
 
 ### Added

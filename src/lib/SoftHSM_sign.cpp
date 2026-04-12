@@ -830,6 +830,11 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			bAllowMultiPartOp = false;
 			isEDDSA = true;
 			break;
+		case CKM_EDDSA_PH:
+			mechanism = AsymMech::EDDSA_PH;
+			bAllowMultiPartOp = false;
+			isEDDSA = true;
+			break;
 #endif
 		case CKM_ML_DSA:
 		{
@@ -2139,6 +2144,11 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 #ifdef WITH_EDDSA
 		case CKM_EDDSA:
 			mechanism = AsymMech::EDDSA;
+			bAllowMultiPartOp = false;
+			isEDDSA = true;
+			break;
+		case CKM_EDDSA_PH:
+			mechanism = AsymMech::EDDSA_PH;
 			bAllowMultiPartOp = false;
 			isEDDSA = true;
 			break;

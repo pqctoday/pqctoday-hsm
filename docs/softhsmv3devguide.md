@@ -94,6 +94,8 @@ major extensions:
 
 | Mechanism | Value | Operation |
 | --- | --- | --- |
+| `CKM_EDDSA` | `0x00001057` | EdDSA sign / verify (pure) |
+| `CKM_EDDSA_PH` | `0x80001057` | Ed25519ph pre-hash sign / verify |
 | `CKM_ML_KEM_KEY_PAIR_GEN` | `0x0f` | Generate ML-KEM key pair |
 | `CKM_ML_KEM` | `0x17` | `C_EncapsulateKey` / `C_DecapsulateKey` |
 | `CKM_ML_DSA_KEY_PAIR_GEN` | `0x1c` | Generate ML-DSA key pair |
@@ -133,13 +135,12 @@ via `C_DeriveKey`. All use OpenSSL EVP KDF / `EVP_PKEY_CTX` APIs — no legacy p
 - **Stateful hash-based signatures (HSS/LMS, XMSS, XMSS-MT) are fully implemented** in the C++
   engine via embedded reference libraries (`stateful/hash-sigs/` for HSS/LMS,
   `stateful/xmss-reference/` for XMSS and XMSS-MT). The Rust WASM engine supports HSS/LMS
-  (via `hbs-lms`) and single-tree XMSS (via `xmss` crate); **XMSS-MT is not yet available in
-  the Rust engine** due to a crate limitation.
+  (via `hbs-lms` and a custom verifier for SP 800-208 SHAKE IDs `0x0F-0x18`) and single-tree
+  XMSS (via `xmss` crate); **XMSS-MT is not yet available in the Rust engine** due to a crate limitation.
 
   Key exhaustion: once all one-time signing slots are consumed, `C_Sign` returns
   `CKR_KEY_EXHAUSTED`. The remaining-use counter is tracked in `CKA_HSS_KEYS_REMAINING`
-  (`0x61c`) but is not persisted across process/WASM restarts. To survive a reload, export
-  the private key with `C_GetAttributeValue(CKA_VALUE)` and re-import on next session.
+  (`0x61c`). This attribute is **strictly persisted** across process boundaries directly to the flat-file backend whenever `-DWITH_FILE_STORE=ON` is enabled in native builds, successfully surviving system crashes. In memory-only environments (e.g. WASM without IndexedDB backing), state is destroyed on exit.
 
 - **Single-threaded WASM build.** The Emscripten target does not use a SharedArrayBuffer worker
   pool. Crypto-intensive operations (especially SLH-DSA-SHA2-256s key generation and signing)
@@ -717,3 +718,49 @@ p11->C_CloseSession(hSession);
 p11->C_Finalize(NULL_PTR);
 dlclose(lib);
 ```
+
+---
+
+## 7. SLH-DSA Parameter Sets
+
+softhsmv3 exposes all 12 NIST-standardised SLH-DSA parameter sets via OpenSSL's `EVP_PKEY` interface. The parameter set is selected by `CKA_SLH_DSA_PARAMETER_SET` on the key template:
+
+| Parameter set string | Security level | Small-fast | Signature size (approx.) |
+|----------------------|---------------|-----------|--------------------------|
+| `"SLH-DSA-SHA2-128s"` | 128-bit      | Small      | 7,856 bytes              |
+| `"SLH-DSA-SHA2-128f"` | 128-bit      | Fast       | 17,088 bytes             |
+| `"SLH-DSA-SHA2-192s"` | 192-bit      | Small      | 16,224 bytes             |
+| `"SLH-DSA-SHA2-192f"` | 192-bit      | Fast       | 35,664 bytes             |
+| `"SLH-DSA-SHA2-256s"` | 256-bit      | Small      | 29,792 bytes             |
+| `"SLH-DSA-SHA2-256f"` | 256-bit      | Fast       | 49,856 bytes             |
+| `"SLH-DSA-SHAKE-128s"`| 128-bit      | Small      | 7,856 bytes              |
+| `"SLH-DSA-SHAKE-128f"`| 128-bit      | Fast       | 17,088 bytes             |
+| `"SLH-DSA-SHAKE-192s"`| 192-bit      | Small      | 16,224 bytes             |
+| `"SLH-DSA-SHAKE-192f"`| 192-bit      | Fast       | 35,664 bytes             |
+| `"SLH-DSA-SHAKE-256s"`| 256-bit      | Small      | 29,792 bytes             |
+| `"SLH-DSA-SHAKE-256f"`| 256-bit      | Fast       | 49,856 bytes             |
+
+SLH-DSA signing is always probabilistic (randomised). The `hedgeVariant` field in `CK_SIGN_ADDITIONAL_CONTEXT` is accepted but has no effect on SLH-DSA operations.
+
+---
+
+## 8. Pre-Hash Encoding Reference
+
+When a `CKM_HASH_ML_DSA_*` or `CKM_HASH_SLH_DSA_*` mechanism is used, softhsmv3 constructs the pre-hash message encoding internally before passing it to OpenSSL's EVP signer. The encoding follows FIPS 204 §5.4 (ML-DSA) and FIPS 205 §10.1 (SLH-DSA):
+
+```
+M' = domain_separator || len(ctx) || ctx || AlgId_DER || H(M)
+```
+
+Where:
+- `domain_separator` = `0x01` (one byte)
+- `len(ctx)` = context length in bytes (one byte, 0–255)
+- `ctx` = context bytes (up to 255 bytes)
+- `AlgId_DER` = DER-encoded `AlgorithmIdentifier` for the hash algorithm
+- `H(M)` = hash of the original message under the specified hash algorithm
+
+This encoding is transparent to callers — pass the raw message to `C_Sign` or `C_SignMessage` and softhsmv3 handles the pre-hash construction.
+
+---
+
+*Repository: [https://github.com/pqctoday/softhsmv3](https://github.com/pqctoday/softhsmv3)*

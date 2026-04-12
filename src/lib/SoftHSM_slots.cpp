@@ -457,6 +457,7 @@ void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE
 	t["CKM_EC_EDWARDS_KEY_PAIR_GEN"]    = CKM_EC_EDWARDS_KEY_PAIR_GEN;
 	t["CKM_EC_MONTGOMERY_KEY_PAIR_GEN"] = CKM_EC_MONTGOMERY_KEY_PAIR_GEN;
 	t["CKM_EDDSA"]			= CKM_EDDSA;
+	t["CKM_EDDSA_PH"]		= CKM_EDDSA_PH;
 
 	// ML-DSA (FIPS 204, PKCS#11 v3.2)
 	t["CKM_ML_DSA_KEY_PAIR_GEN"]	= CKM_ML_DSA_KEY_PAIR_GEN;
@@ -907,6 +908,11 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 		case CKM_EDDSA:
 			pInfo->ulMinKeySize = eddsaMinSize;
 			pInfo->ulMaxKeySize = eddsaMaxSize;
+			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			break;
+		case CKM_EDDSA_PH:
+			pInfo->ulMinKeySize = 255;
+			pInfo->ulMaxKeySize = 255;
 			pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 #endif

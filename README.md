@@ -81,6 +81,8 @@ import CK from '@pqctoday/softhsm-wasm/constants'
 | Key derivation (HKDF, KBKDF, cofactor ECDH) | Not supported | **`CKM_HKDF_DERIVE`, `CKM_SP800_108_COUNTER_KDF`, `CKM_SP800_108_FEEDBACK_KDF`, `CKM_ECDH1_COFACTOR_DERIVE`** |
 | PBKDF2 (`CKM_PKCS5_PBKD2`) | Not supported | **Implemented** — HMAC-SHA{1/224/256/384/512} PRF; BIP39 / SLIP-0010 seed derivation |
 | ECDH1 with KDF (`CKD_SHA*_KDF`) | Not supported | **Implemented** — X9.63 SHA{1/256/384/512} KDF on `CKM_ECDH1_DERIVE`; 5G SUCI deconcealment (TS 33.501 §6.12.2) |
+| LMS/HSS (SP 800-208) | Not supported | **SHA-256 + SHAKE-256** (N32/N24); all 80 NIST parameter combinations; C++↔Rust cross-engine verified |
+| XMSS / XMSS^MT (RFC 8391) | Not supported | **Both engines** (XMSS-MT: C++ only); all SHA2/SHAKE-256 param sets |
 | SHA-3 signature variants | Not supported | **C++:** `CKM_ECDSA_SHA3_224/256/384/512`, `CKM_RSA_SHA3_224/256/384/512_PKCS/_PKCS_PSS` — **Rust:** `CKM_ECDSA_SHA3_224/256/384/512` + `CKM_ECDSA_SHA512` |
 | GOST/DES/DSA/DH | Included | Removed (focused codebase) |
 | WASM build | Not supported | **Emscripten + Rust `wasm32-unknown-unknown`** |
@@ -119,9 +121,22 @@ import CK from '@pqctoday/softhsm-wasm/constants'
 | SLH-DSA-SHAKE-192s/f | 48 B | 96 B | 16,224/35,664 B | 3 |
 | SLH-DSA-SHAKE-256s/f | 64 B | 128 B | 29,792/49,856 B | 5 |
 
+### LMS / HSS (Leighton-Micali Signatures) — SP 800-208 / RFC 8554
+
+Stateful hash-based signatures. Available in both C++ and Rust engines with all 80 NIST parameter combinations (SHA-256 and SHAKE-256, N32 and N24 output sizes, tree heights H5/10/15/20/25, Winternitz W1/2/4/8). Validated against all 320 NIST ACVP LMS sigVer demo vectors.
+
+| LMS Hash Family | Tree Heights | Output Size | LMOTS Variants |
+| --- | --- | --- | --- |
+| SHA-256 N32 | H5, H10, H15, H20, H25 | 32 B | W1, W2, W4, W8 |
+| SHA-256 N24 | H5, H10, H15, H20, H25 | 24 B | W1, W2, W4, W8 |
+| SHAKE-256 N32 | H5, H10, H15, H20, H25 | 32 B | W1, W2, W4, W8 |
+| SHAKE-256 N24 | H5, H10, H15, H20, H25 | 24 B | W1, W2, W4, W8 |
+
+HSS multi-level trees (up to 8 levels) use `CKM_HSS_KEY_PAIR_GEN` / `CKM_HSS`. Key exhaustion returns `CKR_KEY_EXHAUSTED`. Remaining-use counter exposed via `CKA_HSS_KEYS_REMAINING`.
+
 ### XMSS / XMSS^MT (eXtended Merkle Signature Scheme) — RFC 8391 / SP 800-208
 
-Stateful hash-based signatures. Available in both C++ and Rust engines with all parameter sets (SHA2-256, SHAKE-256).
+Stateful hash-based signatures. Available in both C++ and Rust engines with all parameter sets (SHA2-256, SHAKE-256). XMSS-MT available in C++ engine only.
 
 | Variant | Public Key | Private Key | Signature | NIST Level |
 | --- | --- | --- | --- | --- |
@@ -179,9 +194,21 @@ CKM_HASH_SLH_DSA_SHAKE256
 
 ```c
 CKM_XMSS_KEY_PAIR_GEN    // Key pair generation
-CKM_XMSS                 // Pure XMSS Sign (verify not currently supported directly via HSM hardware standard)
+CKM_XMSS                 // Pure XMSS sign / verify
 CKM_XMSSMT_KEY_PAIR_GEN  // Key pair generation MT
-CKM_XMSSMT               // Pure XMSSMT Sign
+CKM_XMSSMT               // Pure XMSSMT sign / verify
+```
+
+### Stateful HBS — LMS / HSS (SP 800-208)
+
+```c
+CKM_HSS_KEY_PAIR_GEN     // HSS key pair generation
+CKM_HSS                  // HSS sign / verify (multi-level LMS)
+
+// Key template attributes
+CKA_LMS_PARAM_SET        // LMS parameter set (e.g. CKP_LMS_SHA256_N32_H10)
+CKA_LMOTS_PARAM_SET      // LMOTS one-time-signature parameter (e.g. CKP_LMOTS_SHA256_N32_W4)
+CKA_HSS_KEYS_REMAINING   // Remaining one-time signature slots (read-only)
 ```
 
 ### Message Signing API (v3.0)
@@ -326,8 +353,8 @@ CKM_KMAC_256               = 0x80000101  // KMAC-256 (vendor-defined range)
 
 The `softhsmv3` implementations maintain strict compliance with current ACVP test vectors and the PKCS#11 v3.2 specification:
 
-- **ACVP Testing (v0.4.16+)**: Both the C++ and Rust engines pass **74/74** ACVP test vectors (37 per engine, zero failures, zero skips) in dual HSM mode. Coverage includes ML-KEM (Decapsulate KAT + Round-Trip), ML-DSA (SigVer KAT + Functional, all 3 variants), HashML-DSA (SHA-256/SHA-512, 3 variants), SLH-DSA (Functional, 2 param sets), HashSLH-DSA (SHA2-128f-SHA256, SHA2-256f-SHA512), AES-GCM/CBC/CTR/KW/KWP, HMAC-SHA256/384/512, RSA-PSS, ECDSA P-256/P-384, EdDSA Ed25519, Ed25519ph, SHA-256 (3 vectors), SHA3-256 (empty-string vector), PBKDF2, and HKDF.
-- **NIST ACVP LMS sigVer (v0.4.7)**: **320/320** official NIST ACVP demo vectors validated against `lm_validate_signature()` — all 80 SP 800-208 parameter combinations (SHA-256 M32/M24 + SHAKE-256 M32/M24 × 5 tree heights × 4 Winternitz params). Source: [usnistgov/ACVP-Server](https://github.com/usnistgov/ACVP-Server/tree/master/gen-val/json-files/LMS-sigVer-1.0).
+- **ACVP Testing (v0.4.21+)**: Both the C++ and Rust engines pass all ACVP algorithm test vectors with **zero failures and zero skips** across all implemented mechanisms in dual HSM mode. The test suite covers: ML-KEM (Decapsulate KAT + Round-Trip, all 3 variants), ML-DSA (SigVer KAT + Functional, all 3 variants), HashML-DSA (SHA-256/SHA-512, 3 variants), SLH-DSA (Functional 2 param sets + SigGen KAT), HashSLH-DSA (SHA2-128f-SHA256, SHA2-256f-SHA512), LMS/HSS SHA-256 + SHAKE-256 (sign+verify round-trips; NIST ACVP LMS sigVer KAT, 20 SHAKE groups per engine — newly passing on both engines as of v0.4.21), AES-GCM/CBC/CTR/KW/KWP, HMAC-SHA256/384/512, RSA-PSS, ECDSA P-256/P-384, EdDSA Ed25519, **Ed25519ph / `CKM_EDDSA_PH` (C++ + Rust, both engines as of v0.4.21)**, SHA-256 (3 vectors), SHA3-256 (empty-string vector), PBKDF2, and HKDF. C++↔Rust cross-engine HSS signing verification available in dual mode.
+- **NIST ACVP LMS sigVer**: **320/320** official NIST ACVP demo vectors validated against `lm_validate_signature()` — all 80 SP 800-208 parameter combinations (SHA-256 M32/M24 + SHAKE-256 M32/M24 × 5 tree heights × 4 Winternitz params). Source: [usnistgov/ACVP-Server](https://github.com/usnistgov/ACVP-Server/tree/master/gen-val/json-files/LMS-sigVer-1.0).
 - **PKCS#11 v3.2 Semantics**: The standalone C++ algorithmic validator (`pqc_validate`) successfully passes 66/66 deep evaluation tests, including comprehensive cryptographic round-trips and negative tampering evaluations against the compiled `libsofthsmv3.dylib`.
 - **Playground E2E**: End-to-end token integration and ACVP matrix execution are verified via automated Playwright continuous integration (`playground-softhsm-acvp.spec.ts`) in dual HSM mode.
 - **Security Audit (March 2026)**: Full remediation of all HIGH and MEDIUM findings. See [`docs/security_audit_03222026.md`](docs/security_audit_03222026.md).
