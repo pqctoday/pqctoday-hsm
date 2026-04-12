@@ -93,8 +93,7 @@ CK_RV Slot::getSlotInfo(CK_SLOT_INFO_PTR info)
 	memcpy(info->slotDescription, sDescription.data(), sDescription.size());
 	memcpy(info->manufacturerID, mfgID, strlen(mfgID));
 
-	// CKF_TOKEN_PRESENT only when an initialised token occupies the slot (PKCS#11 §4.2.2)
-	info->flags = token->isInitialized() ? CKF_TOKEN_PRESENT : 0;
+	info->flags = CKF_TOKEN_PRESENT;
 
 	info->hardwareVersion.major = VERSION_MAJOR;
 	info->hardwareVersion.minor = VERSION_MINOR;
@@ -111,10 +110,7 @@ CK_SLOT_ID Slot::getSlotID()
 }
 
 // Is a token present?
-// PKCS#11 v3.2 §4.2.2: CKF_TOKEN_PRESENT must be true only when a token is actually present.
-// An uninitialised placeholder slot has no token — return false so it is excluded from
-// C_GetSlotList(tokenPresent=CK_TRUE) and C_OpenSession does not see it.
 bool Slot::isTokenPresent()
 {
-	return token->isInitialized();
+	return true;
 }

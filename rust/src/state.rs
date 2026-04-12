@@ -1,7 +1,7 @@
+use rand_chacha::ChaCha20Rng;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
-use rand_chacha::ChaCha20Rng;
 
 use crate::constants::*;
 use crate::crypto::*;
@@ -23,7 +23,7 @@ thread_local! {
     /// across all operations, cleared in C_Finalize. Uses IETF ChaCha20 (RFC 8439)
     /// to match the C++ OpenSSL EVP_chacha20 implementation.
     pub static ACVP_RNG: RefCell<Option<ChaCha20Rng>> = RefCell::new(None);
-    
+
     // PKCS#11 v3.2 token and session tracking
     pub static SESSIONS: RefCell<HashMap<u32, SessionState>> = RefCell::new(HashMap::new());
     pub static TOKEN_STORE: RefCell<HashMap<u32, TokenState>> = RefCell::new(HashMap::new());
@@ -67,16 +67,19 @@ pub fn init_token_store() {
         let mut store = ts.borrow_mut();
         if store.is_empty() {
             // Provide an initial uninitialized token in slot 0
-            store.insert(0, TokenState {
-                slot_id: 0,
-                initialized: false,
-                label: [0x20; 32],
-                login_state: LoginState::Public,
-                so_pin_salt: [0u8; 16],
-                so_pin_hash: [0u8; 32],
-                user_pin_salt: None,
-                user_pin_hash: None,
-            });
+            store.insert(
+                0,
+                TokenState {
+                    slot_id: 0,
+                    initialized: false,
+                    label: [0x20; 32],
+                    login_state: LoginState::Public,
+                    so_pin_salt: [0u8; 16],
+                    so_pin_hash: [0u8; 32],
+                    user_pin_salt: None,
+                    user_pin_hash: None,
+                },
+            );
         }
     });
 }
@@ -85,9 +88,7 @@ pub struct EncryptCtx {
     pub mech_type: u32,
     pub key_handle: u32,
     pub iv: Vec<u8>,
-    #[allow(dead_code)]
     pub aad: Vec<u8>,
-    #[allow(dead_code)]
     pub tag_bits: u32,
 }
 
@@ -133,15 +134,22 @@ fn apply_object_defaults(attrs: &mut Attributes) {
     }
     // PKCS#11 v3.2 class-specific defaults — read CKA_CLASS to determine which to set
     let obj_class = attrs.get(&CKA_CLASS).and_then(|v| {
-        if v.len() >= 4 { Some(u32::from_le_bytes([v[0], v[1], v[2], v[3]])) } else { None }
+        if v.len() >= 4 {
+            Some(u32::from_le_bytes([v[0], v[1], v[2], v[3]]))
+        } else {
+            None
+        }
     });
     if let Some(class) = obj_class {
         // CKA_TRUSTED: public keys + secret keys (object is not trusted-marked by default)
-        if (class == CKO_PUBLIC_KEY || class == CKO_SECRET_KEY) && !attrs.contains_key(&CKA_TRUSTED) {
+        if (class == CKO_PUBLIC_KEY || class == CKO_SECRET_KEY) && !attrs.contains_key(&CKA_TRUSTED)
+        {
             store_bool(attrs, CKA_TRUSTED, false);
         }
         // CKA_WRAP_WITH_TRUSTED: private + secret keys (no forced-trusted-wrap by default)
-        if (class == CKO_PRIVATE_KEY || class == CKO_SECRET_KEY) && !attrs.contains_key(&CKA_WRAP_WITH_TRUSTED) {
+        if (class == CKO_PRIVATE_KEY || class == CKO_SECRET_KEY)
+            && !attrs.contains_key(&CKA_WRAP_WITH_TRUSTED)
+        {
             store_bool(attrs, CKA_WRAP_WITH_TRUSTED, false);
         }
         // CKA_ALWAYS_AUTHENTICATE: private keys only (no per-op re-auth by default)
@@ -182,20 +190,21 @@ pub fn get_object_value(handle: u32) -> Option<Vec<u8>> {
 /// Some internal paths (C_GenerateKeyPair) store the raw SEC1 bytes directly
 /// without the DER header. This function handles both formats.
 pub fn get_ec_point_sec1(handle: u32) -> Option<Vec<u8>> {
-    OBJECTS.with(|objs| {
-        objs.borrow()
-            .get(&handle)
-            .and_then(|attrs| attrs.get(&CKA_EC_POINT).cloned())
-    })
-    .map(|ec_point| {
-        // DER OCTET STRING short form: tag=0x04, then one length byte.
-        // If byte[1] equals len-2 the buffer carries the DER header; strip it.
-        if ec_point.len() > 2 && ec_point[1] as usize == ec_point.len() - 2 {
-            ec_point[2..].to_vec()
-        } else {
-            ec_point
-        }
-    })
+    OBJECTS
+        .with(|objs| {
+            objs.borrow()
+                .get(&handle)
+                .and_then(|attrs| attrs.get(&CKA_EC_POINT).cloned())
+        })
+        .map(|ec_point| {
+            // DER OCTET STRING short form: tag=0x04, then one length byte.
+            // If byte[1] equals len-2 the buffer carries the DER header; strip it.
+            if ec_point.len() > 2 && ec_point[1] as usize == ec_point.len() - 2 {
+                ec_point[2..].to_vec()
+            } else {
+                ec_point
+            }
+        })
 }
 
 /// Return (modulus, public_exponent) bytes for an RSA public key object.
@@ -267,7 +276,9 @@ pub fn get_object_attr_u32(handle: u32, attr_type: u32) -> Option<u32> {
 pub fn get_object_attr_u64(handle: u32, attr_type: u32) -> Option<u64> {
     get_object_attr_bytes(handle, attr_type).and_then(|v| {
         if v.len() >= 8 {
-            Some(u64::from_le_bytes([v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7]]))
+            Some(u64::from_le_bytes([
+                v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7],
+            ]))
         } else {
             None
         }
@@ -320,10 +331,11 @@ pub fn read_bool_attr(attrs: &Attributes, attr_type: u32) -> bool {
 /// - Generic secret (HMAC): first 3 bytes of SHA-256(key_value)
 /// - Asymmetric keys (public/private): first 3 bytes of SHA-256(CKA_VALUE)
 pub fn compute_kcv(attrs: &mut Attributes) {
-    use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
-    use sha2::{Sha256, Digest};
+    use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+    use sha2::{Digest, Sha256};
 
-    let class = attrs.get(&CKA_CLASS)
+    let class = attrs
+        .get(&CKA_CLASS)
         .filter(|v| v.len() >= 4)
         .map(|v| u32::from_le_bytes([v[0], v[1], v[2], v[3]]))
         .unwrap_or(0);
@@ -335,7 +347,8 @@ pub fn compute_kcv(attrs: &mut Attributes) {
 
     let kcv: Vec<u8> = match class {
         CKO_SECRET_KEY => {
-            let key_type = attrs.get(&CKA_KEY_TYPE)
+            let key_type = attrs
+                .get(&CKA_KEY_TYPE)
                 .filter(|v| v.len() >= 4)
                 .map(|v| u32::from_le_bytes([v[0], v[1], v[2], v[3]]))
                 .unwrap_or(0);

@@ -1,6 +1,7 @@
-# PKCS#11 v3.2 Compliance Gap Analysis — softhsmv3 (v13)
+# PKCS#11 v3.2 Compliance Gap Analysis — softhsmv3 (v14)
 
-**Updated:** 2026-04-08 (v13 — KEM output key attribute compliance: `CKA_LOCAL=CK_FALSE`, `CKA_ALWAYS_SENSITIVE=CK_FALSE`, `CKA_NEVER_EXTRACTABLE=CK_FALSE` per §5.18.8/§5.18.9; `C_DecapsulateKey` error codes corrected to `CKR_WRAPPED_KEY_*` family; debug printf removed)
+**Updated:** 2026-04-12 (v14 — `C_Initialize` pReserved pointer guard: small sentinel values (< 4096) now return `CKR_ARGUMENTS_BAD` before ACVP dispatch, preventing null-pointer dereference in compliance test suites; `CKF_TOKEN_PRESENT` unconditionally set — `Slot::getSlotInfo()` / `Slot::isTokenPresent()` no longer conditional on `token->isInitialized()`, fixing `C_GetSlotList(tokenPresent=CK_TRUE)` returning empty on uninitialised tokens; ChaCha20-Poly1305 test state isolation fix)
+**Prior:** 2026-04-08 (v13 — KEM output key attribute compliance: `CKA_LOCAL=CK_FALSE`, `CKA_ALWAYS_SENSITIVE=CK_FALSE`, `CKA_NEVER_EXTRACTABLE=CK_FALSE` per §5.18.8/§5.18.9; `C_DecapsulateKey` error codes corrected to `CKR_WRAPPED_KEY_*` family; debug printf removed)
 **Prior:** 2026-04-06 (v12 — SHA-256 ABI fix: `hash-sigs/sha256.h` now uses `USE_OPENSSL=1` so `hash_context` union uses OpenSSL's `SHA256_CTX` (112 B) matching the linked OpenSSL SHA256; eliminates WASM unreachable trap in `hss_validate_signature` during C_Verify)
 **Prior:** 2026-04-06 (v11 — G-ATTR1a/b/c resolved: ML-DSA/SLH-DSA/ML-KEM public key `CKA_VALUE` now `ck1|ck4`; TypeScript template updated for XMSS `CKA_PARAMETER_SET`; all open items closed)
 **Prior:** 2026-04-01 (v9 — SLH-DSA context string G4 + deterministic mode G5 resolved, full C++/Rust/TypeScript parity)

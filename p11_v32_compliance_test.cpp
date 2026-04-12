@@ -273,6 +273,7 @@ void test_key_attributes() {
     // Enforce CKA_HSS_KEYS_REMAINING check (HSS/LMS)
     CK_MECHANISM hssMech = { CKM_HSS_KEY_PAIR_GEN, NULL_PTR, 0 };
     CK_KEY_TYPE hssKT = 0x00000046UL; // CKK_HSS
+    CK_ULONG hssLevels = 1;
     CK_ATTRIBUTE hssPubTmpl[] = { 
         { CKA_CLASS, &pubClass, sizeof(pubClass) },
         { CKA_KEY_TYPE, &hssKT, sizeof(hssKT) },
@@ -287,7 +288,7 @@ void test_key_attributes() {
         { CKA_SIGN, &bTrue, sizeof(bTrue) }
     };
     CK_OBJECT_HANDLE hssPub, hssPriv;
-    rv = fl->C_GenerateKeyPair(hSess, &hssMech, hssPubTmpl, 2, hssPrivTmpl, 2, &hssPub, &hssPriv);
+    rv = fl->C_GenerateKeyPair(hSess, &hssMech, hssPubTmpl, sizeof(hssPubTmpl)/sizeof(CK_ATTRIBUTE), hssPrivTmpl, sizeof(hssPrivTmpl)/sizeof(CK_ATTRIBUTE), &hssPub, &hssPriv);
     
     if (rv == CKR_OK) {
         CK_ULONG remaining = 0;
@@ -713,7 +714,7 @@ void test_pqc_xmss() {
     };
 
     CK_OBJECT_HANDLE hPub = 0, hPriv = 0;
-    CK_RV rv = fl->C_GenerateKeyPair(hSess, &mech, pubTmpl, 5, privTmpl, 6, &hPub, &hPriv);
+    CK_RV rv = fl->C_GenerateKeyPair(hSess, &mech, pubTmpl, sizeof(pubTmpl)/sizeof(CK_ATTRIBUTE), privTmpl, sizeof(privTmpl)/sizeof(CK_ATTRIBUTE), &hPub, &hPriv);
     if (rv == CKR_MECHANISM_INVALID || rv == CKR_FUNCTION_NOT_SUPPORTED) {
         record_result("XMSS", "Generate_XMSS_SHA2_10_256", "SKIP", "Mech unavailable");
         return;
@@ -1083,7 +1084,7 @@ void test_fips_edge_constraints() {
             // Decap Truncated
             CK_OBJECT_HANDLE hSec2 = 0;
             rv = mlkemDecap(hSess, &encapMech, hKemPriv, NULL_PTR, 0, ct, ctLen - 1, &hSec2);
-            record_result("FIPS", "ML-KEM_Truncated_CT", (rv == CKR_WRAPPED_KEY_LEN_RANGE || rv == CKR_WRAPPED_KEY_INVALID || rv == CKR_ENCRYPTED_DATA_LEN_RANGE || rv == CKR_ENCRYPTED_DATA_INVALID || rv == CKR_ARGUMENTS_BAD) ? "PASS" : "FAIL", "RV=" + std::to_string(rv));
+            record_result("FIPS", "ML-KEM_Truncated_CT", (rv == 274 || rv == CKR_WRAPPED_KEY_LEN_RANGE || rv == CKR_WRAPPED_KEY_INVALID || rv == CKR_ENCRYPTED_DATA_LEN_RANGE || rv == CKR_ENCRYPTED_DATA_INVALID || rv == CKR_ARGUMENTS_BAD) ? "PASS" : "FAIL", "RV=" + std::to_string(rv));
             
             // Decap Tampered
             ct[0] ^= 1;

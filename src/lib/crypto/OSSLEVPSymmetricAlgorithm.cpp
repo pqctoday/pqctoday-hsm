@@ -116,7 +116,7 @@ bool OSSLEVPSymmetricAlgorithm::encryptInit(const SymmetricKey* key, const SymMo
 	}
 
 	// Check the IV
-	if (mode != SymMode::GCM && (IV.size() > 0) && (IV.size() != getBlockSize()))
+	if (mode != SymMode::GCM && mode != SymMode::CHACHA_POLY1305 && (IV.size() > 0) && (IV.size() != getBlockSize()))
 	{
 		ERROR_MSG("Invalid IV size (%d bytes, expected %d bytes)", IV.size(), getBlockSize());
 
@@ -168,7 +168,7 @@ bool OSSLEVPSymmetricAlgorithm::encryptInit(const SymmetricKey* key, const SymMo
 	}
 
 	int rv;
-	if (mode == SymMode::GCM)
+	if (mode == SymMode::GCM || mode == SymMode::CHACHA_POLY1305)
 	{
 		rv = EVP_EncryptInit_ex(pCurCTX, cipher, NULL, NULL, NULL);
 
@@ -198,7 +198,7 @@ bool OSSLEVPSymmetricAlgorithm::encryptInit(const SymmetricKey* key, const SymMo
 
 	EVP_CIPHER_CTX_set_padding(pCurCTX, padding ? 1 : 0);
 
-	if (mode == SymMode::GCM)
+	if (mode == SymMode::GCM || mode == SymMode::CHACHA_POLY1305)
 	{
 		int outLen = 0;
 		if (aad.size() && !EVP_EncryptUpdate(pCurCTX, NULL, &outLen, (unsigned char*) aad.const_byte_str(), aad.size()))
@@ -291,7 +291,7 @@ bool OSSLEVPSymmetricAlgorithm::encryptFinal(ByteString& encryptedData)
 	// Resize the output block
 	encryptedData.resize(outLen);
 
-	if (mode == SymMode::GCM)
+	if (mode == SymMode::GCM || mode == SymMode::CHACHA_POLY1305)
 	{
 		ByteString tag;
 		tag.resize(tagBytes);
@@ -314,7 +314,7 @@ bool OSSLEVPSymmetricAlgorithm::decryptInit(const SymmetricKey* key, const SymMo
 	}
 
 	// Check the IV
-	if (mode != SymMode::GCM && (IV.size() > 0) && (IV.size() != getBlockSize()))
+	if (mode != SymMode::GCM && mode != SymMode::CHACHA_POLY1305 && (IV.size() > 0) && (IV.size() != getBlockSize()))
 	{
 		ERROR_MSG("Invalid IV size (%d bytes, expected %d bytes)", IV.size(), getBlockSize());
 
@@ -366,7 +366,7 @@ bool OSSLEVPSymmetricAlgorithm::decryptInit(const SymmetricKey* key, const SymMo
 	}
 
 	int rv;
-	if (mode == SymMode::GCM)
+	if (mode == SymMode::GCM || mode == SymMode::CHACHA_POLY1305)
 	{
 		rv = EVP_DecryptInit_ex(pCurCTX, cipher, NULL, NULL, NULL);
 
@@ -396,7 +396,7 @@ bool OSSLEVPSymmetricAlgorithm::decryptInit(const SymmetricKey* key, const SymMo
 
 	EVP_CIPHER_CTX_set_padding(pCurCTX, padding ? 1 : 0);
 
-	if (mode == SymMode::GCM)
+	if (mode == SymMode::GCM || mode == SymMode::CHACHA_POLY1305)
 	{
 		int outLen = 0;
 		if (aad.size() && !EVP_DecryptUpdate(pCurCTX, NULL, &outLen, (unsigned char*) aad.const_byte_str(), aad.size()))
@@ -479,7 +479,7 @@ bool OSSLEVPSymmetricAlgorithm::decryptFinal(ByteString& data)
 	}
 
 	data.resize(0);
-	if (mode == SymMode::GCM)
+	if (mode == SymMode::GCM || mode == SymMode::CHACHA_POLY1305)
 	{
 		// Check buffer size
 		if (aeadBuffer.size() < tagBytes)

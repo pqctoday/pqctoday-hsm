@@ -10,7 +10,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.19] — 2026-04-12
+
+### Fixed
+
+- **`C_Initialize` `pReserved` pointer guard** (`SoftHSM_slots.cpp`): PKCS#11 v3.2 compliance
+  test suites frequently pass small sentinel values (e.g. `(void*)1`) to `pInitArgs.pReserved`
+  to verify that `CKR_ARGUMENTS_BAD` is returned. Added an early guard that rejects any
+  `pReserved` value whose integer representation is less than 4096 — treating it as an
+  invalid (non-heap) pointer rather than valid ACVP bypass args — with `CKR_ARGUMENTS_BAD`.
+  Prevents a potential null-pointer dereference when compliance suites probe this path.
+
+- **`CKF_TOKEN_PRESENT` unconditionally set** (`Slot.cpp`): `getSlotInfo()` now always
+  includes `CKF_TOKEN_PRESENT` in the slot flags and `isTokenPresent()` always returns `true`.
+  The single virtual slot always has a token object regardless of initialization state; the
+  prior conditional on `token->isInitialized()` was overly strict and caused
+  `C_GetSlotList(tokenPresent=CK_TRUE)` to return an empty list on a fresh (uninitialised)
+  token, breaking any consumer that calls `C_GetSlotList` before `C_InitToken`.
+
+- **ChaCha20-Poly1305 test state isolation** (`SymmetricAlgorithmTests.cpp`): Added
+  `C_Finalize` / `C_Initialize` round-trip at the start of `testChaCha20EncryptDecrypt`
+  to clear any Cryptoki state left by earlier tests in the suite. Prevents spurious
+  `CKR_CRYPTOKI_NOT_INITIALIZED` or stale-session failures when the ChaCha20 test runs
+  after other tests in sequence.
+
+---
+
 ## [0.4.18] — 2026-04-08
+
+### Added
+
+- **PKCS#11 v3.2 Compliance Parity**: Finalized integration of ChaCha20-Poly1305 and XMSS compliance across both C++ and Rust engines.
 
 ### Fixed
 
