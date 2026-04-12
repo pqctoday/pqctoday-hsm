@@ -89,7 +89,7 @@ extern "C" {
 #include "stateful/xmss-reference/xmss_core.h"
 #include "stateful/xmss-reference/xmss.h"
 #include "stateful/xmss-reference/params.h"
-#include "stateful/xmss-reference/randombytes.h"
+#include "stateful/kat_randombytes.h"
 }
 #include <openssl/params.h>
 #include <vector>

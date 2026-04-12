@@ -1501,11 +1501,10 @@ void SymmetricAlgorithmTests::testChaCha20EncryptDecrypt()
 	CK_SESSION_HANDLE hSession;
 	CK_OBJECT_HANDLE hKey;
 
-	// Just checking C_CreateObject for ChaCha20 works without CKR_GENERAL_ERROR.
-	rv = CRYPTOKI_F_PTR( C_OpenSession(m_args.slotID, CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL_PTR, NULL_PTR, &hSession) );
+	rv = CRYPTOKI_F_PTR( C_OpenSession(m_initializedTokenSlotID, CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL_PTR, NULL_PTR, &hSession) );
 	CPPUNIT_ASSERT(rv == CKR_OK);
 
-	rv = CRYPTOKI_F_PTR( C_Login(hSession, CKU_USER, m_args.userPin, m_args.userPinLen) );
+	rv = CRYPTOKI_F_PTR( C_Login(hSession, CKU_USER, m_userPin1, m_userPin1Length) );
 	CPPUNIT_ASSERT(rv == CKR_OK);
 
 	CK_BBOOL bToken = CK_FALSE;

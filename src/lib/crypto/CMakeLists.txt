@@ -120,7 +120,7 @@ set(SOURCES
     stateful/xmss-reference/hash.c
     stateful/xmss-reference/hash_address.c
     stateful/xmss-reference/params.c
-    stateful/xmss-reference/randombytes.c
+    stateful/kat_randombytes.c
     stateful/xmss-reference/utils.c
     stateful/xmss-reference/wots.c
     stateful/xmss-reference/xmss.c
