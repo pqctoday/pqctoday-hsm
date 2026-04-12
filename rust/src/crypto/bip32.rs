@@ -1,9 +1,9 @@
-use hmac::{Hmac, Mac};
-use sha2::Sha512;
-use std::vec::Vec;
 use crate::constants::*;
+use hmac::{Hmac, Mac};
 use k256::elliptic_curve::group::ff::PrimeField;
 use p256::elliptic_curve::group::ff::PrimeField as P256PrimeField;
+use sha2::Sha512;
+use std::vec::Vec;
 
 type HmacSha512 = Hmac<Sha512>;
 
@@ -63,7 +63,11 @@ pub fn derive_child_node(
     curve: HDCurve,
 ) -> Result<(Vec<u8>, Vec<u8>), u32> {
     let mut mac = HmacSha512::new_from_slice(chain_code).map_err(|_| CKR_GENERAL_ERROR)?;
-    let actual_index = if harden { index | CKF_BIP32_HARDENED } else { index };
+    let actual_index = if harden {
+        index | CKF_BIP32_HARDENED
+    } else {
+        index
+    };
 
     if curve == HDCurve::Ed25519 {
         if !harden {
@@ -101,10 +105,15 @@ pub fn derive_child_node(
     let child_chain = result[32..64].to_vec();
 
     if curve == HDCurve::Secp256k1 {
-        let il_scalar = k256::Scalar::from_repr(k256::FieldBytes::clone_from_slice(il)).into_option().ok_or(CKR_FUNCTION_FAILED)?;
-        let parent_scalar = k256::Scalar::from_repr(k256::FieldBytes::clone_from_slice(parent_priv)).into_option().ok_or(CKR_FUNCTION_FAILED)?;
+        let il_scalar = k256::Scalar::from_repr(k256::FieldBytes::clone_from_slice(il))
+            .into_option()
+            .ok_or(CKR_FUNCTION_FAILED)?;
+        let parent_scalar =
+            k256::Scalar::from_repr(k256::FieldBytes::clone_from_slice(parent_priv))
+                .into_option()
+                .ok_or(CKR_FUNCTION_FAILED)?;
         let child_scalar = il_scalar + parent_scalar;
-        
+
         let child_bytes = child_scalar.to_repr().to_vec();
         // check for invalid 0 key (extremely rare)
         if child_bytes.iter().all(|&b| b == 0) {
@@ -112,10 +121,15 @@ pub fn derive_child_node(
         }
         Ok((child_bytes, child_chain))
     } else {
-        let il_scalar = p256::Scalar::from_repr(p256::FieldBytes::clone_from_slice(il)).into_option().ok_or(CKR_FUNCTION_FAILED)?;
-        let parent_scalar = p256::Scalar::from_repr(p256::FieldBytes::clone_from_slice(parent_priv)).into_option().ok_or(CKR_FUNCTION_FAILED)?;
+        let il_scalar = p256::Scalar::from_repr(p256::FieldBytes::clone_from_slice(il))
+            .into_option()
+            .ok_or(CKR_FUNCTION_FAILED)?;
+        let parent_scalar =
+            p256::Scalar::from_repr(p256::FieldBytes::clone_from_slice(parent_priv))
+                .into_option()
+                .ok_or(CKR_FUNCTION_FAILED)?;
         let child_scalar = il_scalar + parent_scalar;
-        
+
         let child_bytes = child_scalar.to_repr().to_vec();
         if child_bytes.iter().all(|&b| b == 0) {
             return Err(CKR_FUNCTION_FAILED);

@@ -1495,6 +1495,56 @@ void SymmetricAlgorithmTests::aesWrapUnwrapED(CK_MECHANISM_TYPE mechanismType, C
 }
 #endif
 
+void SymmetricAlgorithmTests::testChaCha20EncryptDecrypt()
+{
+	CK_RV rv;
+	CK_SESSION_HANDLE hSession;
+	CK_OBJECT_HANDLE hKey;
+
+	// Just checking C_CreateObject for ChaCha20 works without CKR_GENERAL_ERROR.
+	rv = CRYPTOKI_F_PTR( C_OpenSession(m_args.slotID, CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL_PTR, NULL_PTR, &hSession) );
+	CPPUNIT_ASSERT(rv == CKR_OK);
+
+	rv = CRYPTOKI_F_PTR( C_Login(hSession, CKU_USER, m_args.userPin, m_args.userPinLen) );
+	CPPUNIT_ASSERT(rv == CKR_OK);
+
+	CK_BBOOL bToken = CK_FALSE;
+	CK_BBOOL bPrivate = CK_TRUE;
+	CK_BBOOL bTrue = CK_TRUE;
+	CK_OBJECT_CLASS secretClass = CKO_SECRET_KEY;
+	CK_KEY_TYPE keyType = CKK_CHACHA20;
+
+	// 32-byte key
+	CK_BYTE keyVal[32] = {
+		0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
+		0x10,0x11,0x12,0x13,0x14,0x15,0x16,0x17,0x18,0x19,0x1a,0x1b,0x1c,0x1d,0x1e,0x1f
+	};
+
+	CK_ATTRIBUTE attribs[] = {
+		{ CKA_TOKEN, &bToken, sizeof(bToken) },
+		{ CKA_PRIVATE, &bPrivate, sizeof(bPrivate) },
+		{ CKA_CLASS, &secretClass, sizeof(secretClass) },
+		{ CKA_KEY_TYPE, &keyType, sizeof(keyType) },
+		{ CKA_ENCRYPT, &bTrue, sizeof(bTrue) },
+		{ CKA_DECRYPT, &bTrue, sizeof(bTrue) },
+		{ CKA_VALUE, keyVal, sizeof(keyVal) }
+	};
+
+	hKey = CK_INVALID_HANDLE;
+	rv = CRYPTOKI_F_PTR( C_CreateObject(hSession, attribs, sizeof(attribs)/sizeof(CK_ATTRIBUTE), &hKey) );
+	CPPUNIT_ASSERT_MESSAGE("C_CreateObject ChaCha20 failed", rv == CKR_OK);
+	CPPUNIT_ASSERT(hKey != CK_INVALID_HANDLE);
+
+	rv = CRYPTOKI_F_PTR( C_DestroyObject(hSession, hKey) );
+	CPPUNIT_ASSERT(rv == CKR_OK);
+
+	rv = CRYPTOKI_F_PTR( C_Logout(hSession) );
+	CPPUNIT_ASSERT(rv == CKR_OK);
+
+	rv = CRYPTOKI_F_PTR( C_CloseSession(hSession) );
+	CPPUNIT_ASSERT(rv == CKR_OK);
+}
+
 void SymmetricAlgorithmTests::testAesEncryptDecrypt()
 {
 	CK_RV rv;

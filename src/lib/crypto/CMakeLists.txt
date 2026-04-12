@@ -51,6 +51,7 @@ set(SOURCES
     OSSLCMAC.cpp
     OSSLComp.cpp
     OSSLCryptoFactory.cpp
+    OSSLChaCha20.cpp
     OSSLECDH.cpp
     OSSLECDSA.cpp
     OSSLECKeyPair.cpp

@@ -57,10 +57,10 @@ pub const CKK_ML_KEM: u32 = 0x0000_0049;
 pub const CKK_ML_DSA: u32 = 0x0000_004a;
 pub const CKK_SLH_DSA: u32 = 0x0000_004b;
 // Stateful hash-based signature key types (PKCS#11 v3.2 §6.14)
-pub const CKK_HSS: u32 = 0x0000_0046;  // HSS/LMS multi-level (standard)
+pub const CKK_HSS: u32 = 0x0000_0046; // HSS/LMS multi-level (standard)
 pub const CKK_XMSS: u32 = 0x0000_0047; // XMSS single-tree (standard)
 pub const CKK_XMSSMT: u32 = 0x0000_0048; // XMSS^MT multi-tree (standard)
-// Vendor: single-level LMS (not in PKCS#11 v3.2 standard; same numeric space as CKK is separate from CKM)
+                                         // Vendor: single-level LMS (not in PKCS#11 v3.2 standard; same numeric space as CKK is separate from CKM)
 
 // ── PKCS#11 Semantic Attribute Types ─────────────────────────────────────────
 
@@ -83,11 +83,11 @@ pub const CKA_KEY_GEN_MECHANISM: u32 = 0x0000_0166;
 pub const CKA_CHECK_VALUE: u32 = 0x0000_0090;
 pub const CKA_ENCAPSULATE: u32 = 0x0000_0633;
 pub const CKA_DECAPSULATE: u32 = 0x0000_0634;
-pub const CKA_MODIFIABLE: u32 = 0x0000_0170;        // PKCS#11 v3.2 — mandatory for all objects (default: TRUE)
-pub const CKA_COPYABLE: u32 = 0x0000_0171;          // PKCS#11 v3.2 — mandatory for all objects (default: TRUE)
-pub const CKA_DESTROYABLE: u32 = 0x0000_0172;       // PKCS#11 v3.2 — mandatory for all objects (default: TRUE)
-pub const CKA_TRUSTED: u32 = 0x0000_0086;            // PKCS#11 v3.2 — public/secret keys (default: FALSE)
-pub const CKA_WRAP_WITH_TRUSTED: u32 = 0x0000_0210;  // PKCS#11 v3.2 — private/secret keys (default: FALSE)
+pub const CKA_MODIFIABLE: u32 = 0x0000_0170; // PKCS#11 v3.2 — mandatory for all objects (default: TRUE)
+pub const CKA_COPYABLE: u32 = 0x0000_0171; // PKCS#11 v3.2 — mandatory for all objects (default: TRUE)
+pub const CKA_DESTROYABLE: u32 = 0x0000_0172; // PKCS#11 v3.2 — mandatory for all objects (default: TRUE)
+pub const CKA_TRUSTED: u32 = 0x0000_0086; // PKCS#11 v3.2 — public/secret keys (default: FALSE)
+pub const CKA_WRAP_WITH_TRUSTED: u32 = 0x0000_0210; // PKCS#11 v3.2 — private/secret keys (default: FALSE)
 pub const CKA_ALWAYS_AUTHENTICATE: u32 = 0x0000_0202; // PKCS#11 v3.2 — private keys (default: FALSE)
 
 // Private attribute: stores the parameter set on generated keys
@@ -207,7 +207,7 @@ pub const CKM_EC_EDWARDS_KEY_PAIR_GEN: u32 = 0x0000_1055;
 pub const CKM_EC_MONTGOMERY_KEY_PAIR_GEN: u32 = 0x0000_1056; // PKCS#11 v3.2 §6.7 — X25519 keygen
 pub const CKM_EDDSA: u32 = 0x0000_1057;
 pub const CKM_EC_MONTGOMERY_KEY_DERIVE: u32 = 0x0000_1058; // Alias: ECDH1_DERIVE for X25519 keys
-// Internal-only: Ed25519ph (prehashed) — same PKCS#11 mechanism, dispatched via phFlag in params
+                                                           // Internal-only: Ed25519ph (prehashed) — same PKCS#11 mechanism, dispatched via phFlag in params
 pub const CKM_EDDSA_PH: u32 = 0xFFFF_1057;
 
 // AES
@@ -400,7 +400,6 @@ pub const CKM_HSS: u32 = 0x0000_4033;
 pub const CKM_XMSS_KEY_PAIR_GEN: u32 = 0x0000_4034;
 pub const CKM_XMSS: u32 = 0x0000_4036;
 
-
 // Vendor: Keccak-256 digest (G11 — Ethereum address derivation, Rust engine only)
 pub const CKM_KECCAK_256: u32 = 0x8000_0010;
 
@@ -408,10 +407,10 @@ pub const CKM_KECCAK_256: u32 = 0x8000_0010;
 // Range: 0x80000101–0x80000106 (offset from CKM vendor range to avoid confusion)
 
 pub const CKA_STATEFUL_KEY_STATE: u32 = 0x8000_0101; // raw serialised private key blob
-pub const CKA_LMS_PARAM_SET: u32 = 0x8000_0102;      // CKP_LMS_SHA256_M32_H* value
-pub const CKA_LMOTS_PARAM_SET: u32 = 0x8000_0103;    // CKP_LMOTS_SHA256_N32_W* value
-pub const CKA_XMSS_PARAM_SET: u32 = 0x8000_0104;     // CKP_XMSS_* value
-pub const CKA_LEAF_INDEX: u32 = 0x8000_0105;          // current leaf index (u64, little-endian)
+pub const CKA_LMS_PARAM_SET: u32 = 0x8000_0102; // CKP_LMS_SHA256_M32_H* value
+pub const CKA_LMOTS_PARAM_SET: u32 = 0x8000_0103; // CKP_LMOTS_SHA256_N32_W* value
+pub const CKA_XMSS_PARAM_SET: u32 = 0x8000_0104; // CKP_XMSS_* value
+pub const CKA_LEAF_INDEX: u32 = 0x8000_0105; // current leaf index (u64, little-endian)
 pub const CKA_XMSS_KEYS_REMAINING: u32 = 0x8000_0106; // remaining XMSS signature operations (u32, LE)
 
 // Standard multi-level HSS level-type attribute (PKCS#11 v3.2 §6.14)

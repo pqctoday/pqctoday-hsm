@@ -2110,11 +2110,11 @@ bool P11HSSPrivateKeyObj::init(OSObject *inobject)
 	P11Attribute* attrDecrypt       = new P11AttrDecrypt(osobject);
 	P11Attribute* attrUnwrap        = new P11AttrUnwrap(osobject);
 	P11Attribute* attrDerive        = new P11AttrDerive(osobject);
-	P11Attribute* attrLevels        = new P11AttrHssLevels(osobject, P11Attribute::ck1|P11Attribute::ck3);
+	P11Attribute* attrLevels        = new P11AttrHssLevels(osobject, P11Attribute::ck1|P11Attribute::ck4);
 	P11Attribute* attrLmsType       = new P11AttrHssLmsType(osobject);
 	P11Attribute* attrLmotsType     = new P11AttrHssLmotsType(osobject);
-	P11Attribute* attrLmsTypes      = new P11AttrHssLmsTypes(osobject, P11Attribute::ck1|P11Attribute::ck3);
-	P11Attribute* attrLmotsTypes    = new P11AttrHssLmotsTypes(osobject, P11Attribute::ck1|P11Attribute::ck3);
+	P11Attribute* attrLmsTypes      = new P11AttrHssLmsTypes(osobject, P11Attribute::ck1|P11Attribute::ck4);
+	P11Attribute* attrLmotsTypes    = new P11AttrHssLmotsTypes(osobject, P11Attribute::ck1|P11Attribute::ck4);
 	P11Attribute* attrKeysRemaining = new P11AttrHssKeysRemaining(osobject);
 
 	if (!attrValue->init() || !attrSign->init() || !attrSensitive->init() ||
@@ -2164,7 +2164,7 @@ bool P11XMSSPublicKeyObj::init(OSObject *inobject)
 	P11Attribute* attrVerify     = new P11AttrVerify(osobject);
 	P11Attribute* attrEncrypt    = new P11AttrEncrypt(osobject);
 	P11Attribute* attrWrap       = new P11AttrWrap(osobject);
-	P11Attribute* attrParamSet   = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck3);
+	P11Attribute* attrParamSet   = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck4);
 	P11Attribute* attrKeysRemaining = new P11AttrHssKeysRemaining(osobject);
 
 	if (!attrValue->init() || !attrVerify->init() || !attrEncrypt->init() ||
@@ -2205,7 +2205,7 @@ bool P11XMSSPrivateKeyObj::init(OSObject *inobject)
 	P11Attribute* attrDecrypt       = new P11AttrDecrypt(osobject);
 	P11Attribute* attrUnwrap        = new P11AttrUnwrap(osobject);
 	P11Attribute* attrDerive        = new P11AttrDerive(osobject);
-	P11Attribute* attrParamSet      = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck4|P11Attribute::ck6);
+	P11Attribute* attrParamSet      = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck4);
 	P11Attribute* attrKeysRemaining = new P11AttrHssKeysRemaining(osobject);
 
 	if (!attrValue->init() || !attrSign->init() || !attrSensitive->init() ||
@@ -2248,7 +2248,7 @@ bool P11XMSSMTPublicKeyObj::init(OSObject *inobject)
 	P11Attribute* attrVerify        = new P11AttrVerify(osobject);
 	P11Attribute* attrEncrypt       = new P11AttrEncrypt(osobject);
 	P11Attribute* attrWrap          = new P11AttrWrap(osobject);
-	P11Attribute* attrParamSet      = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck3);
+	P11Attribute* attrParamSet      = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck4);
 	P11Attribute* attrKeysRemaining = new P11AttrHssKeysRemaining(osobject);
 
 	if (!attrValue->init() || !attrVerify->init() || !attrEncrypt->init() ||
@@ -2289,7 +2289,7 @@ bool P11XMSSMTPrivateKeyObj::init(OSObject *inobject)
 	P11Attribute* attrDecrypt       = new P11AttrDecrypt(osobject);
 	P11Attribute* attrUnwrap        = new P11AttrUnwrap(osobject);
 	P11Attribute* attrDerive        = new P11AttrDerive(osobject);
-	P11Attribute* attrParamSet      = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck4|P11Attribute::ck6);
+	P11Attribute* attrParamSet      = new P11AttrParameterSet(osobject, P11Attribute::ck1|P11Attribute::ck4);
 	P11Attribute* attrKeysRemaining = new P11AttrHssKeysRemaining(osobject);
 
 	if (!attrValue->init() || !attrSign->init() || !attrSensitive->init() ||
@@ -2317,4 +2317,44 @@ bool P11XMSSMTPrivateKeyObj::init(OSObject *inobject)
 	return true;
 }
 
+// ─── ChaCha20 (PKCS#11 v3.2, CKK_CHACHA20 = 0x33) ──────────────────────────
 
+// Constructor
+P11ChaCha20SecretKeyObj::P11ChaCha20SecretKeyObj()
+{
+	initialized = false;
+}
+
+// Add attributes
+bool P11ChaCha20SecretKeyObj::init(OSObject *inobject)
+{
+	if (initialized) return true;
+	if (inobject == NULL) return false;
+
+	if (!inobject->attributeExists(CKA_KEY_TYPE) || inobject->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED) != CKK_CHACHA20) {
+		OSAttribute setKeyType((unsigned long)CKK_CHACHA20);
+		inobject->setAttribute(CKA_KEY_TYPE, setKeyType);
+	}
+
+	// Create parent
+	if (!P11SecretKeyObj::init(inobject)) return false;
+
+	// Create attributes
+	// Per PKCS#11 v3.2 §2.21: CKA_VALUE_LEN does NOT exist for ChaCha20 keys.
+	// ChaCha20 has a fixed 256-bit (32-byte) key. Only AES (variable-length) uses it.
+	P11Attribute* attrValue = new P11AttrValue(osobject,P11Attribute::ck1|P11Attribute::ck4|P11Attribute::ck6|P11Attribute::ck7);
+
+	// Initialize the attributes
+	if (!attrValue->init())
+	{
+		ERROR_MSG("Could not initialize the attribute");
+		delete attrValue;
+		return false;
+	}
+
+	// Add them to the map
+	attributes[attrValue->getType()] = attrValue;
+
+	initialized = true;
+	return true;
+}

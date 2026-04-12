@@ -133,6 +133,10 @@ static CK_RV newP11Object(CK_OBJECT_CLASS objClass, CK_KEY_TYPE keyType, CK_CERT
 			{
 				*p11object = new P11AESSecretKeyObj();
 			}
+			else if (keyType == CKK_CHACHA20)
+			{
+				*p11object = new P11ChaCha20SecretKeyObj();
+			}
 			else
 				return CKR_ATTRIBUTE_VALUE_INVALID;
 			break;

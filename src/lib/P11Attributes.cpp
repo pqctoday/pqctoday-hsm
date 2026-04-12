@@ -1037,6 +1037,7 @@ CK_RV P11AttrValue::updateAttr(Token *token, bool isPrivate, CK_VOID_PTR pValue,
 		switch (osobject->getUnsignedLongValue(CKA_KEY_TYPE, CKK_VENDOR_DEFINED))
 		{
 			case CKK_GENERIC_SECRET:
+			case CKK_CHACHA20:
 			case CKK_MD5_HMAC:
 			case CKK_SHA_1_HMAC:
 			case CKK_SHA224_HMAC:
