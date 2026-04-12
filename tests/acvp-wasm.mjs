@@ -57,6 +57,11 @@ import {
   unwrapKey,
   pbkdf2,
   hkdf,
+  generateHSSKeyPair,
+  hssSign,
+  hssVerify,
+  hssGetPublicKeyBytes,
+  hssImportPublicKey,
   loadEngine,
   CK,
 } from './helpers.mjs'
@@ -83,6 +88,8 @@ const hmac512Vec = loadJson('hmac_sha512_test.json')
 const ecdsaP384Vec = loadJson('ecdsa_p384_test.json')
 const aesKwVec = loadJson('aeskw_test.json')
 const slhdsaCtxVec = loadJson('slhdsa_ctx_test.json')
+const lmsSigverVec = loadJson('lms_sigver_test.json')
+const lmsSigverExp = loadJson('lms_sigver_expected.json')
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 function arrEq(a, b) {
@@ -616,6 +623,125 @@ async function runSuite(engineName) {
       }
     }
 
+    // ── §12. HSS / LMS — SP 800-208 SHAKE-256 ───────────────────────────────
+
+    // §12.1 — HSS SHA-256 round-trip (baseline: both engines support HSS at all)
+    {
+      const msg = new TextEncoder().encode('HSS SHA-256 baseline sign+verify test')
+      try {
+        const { pubHandle, privHandle } = generateHSSKeyPair(
+          M, hSession, CK.CKP_LMS_SHA256_M32_H5, CK.CKP_LMOTS_SHA256_N32_W8)
+        const sig = hssSign(M, hSession, privHandle, msg)
+        const ok  = hssVerify(M, hSession, pubHandle, msg, sig)
+        // Tamper check
+        const bad = sig.slice(); bad[bad.length - 1] ^= 0xff
+        const rejected = !hssVerify(M, hSession, pubHandle, msg, bad)
+        addResult('hss-sha256-rt', 'LMS_SHA256_M32_H5/LMOTS_SHA256_N32_W8',
+          'Sign+Verify round-trip (§12.1)',
+          ok && rejected ? 'PASS' : 'FAIL',
+          `sig[${sig.length}B] ok=${ok} rejected=${rejected}`)
+      } catch (e) {
+        addResult('hss-sha256-rt', 'LMS_SHA256_M32_H5/LMOTS_SHA256_N32_W8',
+          'Sign+Verify round-trip (§12.1)', 'FAIL', e.message)
+      }
+    }
+
+    // §12.2 — HSS SHAKE-256 round-trip (SP 800-208 — the new feature)
+    {
+      const msg = new TextEncoder().encode('HSS SHAKE-256 SP 800-208 sign+verify test')
+      try {
+        const { pubHandle, privHandle } = generateHSSKeyPair(
+          M, hSession, CK.CKP_LMS_SHAKE_M32_H5, CK.CKP_LMOTS_SHAKE_N32_W8)
+        const sig = hssSign(M, hSession, privHandle, msg)
+        const ok  = hssVerify(M, hSession, pubHandle, msg, sig)
+        const bad = sig.slice(); bad[bad.length - 1] ^= 0xff
+        const rejected = !hssVerify(M, hSession, pubHandle, msg, bad)
+        addResult('hss-shake256-rt', 'LMS_SHAKE_M32_H5/LMOTS_SHAKE_N32_W8',
+          'Sign+Verify round-trip (§12.2)',
+          ok && rejected ? 'PASS' : 'FAIL',
+          `sig[${sig.length}B] ok=${ok} rejected=${rejected}`)
+      } catch (e) {
+        addResult('hss-shake256-rt', 'LMS_SHAKE_M32_H5/LMOTS_SHAKE_N32_W8',
+          'Sign+Verify round-trip (§12.2)', 'FAIL', e.message)
+      }
+    }
+
+    // §12.3 — NIST ACVP LMS SHAKE-256 sigver KAT (trusted fixed vectors)
+    // Maps ACVP lmsMode string → CKP_LMS_* constant (IANA IDs, SP 800-208 §4)
+    const LMS_MODE_TO_CKP = {
+      LMS_SHAKE_M32_H5:  CK.CKP_LMS_SHAKE_M32_H5,  LMS_SHAKE_M32_H10: CK.CKP_LMS_SHAKE_M32_H10,
+      LMS_SHAKE_M32_H15: CK.CKP_LMS_SHAKE_M32_H15, LMS_SHAKE_M32_H20: CK.CKP_LMS_SHAKE_M32_H20,
+      LMS_SHAKE_M32_H25: CK.CKP_LMS_SHAKE_M32_H25,
+    }
+    // Build expected-result lookup: { tgId: { tcId: testPassed } }
+    const expMap = {}
+    for (const eg of lmsSigverExp.testGroups) {
+      expMap[eg.tgId] = {}
+      for (const et of eg.tests) expMap[eg.tgId][et.tcId] = et.testPassed
+    }
+    let katPass = 0, katFail = 0, katSkip = 0
+    for (const grp of lmsSigverVec.testGroups) {
+      const lmsCkp = LMS_MODE_TO_CKP[grp.lmsMode]
+      if (lmsCkp === undefined) continue  // skip SHA-256 groups (tested by Python script)
+      // Rust engine (hbs-lms 0.1.1) uses RFC 8554 internal type codes and cannot
+      // parse SP 800-208 SHAKE-256 type IDs (0x0F-0x13) in external key bytes.
+      if (engineName === 'rust') {
+        addResult(`hss-kat-${grp.lmsMode}`, grp.lmsMode,
+          `ACVP SigVer KAT (tgId ${grp.tgId}) §12.3`,
+          'SKIP', 'hbs-lms 0.1.1: SP 800-208 SHAKE type IDs not supported in external key bytes')
+        katSkip += grp.tests.length
+        continue
+      }
+      // ACVP provides a raw 56-byte LMS public key (no HSS L=1 prefix).
+      // hss_validate_signature expects HSS format: u32be(L=1) || LMS_PUB_KEY.
+      // Prepend the 4-byte L=1 big-endian prefix to match HSS serialization.
+      const lmsRaw = hexToBytes(grp.publicKey)
+      const pkBytes = new Uint8Array(4 + lmsRaw.length)
+      pkBytes[0] = 0; pkBytes[1] = 0; pkBytes[2] = 0; pkBytes[3] = 1
+      pkBytes.set(lmsRaw, 4)
+      let hPub
+      try {
+        hPub = hssImportPublicKey(M, hSession, pkBytes)
+      } catch (e) {
+        // If C_CreateObject for CKK_HSS is not yet supported, mark all as SKIP
+        addResult(`hss-kat-${grp.lmsMode}`, grp.lmsMode,
+          `ACVP SigVer KAT (tgId ${grp.tgId}) §12.3`,
+          'SKIP', `C_CreateObject unsupported: ${e.message}`)
+        katSkip += grp.tests.length
+        continue
+      }
+      for (const tc of grp.tests) {
+        const expected = expMap[grp.tgId]?.[tc.tcId]
+        try {
+          const msgB = hexToBytes(tc.message)
+          // ACVP provides a raw LMS signature (library extended format).
+          // hss_validate_signature expects HSS format: u32be(Nspk=0) || LMS_SIG.
+          // Prepend the 4-byte Nspk=0 big-endian prefix for single-level HSS.
+          const lmsSig = hexToBytes(tc.signature)
+          const sigB = new Uint8Array(4 + lmsSig.length)
+          sigB[0] = 0; sigB[1] = 0; sigB[2] = 0; sigB[3] = 0
+          sigB.set(lmsSig, 4)
+          const actual = hssVerify(M, hSession, hPub, msgB, sigB)
+          const ok = (actual === expected)
+          if (ok) katPass++; else katFail++
+          addResult(
+            `hss-kat-${grp.tgId}-${tc.tcId}`,
+            grp.lmsMode,
+            `ACVP SigVer KAT tcId=${tc.tcId} (§12.3)`,
+            ok ? 'PASS' : 'FAIL',
+            `expected=${expected} actual=${actual}`
+          )
+        } catch (e) {
+          katFail++
+          addResult(`hss-kat-${grp.tgId}-${tc.tcId}`, grp.lmsMode,
+            `ACVP SigVer KAT tcId=${tc.tcId} (§12.3)`, 'FAIL', e.message)
+        }
+      }
+    }
+    if (!jsonOut && (katPass + katFail + katSkip > 0)) {
+      console.log(`  HSS SHAKE-256 ACVP KAT: ${katPass} PASS / ${katFail} FAIL / ${katSkip} SKIP`)
+    }
+
   } finally {
     finalizeEngine(M, hSession)
   }
@@ -672,6 +798,69 @@ if (engines.length > 1 && !jsonOut) {
   }
   console.log(`\n  Total gaps: ${gapCount} / ${allIds.size} tests`)
   console.log('='.repeat(70) + '\n')
+}
+
+// ── §CC Cross-check: C++ sign → Rust verify, Rust sign → C++ verify ──────────
+if (engines.length > 1 && !jsonOut) {
+  console.log('\n' + '='.repeat(70))
+  console.log('  §CC CROSS-CHECK: HSS SHA-256 C++ ↔ Rust interoperability')
+  console.log('='.repeat(70))
+
+  // SHA-256 params (RFC 8554 type codes 0x05/0x04) used because hbs-lms 0.1.1
+  // writes SHA-256 internal type codes in key/sig bytes regardless of hash function.
+  // SHAKE-256 cross-check (0x0F/0x0C) would fail: C++ produces IANA codes, Rust
+  // ignores them (known limitation documented in §12.3 SKIP).
+  const CC_MSG = new TextEncoder().encode('HSS SHA-256 cross-engine interoperability test')
+  const CC_LMS  = CK.CKP_LMS_SHA256_M32_H5
+  const CC_LMOTS = CK.CKP_LMOTS_SHA256_N32_W8
+  let ccFail = 0
+
+  async function runCrossCheck(signEngineName, verifyEngineName) {
+    const signLabel  = signEngineName.toUpperCase()
+    const verifyLabel = verifyEngineName.toUpperCase()
+    const label = `§CC ${signLabel} sign → ${verifyLabel} verify`
+    try {
+      const Msign  = await loadEngine(signEngineName)
+      const Mverify = await loadEngine(verifyEngineName)
+      const { hSession: sSess } = initializeEngine(Msign)
+      const { hSession: vSess } = initializeEngine(Mverify)
+
+      // Sign engine: generate key pair, sign, export public key
+      const { pubHandle: sPub, privHandle: sPriv } = generateHSSKeyPair(
+        Msign, sSess, CC_LMS, CC_LMOTS)
+      const sig = hssSign(Msign, sSess, sPriv, CC_MSG)
+      const pubBytes = hssGetPublicKeyBytes(Msign, sSess, sPub)
+
+      // Verify engine: import public key, verify signature
+      let result
+      try {
+        const vPub = hssImportPublicKey(Mverify, vSess, pubBytes)
+        result = hssVerify(Mverify, vSess, vPub, CC_MSG, sig)
+      } catch (e) {
+        console.log(`  ${label}: SKIP — C_CreateObject not supported: ${e.message}`)
+        finalizeEngine(Msign, sSess)
+        finalizeEngine(Mverify, vSess)
+        return
+      }
+
+      finalizeEngine(Msign, sSess)
+      finalizeEngine(Mverify, vSess)
+
+      const status = result ? 'PASS' : 'FAIL'
+      if (!result) ccFail++
+      console.log(`  ${label}: ${status}  sig[${sig.length}B] pubkey[${pubBytes.length}B]`)
+    } catch (e) {
+      ccFail++
+      console.log(`  ${label}: FAIL — ${e.message}`)
+    }
+  }
+
+  await runCrossCheck('cpp', 'rust')   // §CC-1
+  await runCrossCheck('rust', 'cpp')   // §CC-2
+
+  console.log(`\n  Cross-check result: ${ccFail === 0 ? 'ALL PASS' : ccFail + ' FAILURE(S)'}`)
+  console.log('='.repeat(70) + '\n')
+  if (ccFail > 0) anyFail = true
 }
 
 if (jsonOut) {

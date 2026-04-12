@@ -12,10 +12,8 @@
 //   https://www.iana.org/assignments/leighton-micali-signatures/
 
 use hbs_lms::{
-    self as lms,
-    HssParameter, LmsAlgorithm, LmotsAlgorithm, HashChain,
-    Sha256_256, Sha256_192,
-    Shake256_256, Shake256_192,
+    self as lms, HashChain, HssParameter, LmotsAlgorithm, LmsAlgorithm, Sha256_192, Sha256_256,
+    Shake256_192, Shake256_256,
 };
 
 use crate::constants::*;
@@ -45,12 +43,12 @@ pub fn ckp_to_lms_algo(param: u32) -> Option<LmsAlgorithm> {
     // All four hash families use the same LmsAlgorithm enum (height-based)
     let height = lms_param_height(param)?;
     match height {
-        5  => Some(LmsAlgorithm::LmsH5),
+        5 => Some(LmsAlgorithm::LmsH5),
         10 => Some(LmsAlgorithm::LmsH10),
         15 => Some(LmsAlgorithm::LmsH15),
         20 => Some(LmsAlgorithm::LmsH20),
         25 => Some(LmsAlgorithm::LmsH25),
-        _  => None,
+        _ => None,
     }
 }
 
@@ -80,9 +78,7 @@ pub fn lms_param_max_leaves(lms_param: u32) -> Option<u64> {
 
 // ── Generic keygen helper ───────────────────────────────────────────────────
 
-fn keygen_typed<H: HashChain>(
-    params: &[HssParameter<H>],
-) -> Result<(Vec<u8>, Vec<u8>), ()> {
+fn keygen_typed<H: HashChain>(params: &[HssParameter<H>]) -> Result<(Vec<u8>, Vec<u8>), ()> {
     let mut seed_bytes = [0u8; 32];
     getrandom::getrandom(&mut seed_bytes).map_err(|_| ())?;
     let mut seed = lms::Seed::<H>::default();
@@ -116,7 +112,7 @@ pub fn lms_sign(
     message: &[u8],
     update_fn: &mut dyn FnMut(&[u8]) -> Result<(), ()>,
 ) -> Result<Vec<u8>, u32> {
-    use crate::constants::{CKR_KEY_EXHAUSTED, CKR_FUNCTION_FAILED};
+    use crate::constants::{CKR_FUNCTION_FAILED, CKR_KEY_EXHAUSTED};
 
     if leaf_index >= max_leaves {
         return Err(CKR_KEY_EXHAUSTED);
@@ -185,7 +181,7 @@ pub fn hss_sign(
     message: &[u8],
     update_fn: &mut dyn FnMut(&[u8]) -> Result<(), ()>,
 ) -> Result<Vec<u8>, u32> {
-    use crate::constants::{CKR_KEY_EXHAUSTED, CKR_FUNCTION_FAILED};
+    use crate::constants::{CKR_FUNCTION_FAILED, CKR_KEY_EXHAUSTED};
 
     let mut callback_fired = false;
     let mut wrapped_update = |new_state: &[u8]| -> Result<(), ()> {
@@ -199,8 +195,12 @@ pub fn hss_sign(
     let result = match lms_param {
         0x05..=0x09 => lms::sign::<Sha256_256>(message, priv_key_bytes, &mut wrapped_update, None),
         0x0A..=0x0E => lms::sign::<Sha256_192>(message, priv_key_bytes, &mut wrapped_update, None),
-        0x0F..=0x13 => lms::sign::<Shake256_256>(message, priv_key_bytes, &mut wrapped_update, None),
-        0x14..=0x18 => lms::sign::<Shake256_192>(message, priv_key_bytes, &mut wrapped_update, None),
+        0x0F..=0x13 => {
+            lms::sign::<Shake256_256>(message, priv_key_bytes, &mut wrapped_update, None)
+        }
+        0x14..=0x18 => {
+            lms::sign::<Shake256_192>(message, priv_key_bytes, &mut wrapped_update, None)
+        }
         _ => lms::sign::<Sha256_256>(message, priv_key_bytes, &mut wrapped_update, None),
     };
 
@@ -218,6 +218,16 @@ pub fn hss_sign(
 
 // ── HSS multi-level verify ──────────────────────────────────────────────────
 
-pub fn hss_verify(pub_key_bytes: &[u8], message: &[u8], signature: &[u8]) -> bool {
-    lms::verify::<Sha256_256>(message, signature, pub_key_bytes).is_ok()
+/// Verify an HSS/LMS signature.  `lms_param` is the CKP_LMS_* value stored in
+/// CKA_LMS_PARAM_SET of the key object; it selects the correct hash type.
+/// Note: hbs-lms 0.1.1 uses RFC 8554 internal type codes for all hash variants,
+/// so SP 800-208 SHAKE-256 type IDs (0x0F-0x18) require Shake256_* dispatch.
+pub fn hss_verify(pub_key_bytes: &[u8], message: &[u8], signature: &[u8], lms_param: u32) -> bool {
+    match lms_param {
+        0x05..=0x09 => lms::verify::<Sha256_256>(message, signature, pub_key_bytes).is_ok(),
+        0x0A..=0x0E => lms::verify::<Sha256_192>(message, signature, pub_key_bytes).is_ok(),
+        0x0F..=0x13 => lms::verify::<Shake256_256>(message, signature, pub_key_bytes).is_ok(),
+        0x14..=0x18 => lms::verify::<Shake256_192>(message, signature, pub_key_bytes).is_ok(),
+        _ => lms::verify::<Sha256_256>(message, signature, pub_key_bytes).is_ok(),
+    }
 }

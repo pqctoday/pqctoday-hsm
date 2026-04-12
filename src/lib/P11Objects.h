@@ -329,6 +329,19 @@ protected:
 	bool initialized;
 };
 
+class P11ChaCha20SecretKeyObj : public P11SecretKeyObj
+{
+public:
+	// Constructor
+	P11ChaCha20SecretKeyObj();
+
+	// Add attributes
+	virtual bool init(OSObject *inobject);
+
+protected:
+	bool initialized;
+};
+
 class P11DESSecretKeyObj : public P11SecretKeyObj
 {
 public:

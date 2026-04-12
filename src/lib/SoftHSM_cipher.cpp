@@ -58,6 +58,7 @@ static bool isSymMechanism(CK_MECHANISM_PTR pMechanism)
 		case CKM_AES_CBC_PAD:
 		case CKM_AES_CTR:
 		case CKM_AES_GCM:
+		case CKM_CHACHA20_POLY1305:
 			return true;
 		default:
 			return false;
@@ -184,6 +185,37 @@ CK_RV SoftHSM::SymEncryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 				return CKR_ARGUMENTS_BAD;
 			}
 			tagBytes = tagBytes / 8;
+			break;
+		case CKM_CHACHA20_POLY1305:
+			if (keyType != CKK_CHACHA20)
+				return CKR_KEY_TYPE_INCONSISTENT;
+			algo = SymAlgo::CHACHA;
+			mode = SymMode::CHACHA_POLY1305;
+			if (pMechanism->pParameter == NULL_PTR ||
+			    pMechanism->ulParameterLen != sizeof(CK_SALSA20_CHACHA20_POLY1305_PARAMS))
+			{
+				DEBUG_MSG("CHACHA20_POLY1305 mode requires parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+			if (CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulNonceLen > 0 &&
+			    CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->pNonce == NULL_PTR)
+			{
+				DEBUG_MSG("CHACHA20_POLY1305 pNonce is NULL with non-zero ulNonceLen");
+				return CKR_ARGUMENTS_BAD;
+			}
+			if (CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulAADLen > 0 &&
+			    CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->pAAD == NULL_PTR)
+			{
+				DEBUG_MSG("CHACHA20_POLY1305 pAAD is NULL with non-zero ulAADLen");
+				return CKR_ARGUMENTS_BAD;
+			}
+			iv.resize(CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulNonceLen);
+			if (CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulNonceLen > 0)
+				memcpy(&iv[0], CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->pNonce, CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulNonceLen);
+			aad.resize(CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
+			if (CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulAADLen > 0)
+				memcpy(&aad[0], CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->pAAD, CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
+			tagBytes = 16;
 			break;
 		default:
 			return CKR_MECHANISM_INVALID;
@@ -814,6 +846,37 @@ CK_RV SoftHSM::SymDecryptInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 				return CKR_ARGUMENTS_BAD;
 			}
 			tagBytes = tagBytes / 8;
+			break;
+		case CKM_CHACHA20_POLY1305:
+			if (keyType != CKK_CHACHA20)
+				return CKR_KEY_TYPE_INCONSISTENT;
+			algo = SymAlgo::CHACHA;
+			mode = SymMode::CHACHA_POLY1305;
+			if (pMechanism->pParameter == NULL_PTR ||
+			    pMechanism->ulParameterLen != sizeof(CK_SALSA20_CHACHA20_POLY1305_PARAMS))
+			{
+				DEBUG_MSG("CHACHA20_POLY1305 mode requires parameters");
+				return CKR_ARGUMENTS_BAD;
+			}
+			if (CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulNonceLen > 0 &&
+			    CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->pNonce == NULL_PTR)
+			{
+				DEBUG_MSG("CHACHA20_POLY1305 pNonce is NULL with non-zero ulNonceLen");
+				return CKR_ARGUMENTS_BAD;
+			}
+			if (CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulAADLen > 0 &&
+			    CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->pAAD == NULL_PTR)
+			{
+				DEBUG_MSG("CHACHA20_POLY1305 pAAD is NULL with non-zero ulAADLen");
+				return CKR_ARGUMENTS_BAD;
+			}
+			iv.resize(CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulNonceLen);
+			if (CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulNonceLen > 0)
+				memcpy(&iv[0], CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->pNonce, CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulNonceLen);
+			aad.resize(CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
+			if (CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulAADLen > 0)
+				memcpy(&aad[0], CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->pAAD, CK_SALSA20_CHACHA20_POLY1305_PARAMS_PTR(pMechanism->pParameter)->ulAADLen);
+			tagBytes = 16;
 			break;
 		default:
 			return CKR_MECHANISM_INVALID;

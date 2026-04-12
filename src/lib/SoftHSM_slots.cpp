@@ -82,6 +82,13 @@ CK_RV SoftHSM::C_Initialize(CK_VOID_PTR pInitArgs)
 		// Must be set to NULL_PTR in this version of PKCS#11, OR used for ACVP bypass!
 		if (args->pReserved != NULL_PTR)
 		{
+			// Compliance tests often pass (void*)1 to verify CKR_ARGUMENTS_BAD
+			if ((uintptr_t)args->pReserved < 4096)
+			{
+				ERROR_MSG("pReserved must be set to NULL_PTR or valid ACVP args");
+				return CKR_ARGUMENTS_BAD;
+			}
+
 			CK_ULONG* acvpArgs = (CK_ULONG*)args->pReserved;
 			if (acvpArgs[0] != 0 && acvpArgs[1] == 32)
 			{
@@ -421,6 +428,11 @@ void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE
 	t["CKM_AES_ECB_ENCRYPT_DATA"]	= CKM_AES_ECB_ENCRYPT_DATA;
 	t["CKM_AES_CBC_ENCRYPT_DATA"]	= CKM_AES_CBC_ENCRYPT_DATA;
 	t["CKM_AES_CMAC"]		= CKM_AES_CMAC;
+
+	// ChaCha20
+	t["CKM_CHACHA20_KEY_GEN"]	= CKM_CHACHA20_KEY_GEN;
+	t["CKM_CHACHA20_POLY1305"]	= CKM_CHACHA20_POLY1305;
+	t["CKM_CHACHA20"]		= CKM_CHACHA20;
 
 	// KMAC
 	t["CKM_KMAC_128"]		= CKM_KMAC_128;
@@ -799,6 +811,17 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 			pInfo->ulMinKeySize = 16;
 			pInfo->ulMaxKeySize = 32;
 			pInfo->flags |= CKF_ENCRYPT | CKF_DECRYPT;
+			break;
+		case CKM_CHACHA20_KEY_GEN:
+			pInfo->ulMinKeySize = 32;
+			pInfo->ulMaxKeySize = 32;
+			pInfo->flags = CKF_GENERATE;
+			break;
+		case CKM_CHACHA20_POLY1305:
+		case CKM_CHACHA20:
+			pInfo->ulMinKeySize = 32;
+			pInfo->ulMaxKeySize = 32;
+			pInfo->flags = CKF_ENCRYPT | CKF_DECRYPT;
 			break;
 		case CKM_AES_KEY_WRAP:
 			pInfo->ulMinKeySize = 16;

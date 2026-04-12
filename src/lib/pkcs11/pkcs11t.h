@@ -1117,7 +1117,10 @@ typedef CK_ULONG          CK_MECHANISM_TYPE;
 #define CKM_GOSTR3410                  0x00001201UL
 #define CKM_GOSTR3410_WITH_GOSTR3411   0x00001202UL
 #define CKM_GOSTR3410_KEY_WRAP         0x00001203UL
-#define CKM_GOSTR3410_DERIVE           0x00001204UL
+#define CKM_GOSTR3410_DERIVE           0x00001202UL
+
+#define CKM_X25519                     0x00004033UL
+#define CKM_X448                       0x00004034UL
 #define CKM_GOSTR3411                  0x00001210UL
 #define CKM_GOSTR3411_HMAC             0x00001211UL
 #define CKM_GOST28147_KEY_GEN          0x00001220UL

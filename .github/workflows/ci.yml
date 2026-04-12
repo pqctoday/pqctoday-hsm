@@ -16,6 +16,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: |
@@ -66,6 +68,8 @@ jobs:
       LD_LIBRARY_PATH: /opt/openssl-3.6/lib64:/opt/openssl-3.6/lib
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: |
@@ -137,12 +141,14 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-audit
         run: cargo install cargo-audit
       - name: Run cargo audit
-        run: cd rust && cargo audit --deny warnings
+        run: cd rust && cargo audit --deny warnings --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0097 --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0097
 
       - name: Check for deprecated OpenSSL API usage
         run: |

@@ -7,7 +7,7 @@ pub fn xmss_param_max_sigs(xmss_param: u32) -> u32 {
         CKP_XMSS_SHA2_10_256 | CKP_XMSS_SHAKE_10_256 => 1u32 << 10, // 1,024
         CKP_XMSS_SHA2_16_256 | CKP_XMSS_SHAKE_16_256 => 1u32 << 16, // 65,536
         CKP_XMSS_SHA2_20_256 | CKP_XMSS_SHAKE_20_256 => 1u32 << 20, // 1,048,576
-        _ => 1u32 << 10, // safe fallback
+        _ => 1u32 << 10,                                            // safe fallback
     }
 }
 
@@ -48,7 +48,10 @@ pub fn xmss_keygen(xmss_param: u32) -> Result<(Vec<u8>, Vec<u8>), ()> {
                 }
             }
             let mut kp = KeyPair::<$t>::from_seed(&seed).map_err(|_| ())?;
-            Ok((kp.verifying_key().as_ref().to_vec(), kp.signing_key().as_ref().to_vec()))
+            Ok((
+                kp.verifying_key().as_ref().to_vec(),
+                kp.signing_key().as_ref().to_vec(),
+            ))
         }};
     }
     match xmss_param {

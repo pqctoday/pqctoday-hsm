@@ -89,7 +89,7 @@ extern "C" {
 #include "stateful/xmss-reference/xmss_core.h"
 #include "stateful/xmss-reference/xmss.h"
 #include "stateful/xmss-reference/params.h"
-#include "stateful/xmss-reference/randombytes.h"
+#include "stateful/kat_randombytes.h"
 }
 #include <openssl/params.h>
 #include <vector>
@@ -179,6 +179,10 @@ CK_RV SoftHSM::C_GenerateKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
 	switch (pMechanism->mechanism)
 	{
 #ifndef WITH_FIPS
+		case CKM_CHACHA20_KEY_GEN:
+			objClass = CKO_SECRET_KEY;
+			keyType = CKK_CHACHA20;
+			break;
 		case CKM_AES_KEY_GEN:
 			objClass = CKO_SECRET_KEY;
 			keyType = CKK_AES;
@@ -222,7 +226,7 @@ CK_RV SoftHSM::C_GenerateKey(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMecha
 
 
 	// Generate AES secret key
-	if (pMechanism->mechanism == CKM_AES_KEY_GEN)
+	if (pMechanism->mechanism == CKM_AES_KEY_GEN || pMechanism->mechanism == CKM_CHACHA20_KEY_GEN)
 	{
 		return this->generateAES(hSession, pTemplate, ulCount, phKey, isOnToken, isPrivate);
 	}
@@ -2253,6 +2257,8 @@ CK_RV SoftHSM::C_DeriveKey
 	{
 		case CKM_ECDH1_DERIVE:
 		case CKM_ECDH1_COFACTOR_DERIVE:
+		case CKM_X25519:
+		case CKM_X448:
 #endif
 		case CKM_PKCS5_PBKD2:
 		case CKM_AES_ECB_ENCRYPT_DATA:
@@ -2622,8 +2628,9 @@ CK_RV SoftHSM::C_DeriveKey
 
 
 #if defined(WITH_ECC) || defined(WITH_EDDSA)
-	// Derive ECDH secret (standard and cofactor variants)
-	if (pMechanism->mechanism == CKM_ECDH1_DERIVE || pMechanism->mechanism == CKM_ECDH1_COFACTOR_DERIVE)
+	// Derive ECDH secret (standard and cofactor variants, and Edwards curves)
+	if (pMechanism->mechanism == CKM_ECDH1_DERIVE || pMechanism->mechanism == CKM_ECDH1_COFACTOR_DERIVE ||
+	    pMechanism->mechanism == CKM_X25519 || pMechanism->mechanism == CKM_X448)
 	{
 		// Check key class and type
 		if (key->getUnsignedLongValue(CKA_CLASS, CKO_VENDOR_DEFINED) != CKO_PRIVATE_KEY)
