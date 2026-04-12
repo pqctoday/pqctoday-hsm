@@ -119,6 +119,15 @@ import CK from '@pqctoday/softhsm-wasm/constants'
 | SLH-DSA-SHAKE-192s/f | 48 B | 96 B | 16,224/35,664 B | 3 |
 | SLH-DSA-SHAKE-256s/f | 64 B | 128 B | 29,792/49,856 B | 5 |
 
+### XMSS / XMSS^MT (eXtended Merkle Signature Scheme) — RFC 8391 / SP 800-208
+
+Stateful hash-based signatures. Available in both C++ and Rust engines with all parameter sets (SHA2-256, SHAKE-256).
+
+| Variant | Public Key | Private Key | Signature | NIST Level |
+| --- | --- | --- | --- | --- |
+| XMSS_SHA2_10_256 | 68 B | 136 B | 2,500 B | 5 |
+| XMSSMT_SHA2_20/2_256 | 68 B | 136 B | 4,963 B | 5 |
+
 ## PKCS#11 v3.2 Mechanisms
 
 ### Key Encapsulation
@@ -166,6 +175,15 @@ CKM_HASH_SLH_DSA_SHAKE128
 CKM_HASH_SLH_DSA_SHAKE256
 ```
 
+### Digital Signatures — XMSS & XMSS^MT (Stateful HBS)
+
+```c
+CKM_XMSS_KEY_PAIR_GEN    // Key pair generation
+CKM_XMSS                 // Pure XMSS Sign (verify not currently supported directly via HSM hardware standard)
+CKM_XMSSMT_KEY_PAIR_GEN  // Key pair generation MT
+CKM_XMSSMT               // Pure XMSSMT Sign
+```
+
 ### Message Signing API (v3.0)
 
 ```c
@@ -199,6 +217,14 @@ C_DecryptMessage()
 C_DecryptMessageBegin()
 C_DecryptMessageNext()
 C_MessageDecryptFinal()
+```
+
+### ChaCha20-Poly1305 AEAD (RFC 7539 / v3.2)
+
+```c
+// ChaCha20-Poly1305 symmetric encryption with AAD validation
+CKM_CHACHA20_KEY_GEN     // Secret key generation
+CKM_CHACHA20_POLY1305    // Authenticated encryption and decryption
 ```
 
 ### Pre-Bound Signature Verification (v3.2)
@@ -575,6 +601,11 @@ Internal state uses thread-local `RefCell<HashMap<u32, HashMap<u32, Vec<u8>>>>` 
   - [x] C++ + Rust: XMSS/XMSS^MT registered in `C_GetMechanismInfo` with `CKF_SIGN | CKF_VERIFY`
   - [x] Rust: `Sha256_192`, `Shake256_256`, `Shake256_192` hash type dispatch in LMS keygen
   - [x] NIST ACVP LMS sigVer: 320/320 demo vectors validated (all 80 parameter combinations)
+  - [x] Rust + C++: XMSS and XMSS^MT DRBG Parity verification with identical vectors against NIST RNG specs!
+- [x] Phase 17: ChaCha20-Poly1305 AEAD Integration (v0.4.14)
+  - [x] Rust + C++: `CKM_CHACHA20_POLY1305` and `CKM_CHACHA20_KEY_GEN` implementation
+  - [x] C++: `CKK_CHACHA20` KCV fixes within `C_CreateObject` (proxying SHA-256 verification internally)
+  - [x] Rust: Validated byte-exact matching utilizing RFC 7539 parity tests
 - [x] Phase 16: BIP32 child derive params layout fix for Ed25519/SLIP-0010 (v0.4.13)
   - [x] Rust: `C_DeriveKey` BIP32 child branch now reads `flags` from offset 0 and `index` from offset 4 (matches TS `buildBIP32ChildDeriveParams` layout)
   - [x] Previous off-by-one read (offset 4/8) caused Ed25519 non-hardened check to misfire → `CKR_MECHANISM_PARAM_INVALID` on first Solana child derive
