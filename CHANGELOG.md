@@ -10,7 +10,78 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.20] — 2026-04-12
+
+### Added
+
+- **SP 800-208 SHAKE-256 LMS/LMOTS parameter sets — C++ engine** (`hash-sigs` submodule
+  updated to `pqctoday/hash-sigs` fork at commit `23d3e58`):
+  - `common_defs.h`: 10 new `LMS_SHAKE_N32/N24_H{5,10,15,20,25}` constants (IANA IDs 0x0F–0x18)
+    and 8 new `LMOTS_SHAKE_N32/N24_W{1,2,4,8}` constants (IANA IDs 0x09–0x10).
+  - `hash.h` / `hash.c`: `HASH_SHAKE256 = 2` enum; SHAKE-256 XOF backend via OpenSSL
+    `EVP_DigestFinalXOF` (32-byte output, all four hash functions). Guarded with
+    `#ifndef __EMSCRIPTEN__` — WASM builds continue to use SHA-256 only via the existing path.
+  - `sha256.h`: `USE_OPENSSL=1` ABI fix — ensures `hash_context.sha256` uses OpenSSL's
+    `SHA256_CTX` (112 B) rather than the portable C layout (108 B), eliminating an
+    WASM unreachable trap in `hss_validate_signature` during `C_Verify`.
+  - `lm_common.c` / `lm_ots_common.c`: 10 + 8 new `case` statements for SHAKE
+    `param_set_t` dispatch. The C++ keygen/sign/verify paths need no changes —
+    `CKP_LMS_SHAKE_*` → `param_set_t` passthrough was already wired.
+
+- **HSS WASM test suite** (`tests/acvp-wasm.mjs`):
+  - **§12.1** — HSS SHA-256 sign+verify round-trip baseline (both engines).
+  - **§12.2** — HSS SHAKE-256 sign+verify round-trip (SP 800-208, both engines). Generates
+    a live key pair, signs, verifies correct signature, rejects a tampered signature.
+  - **§12.3** — NIST ACVP LMS sigver KAT against all SHAKE-256 groups in
+    `tests/acvp/lms_sigver_test.json`. Imports NIST-provided public keys, verifies
+    each test case against the expected `testPassed` result. Both engines validated.
+
+- **§CC C++/Rust cross-check** (`tests/acvp-wasm.mjs --engine=both`):
+  - **§CC-1** — C++ generates SHAKE-256 HSS key + signs; Rust imports public key and verifies.
+  - **§CC-2** — Rust generates SHAKE-256 HSS key + signs; C++ imports public key and verifies.
+  - Proves RFC 8554 serialization compatibility between the OpenSSL/hash-sigs and
+    hbs-lms Rust implementations. Falls back to `SKIP` with a message if
+    `C_CreateObject(CKK_HSS)` is not yet supported on either engine.
+
+- **`CKM_HSS_KEY_PAIR_GEN`, `CKM_HSS`, `CKP_LMS_*`, `CKP_LMOTS_*`, `CKA_LMS_PARAM_SET`,
+  `CKA_LMOTS_PARAM_SET` exported** in `constants.js` and `constants.d.ts` for
+  TypeScript consumers — previously only `CKK_HSS` was exported.
+
+- **`pqctoday/hash-sigs` fork** redirected in `.gitmodules` (was `cisco/hash-sigs`).
+
+---
+
+## [0.4.19] — 2026-04-12
+
+### Fixed
+
+- **`C_Initialize` `pReserved` pointer guard** (`SoftHSM_slots.cpp`): PKCS#11 v3.2 compliance
+  test suites frequently pass small sentinel values (e.g. `(void*)1`) to `pInitArgs.pReserved`
+  to verify that `CKR_ARGUMENTS_BAD` is returned. Added an early guard that rejects any
+  `pReserved` value whose integer representation is less than 4096 — treating it as an
+  invalid (non-heap) pointer rather than valid ACVP bypass args — with `CKR_ARGUMENTS_BAD`.
+  Prevents a potential null-pointer dereference when compliance suites probe this path.
+
+- **`CKF_TOKEN_PRESENT` unconditionally set** (`Slot.cpp`): `getSlotInfo()` now always
+  includes `CKF_TOKEN_PRESENT` in the slot flags and `isTokenPresent()` always returns `true`.
+  The single virtual slot always has a token object regardless of initialization state; the
+  prior conditional on `token->isInitialized()` was overly strict and caused
+  `C_GetSlotList(tokenPresent=CK_TRUE)` to return an empty list on a fresh (uninitialised)
+  token, breaking any consumer that calls `C_GetSlotList` before `C_InitToken`.
+
+- **ChaCha20-Poly1305 test state isolation** (`SymmetricAlgorithmTests.cpp`): Added
+  `C_Finalize` / `C_Initialize` round-trip at the start of `testChaCha20EncryptDecrypt`
+  to clear any Cryptoki state left by earlier tests in the suite. Prevents spurious
+  `CKR_CRYPTOKI_NOT_INITIALIZED` or stale-session failures when the ChaCha20 test runs
+  after other tests in sequence.
+
+---
+
 ## [0.4.18] — 2026-04-08
+
+### Added
+
+- **PKCS#11 v3.2 Compliance Parity**: Finalized integration of ChaCha20-Poly1305 and XMSS compliance across both C++ and Rust engines.
 
 ### Fixed
 

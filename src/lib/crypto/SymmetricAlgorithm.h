@@ -45,7 +45,8 @@ struct SymAlgo
 		Unknown,
 		AES,
 		DES,
-		DES3
+		DES3,
+		CHACHA
 	};
 };
 
@@ -59,7 +60,8 @@ struct SymMode
 		CTR,
 		ECB,
 		GCM,
-		OFB
+		OFB,
+		CHACHA_POLY1305
 	};
 };
 

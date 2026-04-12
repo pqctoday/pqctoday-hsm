@@ -35,8 +35,9 @@ major extensions:
 - **Single compilation unit per feature area** — `SoftHSM_sign.cpp`, `SoftHSM_cipher.cpp`,
   `SoftHSM_keygen.cpp`, `SoftHSM_kem.cpp`, `SoftHSM_slots.cpp` each handle one concern.
   `SoftHSM.cpp` holds shared helpers (e.g. `acquireSessionTokenKey`).
-- **In-memory token only** — the object store lives in RAM. Token state does not survive a
-  process exit or WASM module reload.
+- **Dual-Model Storage Architecture**:
+  - **Memory Model:** The default `ObjectStore` lives purely in RAM. Token state does not survive a process exit or WASM compile. This is heavily optimized for zero-FS browser and serverless javascript sandbox execution.
+  - **File-Based Model:** You can compile `libsofthsm2.so` via `cmake` utilizing `-DWITH_FILE_STORE=ON`. This natively attaches a persistent flat-file proxy mapped to `/var/lib/softhsm/tokens/` via `softhsm2.conf`. This behaves identically to SoftHSMv2, keeping Native Integration Testing parity intact.
 - **Single-threaded WASM target** — the Emscripten build has no SharedArrayBuffer worker pool.
   The native build is thread-safe.
 - **No ENGINE, no deprecated API** — every crypto operation goes through `EVP_PKEY_*` or
@@ -144,9 +145,9 @@ via `C_DeriveKey`. All use OpenSSL EVP KDF / `EVP_PKEY_CTX` APIs — no legacy p
   pool. Crypto-intensive operations (especially SLH-DSA-SHA2-256s key generation and signing)
   may block the main thread for several seconds on constrained hardware.
 
-- **Non-persistent token.** All token state (objects, PIN, label) lives in RAM. Reloading the
-  WASM module or restarting the native process loses all objects. Callers that need persistence
-  must serialize objects with `C_GetAttributeValue(CKA_VALUE)` and re-import on next load.
+- **Non-persistent token (Memory Model).** When compiling without `-DWITH_FILE_STORE=ON`, all token state (objects, PIN, label) lives strictly in RAM. Reloading the
+  WASM module or restarting the native process loses all objects. Callers that need persistence under the Memory Model
+  must serialize objects with `C_GetAttributeValue(CKA_VALUE)` and re-import on next session.
 
 - **`C_CopyObject`, `C_CreateObject` for PQC keys are partially supported.** Importing raw PQC
   key material via `C_CreateObject` works for AES and RSA; PQC import is not yet implemented.

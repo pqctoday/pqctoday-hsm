@@ -9,12 +9,12 @@ use zeroize::Zeroize;
 
 use crate::constants::*;
 use crate::crypto::*;
-use crate::state::*;
 use crate::slh_dsa_keygen;
-use rand::SeedableRng;
+use crate::state::*;
 use fips204::traits::SerDes;
 use fips205::traits::SerDes as _;
 use rand::rngs::OsRng;
+use rand::SeedableRng;
 
 /// ACVP-aware RNG selection macro.
 /// In ACVP mode, uses the persistent ChaCha20Rng from thread-local state
@@ -26,21 +26,21 @@ use rand::rngs::OsRng;
 /// then restores the advanced RNG back to thread-local. If $body exits via
 /// `return` (error paths), the RNG is lost but `C_Initialize` recreates it.
 macro_rules! with_rng {
-    ($rng:ident, $body:block) => {
-        {
-            let mut _acvp_rng_cell = crate::state::ACVP_RNG.with(|r| r.borrow_mut().take());
-            if _acvp_rng_cell.is_some() {
-                let mut $rng = _acvp_rng_cell.as_mut().unwrap();
-                let _with_rng_result = { $body };
-                // Restore the (now-advanced) RNG back to thread-local state
-                crate::state::ACVP_RNG.with(|r| { *r.borrow_mut() = _acvp_rng_cell; });
-                _with_rng_result
-            } else {
-                let mut $rng = OsRng;
-                $body
-            }
+    ($rng:ident, $body:block) => {{
+        let mut _acvp_rng_cell = crate::state::ACVP_RNG.with(|r| r.borrow_mut().take());
+        if _acvp_rng_cell.is_some() {
+            let mut $rng = _acvp_rng_cell.as_mut().unwrap();
+            let _with_rng_result = { $body };
+            // Restore the (now-advanced) RNG back to thread-local state
+            crate::state::ACVP_RNG.with(|r| {
+                *r.borrow_mut() = _acvp_rng_cell;
+            });
+            _with_rng_result
+        } else {
+            let mut $rng = OsRng;
+            $body
         }
-    };
+    }};
 }
 
 // ── Session Management ───────────────────────────────────────────────────────
@@ -102,28 +102,32 @@ pub fn C_GetSlotList(token_present: u8, p_slot_list: *mut u32, pul_count: *mut u
         return CKR_ARGUMENTS_BAD;
     }
     let token_present_bool = token_present != 0;
-    
+
     // Auto-advance slots if needed (mimic SoftHSMv2/v3 shift: always provide 1 uninitialized token)
     TOKEN_STORE.with(|ts| {
         let mut store = ts.borrow_mut();
         let all_initialized = store.values().all(|t| t.initialized);
         if all_initialized {
             let next_slot = store.keys().max().unwrap_or(&0) + 1;
-            store.insert(next_slot, TokenState {
-                slot_id: next_slot,
-                initialized: false,
-                label: [0x20; 32],
-                login_state: LoginState::Public,
-                so_pin_salt: [0u8; 16],
-                so_pin_hash: [0u8; 32],
-                user_pin_salt: None,
-                user_pin_hash: None,
-            });
+            store.insert(
+                next_slot,
+                TokenState {
+                    slot_id: next_slot,
+                    initialized: false,
+                    label: [0x20; 32],
+                    login_state: LoginState::Public,
+                    so_pin_salt: [0u8; 16],
+                    so_pin_hash: [0u8; 32],
+                    user_pin_salt: None,
+                    user_pin_hash: None,
+                },
+            );
         }
     });
 
     let mut slots: Vec<u32> = TOKEN_STORE.with(|ts| {
-        ts.borrow().values()
+        ts.borrow()
+            .values()
             .filter(|t| !token_present_bool || t.initialized)
             .map(|t| t.slot_id)
             .collect()
@@ -152,13 +156,13 @@ pub fn C_InitToken(slot_id: u32, p_pin: *mut u8, ul_pin_len: u32, p_label: *mut 
     if p_pin.is_null() || p_label.is_null() {
         return CKR_ARGUMENTS_BAD;
     }
-    
+
     // In PKCS#11, you generally shouldn't call C_InitToken when sessions are open on that slot.
     let has_sessions = SESSIONS.with(|s| s.borrow().values().any(|sess| sess.slot_id == slot_id));
     if has_sessions {
         return CKR_SESSION_EXISTS;
     }
-    
+
     // Hash PIN with PBKDF2
     let mut salt = [0u8; 16];
     if getrandom::getrandom(&mut salt).is_err() {
@@ -166,11 +170,11 @@ pub fn C_InitToken(slot_id: u32, p_pin: *mut u8, ul_pin_len: u32, p_label: *mut 
     }
     let pin_bytes = unsafe { std::slice::from_raw_parts(p_pin, ul_pin_len as usize) };
     let so_pin_hash = hash_pin(pin_bytes, &salt);
-    
+
     let label_bytes = unsafe { std::slice::from_raw_parts(p_label, 32) };
     let mut label = [0x20u8; 32];
     label.copy_from_slice(label_bytes);
-    
+
     let success = TOKEN_STORE.with(|ts| {
         let mut store = ts.borrow_mut();
         if let Some(token) = store.get_mut(&slot_id) {
@@ -186,8 +190,12 @@ pub fn C_InitToken(slot_id: u32, p_pin: *mut u8, ul_pin_len: u32, p_label: *mut 
             false
         }
     });
-    
-    if success { CKR_OK } else { CKR_SLOT_ID_INVALID }
+
+    if success {
+        CKR_OK
+    } else {
+        CKR_SLOT_ID_INVALID
+    }
 }
 
 #[wasm_bindgen(js_name = _C_OpenSession)]
@@ -207,7 +215,10 @@ pub fn C_OpenSession(
     }
     // Check if SO is logged in and trying to open a RO session
     let so_logged_in = TOKEN_STORE.with(|ts| {
-        ts.borrow().get(&slot_id).map(|t| t.login_state == LoginState::SO).unwrap_or(false)
+        ts.borrow()
+            .get(&slot_id)
+            .map(|t| t.login_state == LoginState::SO)
+            .unwrap_or(false)
     });
     let rw_session = (flags & CKF_RW_SESSION) != 0;
     if so_logged_in && !rw_session {
@@ -221,7 +232,13 @@ pub fn C_OpenSession(
         });
         *ph_session = handle;
         SESSIONS.with(|s| {
-            s.borrow_mut().insert(handle, SessionState { slot_id, rw_session });
+            s.borrow_mut().insert(
+                handle,
+                SessionState {
+                    slot_id,
+                    rw_session,
+                },
+            );
         });
     }
     CKR_OK
@@ -260,7 +277,11 @@ pub fn C_Login(h_session: u32, user_type: u32, p_pin: *mut u8, ul_pin_len: u32) 
     }
 
     let token_opt = TOKEN_STORE.with(|ts| ts.borrow().get(&slot_id).cloned());
-    let token = if let Some(t) = token_opt { t } else { return CKR_GENERAL_ERROR; };
+    let token = if let Some(t) = token_opt {
+        t
+    } else {
+        return CKR_GENERAL_ERROR;
+    };
     if !token.initialized {
         return CKR_OPERATION_NOT_INITIALIZED;
     }
@@ -268,20 +289,35 @@ pub fn C_Login(h_session: u32, user_type: u32, p_pin: *mut u8, ul_pin_len: u32) 
     // Evaluate PKCS#11 v3.2 Exclusivity Boundaries
     match user_type {
         CKU_SO => {
-            if token.login_state == LoginState::SO { return CKR_USER_ALREADY_LOGGED_IN; }
-            if token.login_state == LoginState::User { return CKR_USER_ANOTHER_ALREADY_LOGGED_IN; }
-            let has_ro = SESSIONS.with(|s| s.borrow().values().any(|sess| sess.slot_id == slot_id && !sess.rw_session));
-            if has_ro { return CKR_SESSION_READ_ONLY_EXISTS; }
-            
+            if token.login_state == LoginState::SO {
+                return CKR_USER_ALREADY_LOGGED_IN;
+            }
+            if token.login_state == LoginState::User {
+                return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
+            }
+            let has_ro = SESSIONS.with(|s| {
+                s.borrow()
+                    .values()
+                    .any(|sess| sess.slot_id == slot_id && !sess.rw_session)
+            });
+            if has_ro {
+                return CKR_SESSION_READ_ONLY_EXISTS;
+            }
+
             let pin_bytes = unsafe { std::slice::from_raw_parts(p_pin, ul_pin_len as usize) };
             if hash_pin(pin_bytes, &token.so_pin_salt) != token.so_pin_hash {
                 return CKR_PIN_INCORRECT;
             }
-            TOKEN_STORE.with(|ts| ts.borrow_mut().get_mut(&slot_id).unwrap().login_state = LoginState::SO);
+            TOKEN_STORE
+                .with(|ts| ts.borrow_mut().get_mut(&slot_id).unwrap().login_state = LoginState::SO);
         }
         CKU_USER => {
-            if token.login_state == LoginState::User { return CKR_USER_ALREADY_LOGGED_IN; }
-            if token.login_state == LoginState::SO { return CKR_USER_ANOTHER_ALREADY_LOGGED_IN; }
+            if token.login_state == LoginState::User {
+                return CKR_USER_ALREADY_LOGGED_IN;
+            }
+            if token.login_state == LoginState::SO {
+                return CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
+            }
             if token.user_pin_hash.is_none() {
                 return CKR_USER_PIN_NOT_INITIALIZED;
             }
@@ -289,7 +325,9 @@ pub fn C_Login(h_session: u32, user_type: u32, p_pin: *mut u8, ul_pin_len: u32) 
             if hash_pin(pin_bytes, &token.user_pin_salt.unwrap()) != token.user_pin_hash.unwrap() {
                 return CKR_PIN_INCORRECT;
             }
-            TOKEN_STORE.with(|ts| ts.borrow_mut().get_mut(&slot_id).unwrap().login_state = LoginState::User);
+            TOKEN_STORE.with(|ts| {
+                ts.borrow_mut().get_mut(&slot_id).unwrap().login_state = LoginState::User
+            });
         }
         _ => return CKR_USER_TYPE_INVALID,
     }
@@ -313,7 +351,11 @@ pub fn C_Logout(h_session: u32) -> u32 {
             }
         }
     });
-    if changed { CKR_OK } else { CKR_USER_NOT_LOGGED_IN }
+    if changed {
+        CKR_OK
+    } else {
+        CKR_USER_NOT_LOGGED_IN
+    }
 }
 
 #[wasm_bindgen(js_name = _C_InitPIN)]
@@ -340,15 +382,23 @@ pub fn C_InitPIN(h_session: u32, p_pin: *mut u8, ul_pin_len: u32) -> u32 {
                 return;
             }
             let mut salt = [0u8; 16];
-            if getrandom::getrandom(&mut salt).is_err() { return; }
+            if getrandom::getrandom(&mut salt).is_err() {
+                return;
+            }
             let pin_bytes = unsafe { std::slice::from_raw_parts(p_pin, ul_pin_len as usize) };
             token.user_pin_hash = Some(hash_pin(pin_bytes, &salt));
             token.user_pin_salt = Some(salt);
             success = true;
         }
     });
-    if not_logged_in { return CKR_USER_NOT_LOGGED_IN; }
-    if success { CKR_OK } else { CKR_GENERAL_ERROR }
+    if not_logged_in {
+        return CKR_USER_NOT_LOGGED_IN;
+    }
+    if success {
+        CKR_OK
+    } else {
+        CKR_GENERAL_ERROR
+    }
 }
 
 #[wasm_bindgen(js_name = _C_GetSessionInfo)]
@@ -362,13 +412,16 @@ pub fn C_GetSessionInfo(h_session: u32, p_info: *mut u8) -> u32 {
     }
     let session = session.unwrap();
     let login_state = TOKEN_STORE.with(|ts| {
-        ts.borrow().get(&session.slot_id).map(|t| t.login_state).unwrap_or(LoginState::Public)
+        ts.borrow()
+            .get(&session.slot_id)
+            .map(|t| t.login_state)
+            .unwrap_or(LoginState::Public)
     });
     unsafe {
         let ptr = p_info as *mut u32;
         *ptr = session.slot_id;
         let actual_state = match (login_state, session.rw_session) {
-            (LoginState::SO, true) => CKS_RW_SO_FUNCTIONS, // 4
+            (LoginState::SO, true) => CKS_RW_SO_FUNCTIONS,     // 4
             (LoginState::User, true) => CKS_RW_USER_FUNCTIONS, // 3
             (LoginState::User, false) => CKS_RO_USER_FUNCTIONS, // 1
             (LoginState::Public, true) => CKS_RW_PUBLIC_SESSION, // 2
@@ -376,7 +429,12 @@ pub fn C_GetSessionInfo(h_session: u32, p_info: *mut u8) -> u32 {
             _ => 0,
         };
         *ptr.add(1) = actual_state;
-        let flags = CKF_SERIAL_SESSION | if session.rw_session { CKF_RW_SESSION } else { 0 };
+        let flags = CKF_SERIAL_SESSION
+            | if session.rw_session {
+                CKF_RW_SESSION
+            } else {
+                0
+            };
         *ptr.add(2) = flags;
         *ptr.add(3) = 0; // ulDeviceError
     }
@@ -432,7 +490,9 @@ pub fn C_GetMechanismInfo(_slot_id: u32, mech_type: u32, p_info: *mut u8) -> u32
         CKM_KMAC_128 | CKM_KMAC_256 => (16, 64, 0x00000800 | 0x00002000),
         CKM_GENERIC_SECRET_KEY_GEN => (1, 512, 0x00008000),
         CKM_EC_KEY_PAIR_GEN => (256, 384, 0x00010000),
-        CKM_ECDSA_SHA256 | CKM_ECDSA_SHA384 | CKM_ECDSA_SHA512 => (256, 384, 0x00000800 | 0x00002000),
+        CKM_ECDSA_SHA256 | CKM_ECDSA_SHA384 | CKM_ECDSA_SHA512 => {
+            (256, 384, 0x00000800 | 0x00002000)
+        }
         CKM_ECDH1_DERIVE | CKM_ECDH1_COFACTOR_DERIVE => (256, 384, 0x00080000),
         CKM_EC_EDWARDS_KEY_PAIR_GEN => (255, 255, 0x00010000),
         CKM_EDDSA => (255, 255, 0x00000800 | 0x00002000),
@@ -469,10 +529,9 @@ pub fn C_GetMechanismInfo(_slot_id: u32, mech_type: u32, p_info: *mut u8) -> u32
         | CKM_HASH_SLH_DSA_SHAKE128
         | CKM_HASH_SLH_DSA_SHAKE256 => (128, 256, 0x00000800 | 0x00002000),
         // ECDSA-SHA3 variants
-        CKM_ECDSA_SHA3_224
-        | CKM_ECDSA_SHA3_256
-        | CKM_ECDSA_SHA3_384
-        | CKM_ECDSA_SHA3_512 => (256, 384, 0x00000800 | 0x00002000),
+        CKM_ECDSA_SHA3_224 | CKM_ECDSA_SHA3_256 | CKM_ECDSA_SHA3_384 | CKM_ECDSA_SHA3_512 => {
+            (256, 384, 0x00000800 | 0x00002000)
+        }
         // Key derivation functions
         CKM_PKCS5_PBKD2
         | CKM_HKDF_DERIVE
@@ -510,7 +569,7 @@ pub fn C_GenerateKeyPair(
         match mech_type {
             CKM_ML_KEM_KEY_PAIR_GEN => {
                 use ml_kem::{EncodedSizeUser, KemCore};
-                
+
                 let ps = get_attr_ulong(
                     p_public_key_template,
                     ul_public_key_attribute_count,
@@ -583,8 +642,8 @@ pub fn C_GenerateKeyPair(
                 // CKA_PUBLIC_KEY_INFO (SPKI) — PKCS#11 v3.2 §4.14
                 if let Some(pk_bytes) = pub_attrs.get(&CKA_VALUE).cloned() {
                     let spki = match ps {
-                        CKP_ML_KEM_512  => build_mlkem512_spki(&pk_bytes),
-                        CKP_ML_KEM_768  => build_mlkem768_spki(&pk_bytes),
+                        CKP_ML_KEM_512 => build_mlkem512_spki(&pk_bytes),
+                        CKP_ML_KEM_768 => build_mlkem768_spki(&pk_bytes),
                         CKP_ML_KEM_1024 => build_mlkem1024_spki(&pk_bytes),
                         _ => Vec::new(),
                     };
@@ -665,8 +724,14 @@ pub fn C_GenerateKeyPair(
                         let mut rng = rand::rngs::OsRng;
                         match fips204::ml_dsa_44::try_keygen_with_rng(&mut rng) {
                             Ok((vk, sk)) => {
-                                pub_attrs.insert(CKA_VALUE, fips204::traits::SerDes::into_bytes(vk).to_vec());
-                                prv_attrs.insert(CKA_VALUE, fips204::traits::SerDes::into_bytes(sk).to_vec());
+                                pub_attrs.insert(
+                                    CKA_VALUE,
+                                    fips204::traits::SerDes::into_bytes(vk).to_vec(),
+                                );
+                                prv_attrs.insert(
+                                    CKA_VALUE,
+                                    fips204::traits::SerDes::into_bytes(sk).to_vec(),
+                                );
                             }
                             Err(_) => return CKR_FUNCTION_FAILED,
                         }
@@ -675,8 +740,14 @@ pub fn C_GenerateKeyPair(
                         let mut rng = rand::rngs::OsRng;
                         match fips204::ml_dsa_65::try_keygen_with_rng(&mut rng) {
                             Ok((vk, sk)) => {
-                                pub_attrs.insert(CKA_VALUE, fips204::traits::SerDes::into_bytes(vk).to_vec());
-                                prv_attrs.insert(CKA_VALUE, fips204::traits::SerDes::into_bytes(sk).to_vec());
+                                pub_attrs.insert(
+                                    CKA_VALUE,
+                                    fips204::traits::SerDes::into_bytes(vk).to_vec(),
+                                );
+                                prv_attrs.insert(
+                                    CKA_VALUE,
+                                    fips204::traits::SerDes::into_bytes(sk).to_vec(),
+                                );
                             }
                             Err(_) => return CKR_FUNCTION_FAILED,
                         }
@@ -685,8 +756,14 @@ pub fn C_GenerateKeyPair(
                         let mut rng = rand::rngs::OsRng;
                         match fips204::ml_dsa_87::try_keygen_with_rng(&mut rng) {
                             Ok((vk, sk)) => {
-                                pub_attrs.insert(CKA_VALUE, fips204::traits::SerDes::into_bytes(vk).to_vec());
-                                prv_attrs.insert(CKA_VALUE, fips204::traits::SerDes::into_bytes(sk).to_vec());
+                                pub_attrs.insert(
+                                    CKA_VALUE,
+                                    fips204::traits::SerDes::into_bytes(vk).to_vec(),
+                                );
+                                prv_attrs.insert(
+                                    CKA_VALUE,
+                                    fips204::traits::SerDes::into_bytes(sk).to_vec(),
+                                );
                             }
                             Err(_) => return CKR_FUNCTION_FAILED,
                         }
@@ -775,40 +852,100 @@ pub fn C_GenerateKeyPair(
 
                 match ps {
                     CKP_SLH_DSA_SHA2_128S => {
-                        slh_dsa_keygen!(fips205::slh_dsa_sha2_128s::try_keygen_with_rng, 16, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_sha2_128s::try_keygen_with_rng,
+                            16,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     CKP_SLH_DSA_SHAKE_128S => {
-                        slh_dsa_keygen!(fips205::slh_dsa_shake_128s::try_keygen_with_rng, 16, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_shake_128s::try_keygen_with_rng,
+                            16,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     CKP_SLH_DSA_SHA2_128F => {
-                        slh_dsa_keygen!(fips205::slh_dsa_sha2_128f::try_keygen_with_rng, 16, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_sha2_128f::try_keygen_with_rng,
+                            16,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     CKP_SLH_DSA_SHAKE_128F => {
-                        slh_dsa_keygen!(fips205::slh_dsa_shake_128f::try_keygen_with_rng, 16, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_shake_128f::try_keygen_with_rng,
+                            16,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     CKP_SLH_DSA_SHA2_192S => {
-                        slh_dsa_keygen!(fips205::slh_dsa_sha2_192s::try_keygen_with_rng, 24, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_sha2_192s::try_keygen_with_rng,
+                            24,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     CKP_SLH_DSA_SHAKE_192S => {
-                        slh_dsa_keygen!(fips205::slh_dsa_shake_192s::try_keygen_with_rng, 24, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_shake_192s::try_keygen_with_rng,
+                            24,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     CKP_SLH_DSA_SHA2_192F => {
-                        slh_dsa_keygen!(fips205::slh_dsa_sha2_192f::try_keygen_with_rng, 24, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_sha2_192f::try_keygen_with_rng,
+                            24,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     CKP_SLH_DSA_SHAKE_192F => {
-                        slh_dsa_keygen!(fips205::slh_dsa_shake_192f::try_keygen_with_rng, 24, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_shake_192f::try_keygen_with_rng,
+                            24,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     CKP_SLH_DSA_SHA2_256S => {
-                        slh_dsa_keygen!(fips205::slh_dsa_sha2_256s::try_keygen_with_rng, 32, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_sha2_256s::try_keygen_with_rng,
+                            32,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     CKP_SLH_DSA_SHAKE_256S => {
-                        slh_dsa_keygen!(fips205::slh_dsa_shake_256s::try_keygen_with_rng, 32, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_shake_256s::try_keygen_with_rng,
+                            32,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     CKP_SLH_DSA_SHA2_256F => {
-                        slh_dsa_keygen!(fips205::slh_dsa_sha2_256f::try_keygen_with_rng, 32, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_sha2_256f::try_keygen_with_rng,
+                            32,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     CKP_SLH_DSA_SHAKE_256F => {
-                        slh_dsa_keygen!(fips205::slh_dsa_shake_256f::try_keygen_with_rng, 32, pub_attrs, prv_attrs)
+                        slh_dsa_keygen!(
+                            fips205::slh_dsa_shake_256f::try_keygen_with_rng,
+                            32,
+                            pub_attrs,
+                            prv_attrs
+                        )
                     }
                     _ => return CKR_ARGUMENTS_BAD,
                 }
@@ -847,10 +984,11 @@ pub fn C_GenerateKeyPair(
                 if !(2048..=4096).contains(&bits) {
                     return CKR_ARGUMENTS_BAD;
                 }
-                let private_key = match with_rng!(rng, { rsa::RsaPrivateKey::new(&mut rng, bits).ok() }) {
-                    Some(k) => k,
-                    None => return CKR_FUNCTION_FAILED,
-                };
+                let private_key =
+                    match with_rng!(rng, { rsa::RsaPrivateKey::new(&mut rng, bits).ok() }) {
+                        Some(k) => k,
+                        None => return CKR_FUNCTION_FAILED,
+                    };
                 let public_key = rsa::RsaPublicKey::from(&private_key);
 
                 use rsa::pkcs8::EncodePrivateKey;
@@ -931,7 +1069,6 @@ pub fn C_GenerateKeyPair(
             }
 
             CKM_EC_KEY_PAIR_GEN => {
-
                 let ec_params = get_attr_bytes(
                     p_public_key_template,
                     ul_public_key_attribute_count,
@@ -1007,8 +1144,8 @@ pub fn C_GenerateKeyPair(
                     pub_attrs.insert(CKA_EC_POINT, ec_point);
                     // OID: 1.3.132.0.10 (secp256k1) = 0x06 0x05 0x2b 0x81 0x04 0x00 0x0a
                     let alg_id: &[u8] = &[
-                        0x30, 0x10, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
-                        0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x0a,
+                        0x30, 0x10, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06,
+                        0x05, 0x2b, 0x81, 0x04, 0x00, 0x0a,
                     ];
                     let spki = build_spki_from_parts(alg_id, &vk_bytes);
                     pub_attrs.insert(CKA_PUBLIC_KEY_INFO, spki);
@@ -1148,7 +1285,11 @@ pub fn C_GenerateKeyPair(
                 store_bool(&mut pub_attrs, CKA_WRAP, false);
                 store_bool(&mut pub_attrs, CKA_DERIVE, false);
                 store_bool(&mut pub_attrs, CKA_LOCAL, true);
-                store_ulong(&mut pub_attrs, CKA_KEY_GEN_MECHANISM, CKM_EC_MONTGOMERY_KEY_PAIR_GEN);
+                store_ulong(
+                    &mut pub_attrs,
+                    CKA_KEY_GEN_MECHANISM,
+                    CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
+                );
                 store_ulong(&mut prv_attrs, CKA_CLASS, CKO_PRIVATE_KEY);
                 store_ulong(&mut prv_attrs, CKA_KEY_TYPE, CKK_EC_MONTGOMERY);
                 store_bool(&mut prv_attrs, CKA_TOKEN, false);
@@ -1160,7 +1301,11 @@ pub fn C_GenerateKeyPair(
                 store_bool(&mut prv_attrs, CKA_UNWRAP, false);
                 store_bool(&mut prv_attrs, CKA_DERIVE, true);
                 store_bool(&mut prv_attrs, CKA_LOCAL, true);
-                store_ulong(&mut prv_attrs, CKA_KEY_GEN_MECHANISM, CKM_EC_MONTGOMERY_KEY_PAIR_GEN);
+                store_ulong(
+                    &mut prv_attrs,
+                    CKA_KEY_GEN_MECHANISM,
+                    CKM_EC_MONTGOMERY_KEY_PAIR_GEN,
+                );
 
                 if is_x448 {
                     // X448 — 56-byte keys (RFC 8410, OID 1.3.101.111)
@@ -1227,12 +1372,9 @@ pub fn C_GenerateKeyPair(
                 if levels == 0 || levels > 8 {
                     return CKR_MECHANISM_PARAM_INVALID;
                 }
-                let lms_params: Vec<u32> = (0..levels)
-                    .map(|i| *p_param_ptr.add(1 + i))
-                    .collect();
-                let lmots_params: Vec<u32> = (0..levels)
-                    .map(|i| *p_param_ptr.add(1 + 8 + i))
-                    .collect();
+                let lms_params: Vec<u32> = (0..levels).map(|i| *p_param_ptr.add(1 + i)).collect();
+                let lmots_params: Vec<u32> =
+                    (0..levels).map(|i| *p_param_ptr.add(1 + 8 + i)).collect();
 
                 let (pub_bytes, priv_bytes) =
                     match crate::crypto::lms::hss_keygen(levels, &lms_params, &lmots_params) {
@@ -1311,7 +1453,7 @@ pub fn C_GenerateKeyPair(
                     CKA_XMSS_PARAM_SET,
                 )
                 .unwrap_or(param_code);
-                
+
                 if xmss_param == 0 {
                     xmss_param = CKP_XMSS_SHA2_10_256;
                 }
@@ -1449,7 +1591,11 @@ pub fn C_GenerateKey(
                 store_bool(&mut attrs, CKA_VERIFY, true);
                 store_bool(&mut attrs, CKA_DERIVE, false);
                 store_bool(&mut attrs, CKA_LOCAL, true);
-                store_ulong(&mut attrs, CKA_KEY_GEN_MECHANISM, CKM_GENERIC_SECRET_KEY_GEN); // PKCS#11 v3.2 §4.3
+                store_ulong(
+                    &mut attrs,
+                    CKA_KEY_GEN_MECHANISM,
+                    CKM_GENERIC_SECRET_KEY_GEN,
+                ); // PKCS#11 v3.2 §4.3
                 absorb_template_attrs(&mut attrs, p_template, ul_count);
                 finalize_private_key_attrs(&mut attrs); // sets CKA_ALWAYS_SENSITIVE + CKA_NEVER_EXTRACTABLE
                 compute_kcv(&mut attrs);
@@ -1645,7 +1791,8 @@ pub fn C_GetAttributeValue(_h_session: u32, h_object: u32, p_template: *mut u8, 
     if let Some(obj_attrs) = attrs {
         // PKCS#11 v3.2 §4.7: CKA_VALUE access restrictions apply only to private and
         // secret keys. Public keys (CKO_PUBLIC_KEY) are always fully readable.
-        let class = obj_attrs.get(&CKA_CLASS)
+        let class = obj_attrs
+            .get(&CKA_CLASS)
             .filter(|v| v.len() >= 4)
             .map(|v| u32::from_le_bytes([v[0], v[1], v[2], v[3]]))
             .unwrap_or(CKO_PUBLIC_KEY);
@@ -1682,7 +1829,11 @@ pub fn C_GetAttributeValue(_h_session: u32, h_object: u32, p_template: *mut u8, 
             }
         }
         // Per §5.7.5: return CKR_ATTRIBUTE_TYPE_INVALID if ANY attribute was absent
-        if had_missing { CKR_ATTRIBUTE_TYPE_INVALID } else { CKR_OK }
+        if had_missing {
+            CKR_ATTRIBUTE_TYPE_INVALID
+        } else {
+            CKR_OK
+        }
     } else {
         CKR_ARGUMENTS_BAD
     }
@@ -1721,14 +1872,21 @@ pub fn C_CreateObject(
             // P-384 OID (1.3.132.0.34): 06 05 2b 81 04 00 22 — last byte 0x22
             // P-256 OID (1.2.840.10045.3.1.7): 06 07 2a 86 48 ce 3d 03 01 07 — last byte 0x07
             let is_p384 = ec_params.len() >= 7 && ec_params[ec_params.len() - 1] == 0x22;
-            store_param_set(&mut new_attrs, if is_p384 { CURVE_P384 } else { CURVE_P256 });
+            store_param_set(
+                &mut new_attrs,
+                if is_p384 { CURVE_P384 } else { CURVE_P256 },
+            );
         }
         // PKCS#11 v3.2 §4.3 — CKA_LOCAL=FALSE is mandatory for imported objects;
         // override any caller-provided value since this is a server-managed attribute.
         store_bool(&mut new_attrs, CKA_LOCAL, false);
         // PKCS#11 v3.2 §4.3 — CKA_KEY_GEN_MECHANISM = CKM_UNAVAILABLE_INFORMATION for imported keys
         if !new_attrs.contains_key(&CKA_KEY_GEN_MECHANISM) {
-            store_ulong(&mut new_attrs, CKA_KEY_GEN_MECHANISM, CKM_UNAVAILABLE_INFORMATION);
+            store_ulong(
+                &mut new_attrs,
+                CKA_KEY_GEN_MECHANISM,
+                CKM_UNAVAILABLE_INFORMATION,
+            );
         }
         // Set CKA_ALWAYS_SENSITIVE + CKA_NEVER_EXTRACTABLE if CKA_SENSITIVE is present
         if new_attrs.contains_key(&CKA_SENSITIVE) {
@@ -1806,7 +1964,8 @@ pub fn C_SignInit(h_session: u32, p_mechanism: *mut u8, h_key: u32) -> u32 {
             (Vec::new(), false)
         };
         SIGN_STATE.with(|s| {
-            s.borrow_mut().insert(h_session, (mech_type, h_key, slh_ctx, slh_det));
+            s.borrow_mut()
+                .insert(h_session, (mech_type, h_key, slh_ctx, slh_det));
         });
     }
     CKR_OK
@@ -1872,8 +2031,8 @@ pub fn C_Sign(
             };
 
             let sign_result = if mech == CKM_XMSS {
-                let xmss_param = get_object_attr_u32(hkey, CKA_XMSS_PARAM_SET)
-                    .unwrap_or(CKP_XMSS_SHA2_10_256);
+                let xmss_param =
+                    get_object_attr_u32(hkey, CKA_XMSS_PARAM_SET).unwrap_or(CKP_XMSS_SHA2_10_256);
                 match crate::crypto::xmss_bridge::xmss_sign(xmss_param, &priv_bytes, msg) {
                     Ok((sig, updated_sk)) => match update_fn(&updated_sk) {
                         Ok(_) => Ok(sig),
@@ -1901,7 +2060,9 @@ pub fn C_Sign(
                                 (old_idx + 1).to_le_bytes().to_vec(),
                             );
                             // HSS: decrement CKA_HSS_KEYS_REMAINING by 1 per sign (PKCS#11 v3.2 §6.14)
-                            if let Some(mut remaining) = get_object_attr_u32(hkey, CKA_HSS_KEYS_REMAINING) {
+                            if let Some(mut remaining) =
+                                get_object_attr_u32(hkey, CKA_HSS_KEYS_REMAINING)
+                            {
                                 if remaining > 0 {
                                     remaining -= 1;
                                     set_object_attr_bytes(
@@ -1956,14 +2117,15 @@ pub fn C_Sign(
         let eff_msg = msg;
         let result = match eff_mech {
             m if m == CKM_ML_DSA || is_prehash_ml_dsa(m) => sign_ml_dsa(m, ps, &sk_bytes, msg),
-            m if m == CKM_SLH_DSA || is_prehash_slh_dsa(m) => sign_slh_dsa(m, ps, &sk_bytes, msg, &ctx_bytes, deterministic),
+            m if m == CKM_SLH_DSA || is_prehash_slh_dsa(m) => {
+                sign_slh_dsa(m, ps, &sk_bytes, msg, &ctx_bytes, deterministic)
+            }
             CKM_SHA256_HMAC | CKM_SHA384_HMAC | CKM_SHA512_HMAC | CKM_SHA3_256_HMAC
             | CKM_SHA3_512_HMAC => sign_hmac(eff_mech, &sk_bytes, eff_msg),
             CKM_KMAC_128 | CKM_KMAC_256 => sign_kmac(eff_mech, &sk_bytes, eff_msg),
             CKM_SHA256_RSA_PKCS | CKM_SHA256_RSA_PKCS_PSS => sign_rsa(eff_mech, &sk_bytes, eff_msg),
             CKM_ECDSA | CKM_ECDSA_SHA256 | CKM_ECDSA_SHA384 | CKM_ECDSA_SHA512
-            | CKM_ECDSA_SHA3_224 | CKM_ECDSA_SHA3_256 | CKM_ECDSA_SHA3_384
-            | CKM_ECDSA_SHA3_512 => {
+            | CKM_ECDSA_SHA3_224 | CKM_ECDSA_SHA3_256 | CKM_ECDSA_SHA3_384 | CKM_ECDSA_SHA3_512 => {
                 sign_ecdsa(eff_mech, ps, &sk_bytes, eff_msg)
             }
             CKM_EDDSA => sign_eddsa(&sk_bytes, eff_msg),
@@ -2024,7 +2186,8 @@ pub fn C_VerifyInit(h_session: u32, p_mechanism: *mut u8, h_key: u32) -> u32 {
             (Vec::new(), false)
         };
         VERIFY_STATE.with(|s| {
-            s.borrow_mut().insert(h_session, (mech_type, h_key, slh_ctx, slh_det));
+            s.borrow_mut()
+                .insert(h_session, (mech_type, h_key, slh_ctx, slh_det));
         });
     }
     CKR_OK
@@ -2054,11 +2217,13 @@ pub fn C_Verify(
             let msg = std::slice::from_raw_parts(p_data, ul_data_len as usize);
             let sig_bytes = std::slice::from_raw_parts(p_signature, ul_signature_len as usize);
             let ok = if mech == CKM_XMSS {
-                let xmss_param = get_object_attr_u32(hkey, CKA_XMSS_PARAM_SET)
-                    .unwrap_or(CKP_XMSS_SHA2_10_256);
+                let xmss_param =
+                    get_object_attr_u32(hkey, CKA_XMSS_PARAM_SET).unwrap_or(CKP_XMSS_SHA2_10_256);
                 crate::crypto::xmss_bridge::xmss_verify(xmss_param, &pub_bytes, msg, sig_bytes)
             } else {
-                crate::crypto::lms::hss_verify(&pub_bytes, msg, sig_bytes)
+                let lms_param =
+                    get_object_attr_u32(hkey, CKA_LMS_PARAM_SET).unwrap_or(0x05);
+                crate::crypto::lms::hss_verify(&pub_bytes, msg, sig_bytes, lms_param)
             };
             VERIFY_STATE.with(|s| s.borrow_mut().remove(&h_session));
             return if ok { CKR_OK } else { CKR_SIGNATURE_INVALID };
@@ -2079,8 +2244,12 @@ pub fn C_Verify(
         let eff_mech = mech;
         let eff_msg = msg;
         let rv = match match eff_mech {
-            m if m == CKM_ML_DSA || is_prehash_ml_dsa(m) => verify_ml_dsa(m, ps, &pk_bytes, msg, sig_bytes),
-            m if m == CKM_SLH_DSA || is_prehash_slh_dsa(m) => verify_slh_dsa(m, ps, &pk_bytes, msg, sig_bytes, &ctx_bytes),
+            m if m == CKM_ML_DSA || is_prehash_ml_dsa(m) => {
+                verify_ml_dsa(m, ps, &pk_bytes, msg, sig_bytes)
+            }
+            m if m == CKM_SLH_DSA || is_prehash_slh_dsa(m) => {
+                verify_slh_dsa(m, ps, &pk_bytes, msg, sig_bytes, &ctx_bytes)
+            }
             CKM_SHA256_HMAC | CKM_SHA384_HMAC | CKM_SHA512_HMAC | CKM_SHA3_256_HMAC
             | CKM_SHA3_512_HMAC => verify_hmac(eff_mech, &pk_bytes, eff_msg, sig_bytes),
             CKM_KMAC_128 | CKM_KMAC_256 => match sign_kmac(eff_mech, &pk_bytes, eff_msg) {
@@ -2104,11 +2273,12 @@ pub fn C_Verify(
             }
             // PKCS#11 v3.2: EC public key material is in CKA_EC_POINT.
             CKM_ECDSA | CKM_ECDSA_SHA256 | CKM_ECDSA_SHA384 | CKM_ECDSA_SHA512
-            | CKM_ECDSA_SHA3_224 | CKM_ECDSA_SHA3_256 | CKM_ECDSA_SHA3_384
-            | CKM_ECDSA_SHA3_512 => match &ec_point_bytes {
-                Some(b) => verify_ecdsa(eff_mech, ps, b, eff_msg, sig_bytes),
-                None => Err(CKR_KEY_TYPE_INCONSISTENT),
-            },
+            | CKM_ECDSA_SHA3_224 | CKM_ECDSA_SHA3_256 | CKM_ECDSA_SHA3_384 | CKM_ECDSA_SHA3_512 => {
+                match &ec_point_bytes {
+                    Some(b) => verify_ecdsa(eff_mech, ps, b, eff_msg, sig_bytes),
+                    None => Err(CKR_KEY_TYPE_INCONSISTENT),
+                }
+            }
             CKM_EDDSA => verify_eddsa(&pk_bytes, eff_msg, sig_bytes),
             CKM_EDDSA_PH => verify_eddsa_ph(&pk_bytes, eff_msg, sig_bytes),
             _ => Err(CKR_MECHANISM_INVALID),
@@ -2248,31 +2418,33 @@ pub fn C_VerifySignatureInit(
             (Vec::new(), false)
         };
         let signature = std::slice::from_raw_parts(p_signature, ul_signature_len as usize).to_vec();
-        
+
         VERIFY_SIG_STATE.with(|s| {
-            s.borrow_mut().insert(h_session, VerifySigCtx {
-                mech_type,
-                key_handle: h_key,
-                signature,
-                msg_acc: Vec::new(),
-                slh_ctx,
-                slh_det,
-            });
+            s.borrow_mut().insert(
+                h_session,
+                VerifySigCtx {
+                    mech_type,
+                    key_handle: h_key,
+                    signature,
+                    msg_acc: Vec::new(),
+                    slh_ctx,
+                    slh_det,
+                },
+            );
         });
     }
     CKR_OK
 }
 
 #[wasm_bindgen(js_name = _C_VerifySignature)]
-pub fn C_VerifySignature(
-    h_session: u32,
-    p_data: *mut u8,
-    ul_data_len: u32,
-) -> u32 {
+pub fn C_VerifySignature(h_session: u32, p_data: *mut u8, ul_data_len: u32) -> u32 {
     let state = VERIFY_SIG_STATE.with(|s| s.borrow_mut().remove(&h_session));
     if let Some(ctx) = state {
         VERIFY_STATE.with(|s| {
-            s.borrow_mut().insert(h_session, (ctx.mech_type, ctx.key_handle, ctx.slh_ctx, ctx.slh_det));
+            s.borrow_mut().insert(
+                h_session,
+                (ctx.mech_type, ctx.key_handle, ctx.slh_ctx, ctx.slh_det),
+            );
         });
         let mut sig_clone = ctx.signature.clone();
         C_Verify(
@@ -2283,16 +2455,12 @@ pub fn C_VerifySignature(
             sig_clone.len() as u32,
         )
     } else {
-         CKR_OPERATION_NOT_INITIALIZED
+        CKR_OPERATION_NOT_INITIALIZED
     }
 }
 
 #[wasm_bindgen(js_name = _C_VerifySignatureUpdate)]
-pub fn C_VerifySignatureUpdate(
-    h_session: u32,
-    p_part: *mut u8,
-    ul_part_len: u32,
-) -> u32 {
+pub fn C_VerifySignatureUpdate(h_session: u32, p_part: *mut u8, ul_part_len: u32) -> u32 {
     let mut ok = false;
     VERIFY_SIG_STATE.with(|s| {
         if let Some(ctx) = s.borrow_mut().get_mut(&h_session) {
@@ -2305,7 +2473,11 @@ pub fn C_VerifySignatureUpdate(
             ok = true;
         }
     });
-    if ok { CKR_OK } else { CKR_OPERATION_NOT_INITIALIZED }
+    if ok {
+        CKR_OK
+    } else {
+        CKR_OPERATION_NOT_INITIALIZED
+    }
 }
 
 #[wasm_bindgen(js_name = _C_VerifySignatureFinal)]
@@ -2313,13 +2485,20 @@ pub fn C_VerifySignatureFinal(h_session: u32) -> u32 {
     let state = VERIFY_SIG_STATE.with(|s| s.borrow_mut().remove(&h_session));
     if let Some(ctx) = state {
         VERIFY_STATE.with(|s| {
-            s.borrow_mut().insert(h_session, (ctx.mech_type, ctx.key_handle, ctx.slh_ctx, ctx.slh_det));
+            s.borrow_mut().insert(
+                h_session,
+                (ctx.mech_type, ctx.key_handle, ctx.slh_ctx, ctx.slh_det),
+            );
         });
         let mut data = ctx.msg_acc.clone();
         let mut sig = ctx.signature.clone();
         C_Verify(
             h_session,
-            if data.is_empty() { 4 as *mut u8 } else { data.as_mut_ptr() },
+            if data.is_empty() {
+                4 as *mut u8
+            } else {
+                data.as_mut_ptr()
+            },
             data.len() as u32,
             sig.as_mut_ptr(),
             sig.len() as u32,
@@ -2398,6 +2577,27 @@ pub fn C_EncryptInit(h_session: u32, p_mechanism: *mut u8, h_key: u32) -> u32 {
                 };
                 (Vec::new(), Vec::new(), hash_alg)
             }
+            0x00004021u32 /* CKM_CHACHA20_POLY1305 */ => {
+                // CK_SALSA20_CHACHA20_POLY1305_PARAMS (WASM32, 16 bytes):
+                //   pNonce(u32 ptr) + ulNonceLen(u32) + pAAD(u32 ptr) + ulAADLen(u32)
+                if p_param.is_null() || ul_param_len < 16 {
+                    return CKR_ARGUMENTS_BAD;
+                }
+                let nonce_ptr = *(p_param as *const u32) as usize as *const u8;
+                let nonce_len = *((p_param as *const u32).add(1)) as usize;
+                let aad_ptr   = *((p_param as *const u32).add(2)) as usize as *const u8;
+                let aad_len   = *((p_param as *const u32).add(3)) as usize;
+                if nonce_len != 12 {
+                    return CKR_MECHANISM_PARAM_INVALID;
+                }
+                let nonce = std::slice::from_raw_parts(nonce_ptr, nonce_len).to_vec();
+                let aad = if !aad_ptr.is_null() && aad_len > 0 {
+                    std::slice::from_raw_parts(aad_ptr, aad_len).to_vec()
+                } else {
+                    Vec::new()
+                };
+                (nonce, aad, 0)
+            }
             _ => return CKR_MECHANISM_INVALID,
         };
 
@@ -2429,9 +2629,9 @@ pub fn C_Encrypt(
     let ctx = ENCRYPT_STATE.with(|s| {
         s.borrow_mut()
             .remove(&h_session)
-            .map(|c| (c.mech_type, c.key_handle, c.iv, c.tag_bits))
+            .map(|c| (c.mech_type, c.key_handle, c.iv, c.aad, c.tag_bits))
     });
-    let (mech_type, key_handle, iv, tag_bits) = match ctx {
+    let (mech_type, key_handle, iv, aad, tag_bits) = match ctx {
         Some(c) => c,
         None => return CKR_OPERATION_NOT_INITIALIZED,
     };
@@ -2532,6 +2732,22 @@ pub fn C_Encrypt(
                         Err(_) => return CKR_FUNCTION_FAILED,
                     }
                 })
+            }
+            0x00004021u32 /* CKM_CHACHA20_POLY1305 */ => {
+                use chacha20poly1305::{ChaCha20Poly1305, KeyInit, aead::{Aead, Payload}};
+                use chacha20poly1305::aead::generic_array::GenericArray;
+                if key_bytes.len() != 32 {
+                    return CKR_KEY_SIZE_RANGE;
+                }
+                if iv.len() != 12 {
+                    return CKR_MECHANISM_PARAM_INVALID;
+                }
+                let cipher = ChaCha20Poly1305::new(GenericArray::from_slice(&key_bytes));
+                let nonce = GenericArray::from_slice(&iv);
+                match cipher.encrypt(nonce, Payload { msg: plaintext, aad: &aad }) {
+                    Ok(ct) => ct,
+                    Err(_) => return CKR_FUNCTION_FAILED,
+                }
             }
             _ => return CKR_MECHANISM_INVALID,
         };
@@ -3047,7 +3263,6 @@ pub fn C_DeriveKey(
             }
         }
 
-        
         if mech_type == CKM_SP800_108_COUNTER_KDF || mech_type == CKM_SP800_108_FEEDBACK_KDF {
             let key_bytes = match get_object_value(h_base_key) {
                 Some(v) => v,
@@ -3071,14 +3286,18 @@ pub fn C_DeriveKey(
 
             let ctx = if !ptr_ctx.is_null() && len_ctx > 0 {
                 unsafe { std::slice::from_raw_parts(ptr_ctx, len_ctx) }
-            } else { b"" };
+            } else {
+                b""
+            };
             let label = if !ptr_label.is_null() && len_label > 0 {
                 unsafe { std::slice::from_raw_parts(ptr_label, len_label) }
-            } else { b"" };
+            } else {
+                b""
+            };
 
             let mut out = Vec::with_capacity(key_len);
             let l_bits = (key_len as u32) * 8;
-            
+
             let ok = match prf_mech {
                 CKM_SHA256_HMAC => {
                     use hmac::{Hmac, Mac};
@@ -3086,15 +3305,21 @@ pub fn C_DeriveKey(
                     while out.len() < key_len {
                         if let Ok(mut mac) = Hmac::<sha2::Sha256>::new_from_slice(&key_bytes) {
                             mac.update(&i.to_be_bytes());
-                            if !label.is_empty() { mac.update(label); }
+                            if !label.is_empty() {
+                                mac.update(label);
+                            }
                             mac.update(&[0x00]);
-                            if !ctx.is_empty() { mac.update(ctx); }
+                            if !ctx.is_empty() {
+                                mac.update(ctx);
+                            }
                             mac.update(&l_bits.to_be_bytes());
                             let res = mac.finalize().into_bytes();
                             let chunk = std::cmp::min(res.len(), key_len - out.len());
                             out.extend_from_slice(&res[..chunk]);
                             i += 1;
-                        } else { break; }
+                        } else {
+                            break;
+                        }
                     }
                     out.len() == key_len
                 }
@@ -3120,7 +3345,9 @@ pub fn C_DeriveKey(
             attrs.insert(CKA_VALUE_LEN, (key_len as u32).to_le_bytes().to_vec());
             attrs.insert(CKA_EXTRACTABLE, vec![extractable as u8]);
             let handle = crate::state::allocate_handle(attrs);
-            unsafe { *ph_key = handle; }
+            unsafe {
+                *ph_key = handle;
+            }
             return CKR_OK;
         }
 
@@ -3142,7 +3369,7 @@ pub fn C_DeriveKey(
                 Some(v) => v.clone(),
                 None => return CKR_TEMPLATE_INCONSISTENT,
             };
-            
+
             let curve = match crate::crypto::HDCurve::from_oid(&ec_params) {
                 Some(c) => c,
                 None => return CKR_KEY_TYPE_INCONSISTENT,
@@ -3173,7 +3400,7 @@ pub fn C_DeriveKey(
                 if parent_chain_code.is_empty() {
                     return CKR_KEY_TYPE_INCONSISTENT;
                 }
-                
+
                 let p_param = *(p_mechanism.add(4) as *const u32) as usize as *const u32;
                 if p_param.is_null() {
                     return CKR_ARGUMENTS_BAD;
@@ -3183,15 +3410,22 @@ pub fn C_DeriveKey(
                 //   offset 4: index (CK_ULONG — child index, 0-based, no hardened bit)
                 let flags = *p_param.add(0);
                 let index = *p_param.add(1);
-                
-                match crate::crypto::derive_child_node(&parent_priv, &parent_chain_code, index, flags != 0, curve) {
+
+                match crate::crypto::derive_child_node(
+                    &parent_priv,
+                    &parent_chain_code,
+                    index,
+                    flags != 0,
+                    curve,
+                ) {
                     Ok(res) => res,
                     Err(e) => return e,
                 }
             };
 
             // Respect CKA_EXTRACTABLE from the caller's template (default: false / sensitive)
-            let extractable = attrs.get(&CKA_EXTRACTABLE)
+            let extractable = attrs
+                .get(&CKA_EXTRACTABLE)
                 .and_then(|v| v.first())
                 .map(|&b| b != 0)
                 .unwrap_or(false);
@@ -3205,7 +3439,7 @@ pub fn C_DeriveKey(
             store_bool(&mut attrs, CKA_PRIVATE, true);
             store_bool(&mut attrs, CKA_SENSITIVE, !extractable);
             store_bool(&mut attrs, CKA_EXTRACTABLE, extractable);
-            
+
             *ph_key = allocate_handle(attrs);
             return CKR_OK;
         }
@@ -4259,29 +4493,17 @@ pub fn C_DecryptUpdate(
 // ── PKCS#11 v3.2 Asynchronous and Session Flag Stubs ────────────────────────
 
 #[wasm_bindgen(js_name = _C_GetSessionValidationFlags)]
-pub fn C_GetSessionValidationFlags(
-    _h_session: u32,
-    _type: u32,
-    _p_flags: *mut u32,
-) -> u32 {
+pub fn C_GetSessionValidationFlags(_h_session: u32, _type: u32, _p_flags: *mut u32) -> u32 {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
 #[wasm_bindgen(js_name = _C_AsyncComplete)]
-pub fn C_AsyncComplete(
-    _h_session: u32,
-    _p_function_name: *mut u8,
-    _p_result: *mut u8,
-) -> u32 {
+pub fn C_AsyncComplete(_h_session: u32, _p_function_name: *mut u8, _p_result: *mut u8) -> u32 {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
 #[wasm_bindgen(js_name = _C_AsyncGetID)]
-pub fn C_AsyncGetID(
-    _h_session: u32,
-    _p_function_name: *mut u8,
-    _pul_id: *mut u32,
-) -> u32 {
+pub fn C_AsyncGetID(_h_session: u32, _p_function_name: *mut u8, _pul_id: *mut u32) -> u32 {
     CKR_FUNCTION_NOT_SUPPORTED
 }
 
@@ -4437,7 +4659,9 @@ pub fn C_SeedRandom(_h_session: u32, _p_seed: *mut u8, _ul_seed_len: u32) -> u32
 // ============================================================================
 
 fn parse_gcm_msg_params(p: *mut u8) -> Result<(Vec<u8>, *mut u8, u32), u32> {
-    if p.is_null() { return Err(CKR_ARGUMENTS_BAD); }
+    if p.is_null() {
+        return Err(CKR_ARGUMENTS_BAD);
+    }
     unsafe {
         let p_iv = *(p as *const u32) as usize as *mut u8;
         let ul_iv_len = *(p.add(4) as *const u32);
@@ -4445,7 +4669,9 @@ fn parse_gcm_msg_params(p: *mut u8) -> Result<(Vec<u8>, *mut u8, u32), u32> {
         let p_tag = *(p.add(16) as *const u32) as usize as *mut u8;
         let ul_tag_bits = *(p.add(20) as *const u32);
 
-        if p_iv.is_null() || ul_iv_len == 0 { return Err(CKR_MECHANISM_PARAM_INVALID); }
+        if p_iv.is_null() || ul_iv_len == 0 {
+            return Err(CKR_MECHANISM_PARAM_INVALID);
+        }
         if p_tag.is_null() || ul_tag_bits == 0 || ul_tag_bits > 128 || ul_tag_bits % 8 != 0 {
             return Err(CKR_MECHANISM_PARAM_INVALID);
         }
@@ -4463,7 +4689,12 @@ fn parse_gcm_msg_params(p: *mut u8) -> Result<(Vec<u8>, *mut u8, u32), u32> {
     }
 }
 
-pub fn msg_encrypt_init_internal(h_session: u32, p_mechanism: *mut u8, h_key: u32, is_encrypt: bool) -> u32 {
+pub fn msg_encrypt_init_internal(
+    h_session: u32,
+    p_mechanism: *mut u8,
+    h_key: u32,
+    is_encrypt: bool,
+) -> u32 {
     unsafe {
         if p_mechanism.is_null() {
             return CKR_ARGUMENTS_BAD;
@@ -4472,11 +4703,13 @@ pub fn msg_encrypt_init_internal(h_session: u32, p_mechanism: *mut u8, h_key: u3
         if mech_type != CKM_AES_GCM {
             return CKR_MECHANISM_INVALID;
         }
-        
+
         let can_use = OBJECTS.with(|o| {
             o.borrow()
                 .get(&h_key)
-                .map(|attrs| read_bool_attr(attrs, if is_encrypt { CKA_ENCRYPT } else { CKA_DECRYPT }))
+                .map(|attrs| {
+                    read_bool_attr(attrs, if is_encrypt { CKA_ENCRYPT } else { CKA_DECRYPT })
+                })
                 .unwrap_or(false)
         });
         if !can_use {
@@ -4487,7 +4720,7 @@ pub fn msg_encrypt_init_internal(h_session: u32, p_mechanism: *mut u8, h_key: u3
             Some(v) => v,
             None => return CKR_KEY_TYPE_INCONSISTENT,
         };
-        
+
         if key_bytes.len() != 16 && key_bytes.len() != 32 {
             return CKR_KEY_SIZE_RANGE;
         }
@@ -4535,10 +4768,16 @@ pub fn aes_gcm_exec(
         if is_encrypt {
             match cipher.encrypt(nonce, payload_aead) {
                 Ok(out) => {
-                    if out.len() < tag_bytes { return Err(CKR_GENERAL_ERROR); }
+                    if out.len() < tag_bytes {
+                        return Err(CKR_GENERAL_ERROR);
+                    }
                     let ct_len = out.len() - 16;
                     unsafe {
-                        std::ptr::copy_nonoverlapping(out[ct_len..ct_len + tag_bytes].as_ptr(), p_tag, tag_bytes);
+                        std::ptr::copy_nonoverlapping(
+                            out[ct_len..ct_len + tag_bytes].as_ptr(),
+                            p_tag,
+                            tag_bytes,
+                        );
                     }
                     Ok(out[0..ct_len].to_vec())
                 }
@@ -4566,10 +4805,16 @@ pub fn aes_gcm_exec(
         if is_encrypt {
             match cipher.encrypt(nonce, payload_aead) {
                 Ok(out) => {
-                    if out.len() < tag_bytes { return Err(CKR_GENERAL_ERROR); }
+                    if out.len() < tag_bytes {
+                        return Err(CKR_GENERAL_ERROR);
+                    }
                     let ct_len = out.len() - 16;
                     unsafe {
-                        std::ptr::copy_nonoverlapping(out[ct_len..ct_len + tag_bytes].as_ptr(), p_tag, tag_bytes);
+                        std::ptr::copy_nonoverlapping(
+                            out[ct_len..ct_len + tag_bytes].as_ptr(),
+                            p_tag,
+                            tag_bytes,
+                        );
                     }
                     Ok(out[0..ct_len].to_vec())
                 }
@@ -4618,7 +4863,9 @@ pub fn C_EncryptMessage(
         Some(c) => c,
         None => return CKR_OPERATION_NOT_INITIALIZED,
     };
-    if ctx.in_message { return CKR_OPERATION_ACTIVE; }
+    if ctx.in_message {
+        return CKR_OPERATION_ACTIVE;
+    }
 
     unsafe {
         if p_ciphertext.is_null() {
@@ -4661,14 +4908,17 @@ pub fn C_EncryptMessageBegin(
         Some(c) => c,
         None => return CKR_OPERATION_NOT_INITIALIZED,
     };
-    if ctx.in_message { return CKR_OPERATION_ACTIVE; }
+    if ctx.in_message {
+        return CKR_OPERATION_ACTIVE;
+    }
 
     unsafe {
         let (iv, _p_tag, tag_bits) = match parse_gcm_msg_params(p_parameter) {
             Ok(v) => v,
             Err(e) => return e,
         };
-        let aad = std::slice::from_raw_parts(p_associated_data, ul_associated_data_len as usize).to_vec();
+        let aad =
+            std::slice::from_raw_parts(p_associated_data, ul_associated_data_len as usize).to_vec();
 
         MESSAGE_ENCRYPT_STATE.with(|s| {
             let mut store = s.borrow_mut();
@@ -4699,7 +4949,9 @@ pub fn C_EncryptMessageNext(
         Some(c) => c,
         None => return CKR_OPERATION_NOT_INITIALIZED,
     };
-    if !ctx.in_message { return CKR_OPERATION_NOT_INITIALIZED; }
+    if !ctx.in_message {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
 
     unsafe {
         if p_ciphertext_part.is_null() {
@@ -4713,40 +4965,71 @@ pub fn C_EncryptMessageNext(
 
         MESSAGE_ENCRYPT_STATE.with(|s| {
             if let Some(c) = s.borrow_mut().get_mut(&h_session) {
-                let plain_chunk = std::slice::from_raw_parts(p_plaintext_part, ul_plaintext_part_len as usize);
+                let plain_chunk =
+                    std::slice::from_raw_parts(p_plaintext_part, ul_plaintext_part_len as usize);
                 c.payload_acc.extend_from_slice(plain_chunk);
             }
         });
 
-        if (flags & 0x00000001) != 0 /* CKF_END_OF_MESSAGE */ {
-            let final_ctx = MESSAGE_ENCRYPT_STATE.with(|s| s.borrow().get(&h_session).cloned().unwrap());
+        if (flags & 0x00000001) != 0
+        /* CKF_END_OF_MESSAGE */
+        {
+            let final_ctx =
+                MESSAGE_ENCRYPT_STATE.with(|s| s.borrow().get(&h_session).cloned().unwrap());
             let p_tag = if p_parameter.is_null() {
                 return CKR_ARGUMENTS_BAD;
             } else {
                 *(p_parameter.add(16) as *const u32) as usize as *mut u8
             };
 
-            match aes_gcm_exec(&final_ctx.key, &final_ctx.iv, &final_ctx.aad, &final_ctx.payload_acc, true, p_tag, final_ctx.tag_bits) {
+            match aes_gcm_exec(
+                &final_ctx.key,
+                &final_ctx.iv,
+                &final_ctx.aad,
+                &final_ctx.payload_acc,
+                true,
+                p_tag,
+                final_ctx.tag_bits,
+            ) {
                 Ok(full_ct) => {
                     let chunk_start = full_ct.len() - ul_plaintext_part_len as usize;
-                    std::ptr::copy_nonoverlapping(full_ct[chunk_start..].as_ptr(), p_ciphertext_part, ul_plaintext_part_len as usize);
+                    std::ptr::copy_nonoverlapping(
+                        full_ct[chunk_start..].as_ptr(),
+                        p_ciphertext_part,
+                        ul_plaintext_part_len as usize,
+                    );
                     *pul_ciphertext_part_len = ul_plaintext_part_len;
-                    
-                    MESSAGE_ENCRYPT_STATE.with(|s| s.borrow_mut().get_mut(&h_session).unwrap().in_message = false);
+
+                    MESSAGE_ENCRYPT_STATE
+                        .with(|s| s.borrow_mut().get_mut(&h_session).unwrap().in_message = false);
                     CKR_OK
                 }
                 Err(e) => {
-                    MESSAGE_ENCRYPT_STATE.with(|s| s.borrow_mut().get_mut(&h_session).unwrap().in_message = false);
+                    MESSAGE_ENCRYPT_STATE
+                        .with(|s| s.borrow_mut().get_mut(&h_session).unwrap().in_message = false);
                     e
                 }
             }
         } else {
-            let intermediate_ctx = MESSAGE_ENCRYPT_STATE.with(|s| s.borrow().get(&h_session).cloned().unwrap());
+            let intermediate_ctx =
+                MESSAGE_ENCRYPT_STATE.with(|s| s.borrow().get(&h_session).cloned().unwrap());
             let mut fake_tag = vec![0u8; (intermediate_ctx.tag_bits / 8) as usize];
-            match aes_gcm_exec(&intermediate_ctx.key, &intermediate_ctx.iv, &intermediate_ctx.aad, &intermediate_ctx.payload_acc, true, fake_tag.as_mut_ptr(), intermediate_ctx.tag_bits) {
+            match aes_gcm_exec(
+                &intermediate_ctx.key,
+                &intermediate_ctx.iv,
+                &intermediate_ctx.aad,
+                &intermediate_ctx.payload_acc,
+                true,
+                fake_tag.as_mut_ptr(),
+                intermediate_ctx.tag_bits,
+            ) {
                 Ok(full_ct) => {
                     let chunk_start = full_ct.len() - ul_plaintext_part_len as usize;
-                    std::ptr::copy_nonoverlapping(full_ct[chunk_start..].as_ptr(), p_ciphertext_part, ul_plaintext_part_len as usize);
+                    std::ptr::copy_nonoverlapping(
+                        full_ct[chunk_start..].as_ptr(),
+                        p_ciphertext_part,
+                        ul_plaintext_part_len as usize,
+                    );
                     *pul_ciphertext_part_len = ul_plaintext_part_len;
                     CKR_OK
                 }
@@ -4783,7 +5066,9 @@ pub fn C_DecryptMessage(
         Some(c) => c,
         None => return CKR_OPERATION_NOT_INITIALIZED,
     };
-    if ctx.in_message { return CKR_OPERATION_ACTIVE; }
+    if ctx.in_message {
+        return CKR_OPERATION_ACTIVE;
+    }
 
     unsafe {
         if p_plaintext.is_null() {
@@ -4826,14 +5111,17 @@ pub fn C_DecryptMessageBegin(
         Some(c) => c,
         None => return CKR_OPERATION_NOT_INITIALIZED,
     };
-    if ctx.in_message { return CKR_OPERATION_ACTIVE; }
+    if ctx.in_message {
+        return CKR_OPERATION_ACTIVE;
+    }
 
     unsafe {
         let (iv, _p_tag, tag_bits) = match parse_gcm_msg_params(p_parameter) {
             Ok(v) => v,
             Err(e) => return e,
         };
-        let aad = std::slice::from_raw_parts(p_associated_data, ul_associated_data_len as usize).to_vec();
+        let aad =
+            std::slice::from_raw_parts(p_associated_data, ul_associated_data_len as usize).to_vec();
 
         MESSAGE_DECRYPT_STATE.with(|s| {
             let mut store = s.borrow_mut();
@@ -4864,7 +5152,9 @@ pub fn C_DecryptMessageNext(
         Some(c) => c,
         None => return CKR_OPERATION_NOT_INITIALIZED,
     };
-    if !ctx.in_message { return CKR_OPERATION_NOT_INITIALIZED; }
+    if !ctx.in_message {
+        return CKR_OPERATION_NOT_INITIALIZED;
+    }
 
     unsafe {
         if p_plaintext_part.is_null() {
@@ -4878,39 +5168,70 @@ pub fn C_DecryptMessageNext(
 
         MESSAGE_DECRYPT_STATE.with(|s| {
             if let Some(c) = s.borrow_mut().get_mut(&h_session) {
-                let ct_chunk = std::slice::from_raw_parts(p_ciphertext_part, ul_ciphertext_part_len as usize);
+                let ct_chunk =
+                    std::slice::from_raw_parts(p_ciphertext_part, ul_ciphertext_part_len as usize);
                 c.payload_acc.extend_from_slice(ct_chunk);
             }
         });
 
-        if (flags & 0x00000001) != 0 /* CKF_END_OF_MESSAGE */ {
-            let final_ctx = MESSAGE_DECRYPT_STATE.with(|s| s.borrow().get(&h_session).cloned().unwrap());
+        if (flags & 0x00000001) != 0
+        /* CKF_END_OF_MESSAGE */
+        {
+            let final_ctx =
+                MESSAGE_DECRYPT_STATE.with(|s| s.borrow().get(&h_session).cloned().unwrap());
             let p_tag = if p_parameter.is_null() {
                 return CKR_ARGUMENTS_BAD;
             } else {
                 *(p_parameter.add(16) as *const u32) as usize as *mut u8
             };
 
-            match aes_gcm_exec(&final_ctx.key, &final_ctx.iv, &final_ctx.aad, &final_ctx.payload_acc, false, p_tag, final_ctx.tag_bits) {
+            match aes_gcm_exec(
+                &final_ctx.key,
+                &final_ctx.iv,
+                &final_ctx.aad,
+                &final_ctx.payload_acc,
+                false,
+                p_tag,
+                final_ctx.tag_bits,
+            ) {
                 Ok(full_pt) => {
                     let chunk_start = full_pt.len() - ul_ciphertext_part_len as usize;
-                    std::ptr::copy_nonoverlapping(full_pt[chunk_start..].as_ptr(), p_plaintext_part, ul_ciphertext_part_len as usize);
+                    std::ptr::copy_nonoverlapping(
+                        full_pt[chunk_start..].as_ptr(),
+                        p_plaintext_part,
+                        ul_ciphertext_part_len as usize,
+                    );
                     *pul_plaintext_part_len = ul_ciphertext_part_len;
-                    MESSAGE_DECRYPT_STATE.with(|s| s.borrow_mut().get_mut(&h_session).unwrap().in_message = false);
+                    MESSAGE_DECRYPT_STATE
+                        .with(|s| s.borrow_mut().get_mut(&h_session).unwrap().in_message = false);
                     CKR_OK
                 }
                 Err(e) => {
-                    MESSAGE_DECRYPT_STATE.with(|s| s.borrow_mut().get_mut(&h_session).unwrap().in_message = false);
+                    MESSAGE_DECRYPT_STATE
+                        .with(|s| s.borrow_mut().get_mut(&h_session).unwrap().in_message = false);
                     e
                 }
             }
         } else {
-            let intermediate_ctx = MESSAGE_DECRYPT_STATE.with(|s| s.borrow().get(&h_session).cloned().unwrap());
+            let intermediate_ctx =
+                MESSAGE_DECRYPT_STATE.with(|s| s.borrow().get(&h_session).cloned().unwrap());
             let mut fake_tag = vec![0u8; (intermediate_ctx.tag_bits / 8) as usize];
-            match aes_gcm_exec(&intermediate_ctx.key, &intermediate_ctx.iv, &intermediate_ctx.aad, &intermediate_ctx.payload_acc, true, fake_tag.as_mut_ptr(), intermediate_ctx.tag_bits) {
+            match aes_gcm_exec(
+                &intermediate_ctx.key,
+                &intermediate_ctx.iv,
+                &intermediate_ctx.aad,
+                &intermediate_ctx.payload_acc,
+                true,
+                fake_tag.as_mut_ptr(),
+                intermediate_ctx.tag_bits,
+            ) {
                 Ok(full_pt_like) => {
                     let chunk_start = full_pt_like.len() - ul_ciphertext_part_len as usize;
-                    std::ptr::copy_nonoverlapping(full_pt_like[chunk_start..].as_ptr(), p_plaintext_part, ul_ciphertext_part_len as usize);
+                    std::ptr::copy_nonoverlapping(
+                        full_pt_like[chunk_start..].as_ptr(),
+                        p_plaintext_part,
+                        ul_ciphertext_part_len as usize,
+                    );
                     *pul_plaintext_part_len = ul_ciphertext_part_len;
                     CKR_OK
                 }

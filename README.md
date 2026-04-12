@@ -522,13 +522,19 @@ softhsmrustv3design.md  # Detailed architecture design document
 
 Internal state uses thread-local `RefCell<HashMap<u32, HashMap<u32, Vec<u8>>>>` for the object store (handle → attribute map), with monotonically incrementing `AtomicU32` handles returned to JS callers. Session handles are also unique via an atomic counter. All cryptographic operations execute entirely within WASM linear memory, isolated from the JavaScript heap.
 
+## Token Storage & Persistence
+
+SoftHSMv3 introduces a **Dual-Mode Storage Architecture** to support both ephemeral and persistent workloads cleanly without branching the API:
+
+1. **Memory Model (WASM Default):** Total in-memory `ObjectStore`. Token state does not survive a WASM module reload or process exit. Extremely fast execution with zero filesystem dependencies. Required for Browser and Sandbox embedding.
+2. **File-Based Model (Native Integration):** An optional filesystem-backed ObjectStore mapping directly to `/var/lib/softhsm/tokens` (configured via `softhsm2.conf`). This behaves exactly like SoftHSMv2, granting full persistence of Keys and Pins across process restarts, essential for Native IT systems like OpenSSL, OpenVPN, and NGINX integration testing.
+
+*Note: The native file model cleanly compiles out of the WASM pipeline to keep the Javascript distribution lightweight.*
+
 ## Known Limitations
 
-- **Stateful hash-based signatures**: HSS/LMS (keygen, sign, verify) and XMSS/XMSS^MT (keygen, sign, verify) are implemented in both C++ and Rust engines. All SP 800-208 parameter sets supported (SHA-256 N32/N24, SHAKE-256 N32/N24). Validated against 320 NIST ACVP LMS sigVer demo vectors. State persistence is in-memory per session — the host application must manage durable state for production use.
+- **Stateful hash-based signatures**: HSS/LMS (keygen, sign, verify) and XMSS/XMSS^MT (keygen, sign, verify) are implemented in both C++ and Rust engines. All SP 800-208 parameter sets supported (SHA-256 N32/N24, SHAKE-256 N32/N24). Validated against 320 NIST ACVP LMS sigVer demo vectors. State persistence is in-memory per session — the host application must manage durable state for production use if using the memory model.
 - **Single-threaded**: The WASM target is single-threaded (no SharedArrayBuffer worker pool).
-- **Non-persistent token**: Token state is in-memory only and does not survive WASM module reload.
-
-## Roadmap
 
 - [x] Phase 0: Import SoftHSM2 + PKCS#11 v3.2 headers + strip legacy ([#1](https://github.com/pqctoday/softhsmv3/issues/1))
 - [x] Phase 1: OpenSSL 3.x API migration ([#2](https://github.com/pqctoday/softhsmv3/issues/2))

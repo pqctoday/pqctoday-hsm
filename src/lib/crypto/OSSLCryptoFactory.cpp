@@ -38,6 +38,7 @@
 #include "OSSLCryptoFactory.h"
 #include "OSSLRNG.h"
 #include "OSSLAES.h"
+#include "OSSLChaCha20.h"
 #include "OSSLSHA1.h"
 #include "OSSLSHA224.h"
 #include "OSSLSHA256.h"
@@ -100,6 +101,8 @@ SymmetricAlgorithm* OSSLCryptoFactory::getSymmetricAlgorithm(SymAlgo::Type algor
 	{
 		case SymAlgo::AES:
 			return new OSSLAES();
+		case SymAlgo::CHACHA:
+			return new OSSLChaCha20();
 		default:
 			break;
 	}

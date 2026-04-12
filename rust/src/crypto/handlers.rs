@@ -6,7 +6,6 @@ use wasm_bindgen::prelude::*;
 use crate::constants::*;
 use crate::state::*;
 
-
 // Install panic hook on WASM start — turns panics into console.error with stack traces
 #[wasm_bindgen(start)]
 pub fn wasm_start() {
@@ -167,14 +166,18 @@ macro_rules! slh_dsa_keygen {
 macro_rules! slh_dsa_sign {
     ($ps:ty, $mech:expr, $sk_bytes:expr, $msg:expr, $ctx:expr, $deterministic:expr) => {{
         use fips205::traits::Signer;
-        let sk_arr: &<$ps as fips205::traits::SerDes>::ByteArray = $sk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+        let sk_arr: &<$ps as fips205::traits::SerDes>::ByteArray = $sk_bytes
+            .try_into()
+            .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
         let sk = <$ps as fips205::traits::SerDes>::try_from_bytes(sk_arr)
             .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
         match crate::crypto::handlers::get_slh_dsa_ph($mech) {
-            Some(ph) => sk.try_hash_sign($msg, $ctx, &ph, !$deterministic)
+            Some(ph) => sk
+                .try_hash_sign($msg, $ctx, &ph, !$deterministic)
                 .map_err(|_| CKR_FUNCTION_FAILED)
                 .map(|s| Into::<Vec<u8>>::into(s)),
-            None => sk.try_sign($msg, $ctx, !$deterministic)
+            None => sk
+                .try_sign($msg, $ctx, !$deterministic)
                 .map_err(|_| CKR_FUNCTION_FAILED)
                 .map(|s| Into::<Vec<u8>>::into(s)),
         }
@@ -185,13 +188,28 @@ macro_rules! slh_dsa_sign {
 macro_rules! slh_dsa_verify {
     ($ps:ty, $mech:expr, $pk_bytes:expr, $msg:expr, $sig_bytes:expr, $ctx:expr) => {{
         use fips205::traits::Verifier;
-        let pk_arr: &<$ps as fips205::traits::SerDes>::ByteArray = $pk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+        let pk_arr: &<$ps as fips205::traits::SerDes>::ByteArray = $pk_bytes
+            .try_into()
+            .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
         let vk = <$ps as fips205::traits::SerDes>::try_from_bytes(pk_arr)
             .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
-        let sig: <$ps as fips205::traits::Verifier>::Signature = $sig_bytes.try_into().map_err(|_| CKR_SIGNATURE_INVALID)?;
+        let sig: <$ps as fips205::traits::Verifier>::Signature =
+            $sig_bytes.try_into().map_err(|_| CKR_SIGNATURE_INVALID)?;
         match crate::crypto::handlers::get_slh_dsa_ph($mech) {
-            Some(ph) => if vk.hash_verify($msg, &sig, $ctx, &ph) { Ok(()) } else { Err(CKR_SIGNATURE_INVALID) },
-            None => if vk.verify($msg, &sig, $ctx) { Ok(()) } else { Err(CKR_SIGNATURE_INVALID) },
+            Some(ph) => {
+                if vk.hash_verify($msg, &sig, $ctx, &ph) {
+                    Ok(())
+                } else {
+                    Err(CKR_SIGNATURE_INVALID)
+                }
+            }
+            None => {
+                if vk.verify($msg, &sig, $ctx) {
+                    Ok(())
+                } else {
+                    Err(CKR_SIGNATURE_INVALID)
+                }
+            }
         }
     }};
 }
@@ -283,37 +301,49 @@ pub fn der_length(len: usize) -> Vec<u8> {
 /// Build SPKI for ML-KEM-512 (OID 2.16.840.1.101.3.4.4.1)
 pub fn build_mlkem512_spki(pk: &[u8]) -> Vec<u8> {
     // AlgId = SEQUENCE(11) { OID(9) 60 86 48 01 65 03 04 04 01 }
-    let alg_id: &[u8] = &[0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x01];
+    let alg_id: &[u8] = &[
+        0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x01,
+    ];
     build_spki_from_parts(alg_id, pk)
 }
 
 /// Build SPKI for ML-KEM-768 (OID 2.16.840.1.101.3.4.4.2)
 pub fn build_mlkem768_spki(pk: &[u8]) -> Vec<u8> {
-    let alg_id: &[u8] = &[0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x02];
+    let alg_id: &[u8] = &[
+        0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x02,
+    ];
     build_spki_from_parts(alg_id, pk)
 }
 
 /// Build SPKI for ML-KEM-1024 (OID 2.16.840.1.101.3.4.4.3)
 pub fn build_mlkem1024_spki(pk: &[u8]) -> Vec<u8> {
-    let alg_id: &[u8] = &[0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03];
+    let alg_id: &[u8] = &[
+        0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x04, 0x03,
+    ];
     build_spki_from_parts(alg_id, pk)
 }
 
 /// Build SPKI for ML-DSA-44 (OID 2.16.840.1.101.3.4.3.17)
 pub fn build_mldsa44_spki(pk: &[u8]) -> Vec<u8> {
-    let alg_id: &[u8] = &[0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x11];
+    let alg_id: &[u8] = &[
+        0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x11,
+    ];
     build_spki_from_parts(alg_id, pk)
 }
 
 /// Build SPKI for ML-DSA-65 (OID 2.16.840.1.101.3.4.3.18)
 pub fn build_mldsa65_spki(pk: &[u8]) -> Vec<u8> {
-    let alg_id: &[u8] = &[0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12];
+    let alg_id: &[u8] = &[
+        0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x12,
+    ];
     build_spki_from_parts(alg_id, pk)
 }
 
 /// Build SPKI for ML-DSA-87 (OID 2.16.840.1.101.3.4.3.19)
 pub fn build_mldsa87_spki(pk: &[u8]) -> Vec<u8> {
-    let alg_id: &[u8] = &[0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x13];
+    let alg_id: &[u8] = &[
+        0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x03, 0x13,
+    ];
     build_spki_from_parts(alg_id, pk)
 }
 
@@ -324,21 +354,23 @@ pub fn build_mldsa87_spki(pk: &[u8]) -> Vec<u8> {
 pub fn build_slhdsa_spki(ckp: u32, pk: &[u8]) -> Vec<u8> {
     // Mapping from CKP constant to OID arc-20 last byte
     let oid_last: u8 = match ckp {
-        1  => 0x01, // SHA2-128s
-        3  => 0x02, // SHA2-128f
-        5  => 0x03, // SHA2-192s
-        7  => 0x04, // SHA2-192f
-        9  => 0x05, // SHA2-256s
-        11 => 0x06, // SHA2-256f
-        2  => 0x07, // SHAKE-128s
-        4  => 0x08, // SHAKE-128f
-        6  => 0x09, // SHAKE-192s
-        8  => 0x0a, // SHAKE-192f
-        10 => 0x0b, // SHAKE-256s
-        12 => 0x0c, // SHAKE-256f
-        _  => return Vec::new(), // unknown parameter set
+        1 => 0x01,              // SHA2-128s
+        3 => 0x02,              // SHA2-128f
+        5 => 0x03,              // SHA2-192s
+        7 => 0x04,              // SHA2-192f
+        9 => 0x05,              // SHA2-256s
+        11 => 0x06,             // SHA2-256f
+        2 => 0x07,              // SHAKE-128s
+        4 => 0x08,              // SHAKE-128f
+        6 => 0x09,              // SHAKE-192s
+        8 => 0x0a,              // SHAKE-192f
+        10 => 0x0b,             // SHAKE-256s
+        12 => 0x0c,             // SHAKE-256f
+        _ => return Vec::new(), // unknown parameter set
     };
-    let alg_id = [0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x14, oid_last];
+    let alg_id = [
+        0x30, 0x0b, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x14, oid_last,
+    ];
     build_spki_from_parts(&alg_id, pk)
 }
 
@@ -433,47 +465,168 @@ pub fn sign_ml_dsa(mech: u32, ps: u32, sk_bytes: &[u8], msg: &[u8]) -> Result<Ve
     use fips204::traits::Signer;
     match ps {
         CKP_ML_DSA_44 => {
-            let sk_arr: &<fips204::ml_dsa_44::PrivateKey as fips204::traits::SerDes>::ByteArray = sk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
-            let sk = <fips204::ml_dsa_44::PrivateKey as fips204::traits::SerDes>::try_from_bytes(*sk_arr).map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let sk_arr: &<fips204::ml_dsa_44::PrivateKey as fips204::traits::SerDes>::ByteArray =
+                sk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let sk = <fips204::ml_dsa_44::PrivateKey as fips204::traits::SerDes>::try_from_bytes(
+                *sk_arr,
+            )
+            .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
             match get_ml_dsa_ph(mech) {
-                Some(ph) => sk.try_hash_sign(msg, b"", &ph).map_err(|_| CKR_FUNCTION_FAILED).map(|s| Into::<Vec<u8>>::into(s)),
-                None => sk.try_sign(msg, b"").map_err(|_| CKR_FUNCTION_FAILED).map(|s| Into::<Vec<u8>>::into(s)),
+                Some(ph) => sk
+                    .try_hash_sign(msg, b"", &ph)
+                    .map_err(|_| CKR_FUNCTION_FAILED)
+                    .map(|s| Into::<Vec<u8>>::into(s)),
+                None => sk
+                    .try_sign(msg, b"")
+                    .map_err(|_| CKR_FUNCTION_FAILED)
+                    .map(|s| Into::<Vec<u8>>::into(s)),
             }
         }
         CKP_ML_DSA_65 | 0 => {
-            let sk_arr: &<fips204::ml_dsa_65::PrivateKey as fips204::traits::SerDes>::ByteArray = sk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
-            let sk = <fips204::ml_dsa_65::PrivateKey as fips204::traits::SerDes>::try_from_bytes(*sk_arr).map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let sk_arr: &<fips204::ml_dsa_65::PrivateKey as fips204::traits::SerDes>::ByteArray =
+                sk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let sk = <fips204::ml_dsa_65::PrivateKey as fips204::traits::SerDes>::try_from_bytes(
+                *sk_arr,
+            )
+            .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
             match get_ml_dsa_ph(mech) {
-                Some(ph) => sk.try_hash_sign(msg, b"", &ph).map_err(|_| CKR_FUNCTION_FAILED).map(|s| Into::<Vec<u8>>::into(s)),
-                None => sk.try_sign(msg, b"").map_err(|_| CKR_FUNCTION_FAILED).map(|s| Into::<Vec<u8>>::into(s)),
+                Some(ph) => sk
+                    .try_hash_sign(msg, b"", &ph)
+                    .map_err(|_| CKR_FUNCTION_FAILED)
+                    .map(|s| Into::<Vec<u8>>::into(s)),
+                None => sk
+                    .try_sign(msg, b"")
+                    .map_err(|_| CKR_FUNCTION_FAILED)
+                    .map(|s| Into::<Vec<u8>>::into(s)),
             }
         }
         CKP_ML_DSA_87 => {
-            let sk_arr: &<fips204::ml_dsa_87::PrivateKey as fips204::traits::SerDes>::ByteArray = sk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
-            let sk = <fips204::ml_dsa_87::PrivateKey as fips204::traits::SerDes>::try_from_bytes(*sk_arr).map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let sk_arr: &<fips204::ml_dsa_87::PrivateKey as fips204::traits::SerDes>::ByteArray =
+                sk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let sk = <fips204::ml_dsa_87::PrivateKey as fips204::traits::SerDes>::try_from_bytes(
+                *sk_arr,
+            )
+            .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
             match get_ml_dsa_ph(mech) {
-                Some(ph) => sk.try_hash_sign(msg, b"", &ph).map_err(|_| CKR_FUNCTION_FAILED).map(|s| Into::<Vec<u8>>::into(s)),
-                None => sk.try_sign(msg, b"").map_err(|_| CKR_FUNCTION_FAILED).map(|s| Into::<Vec<u8>>::into(s)),
+                Some(ph) => sk
+                    .try_hash_sign(msg, b"", &ph)
+                    .map_err(|_| CKR_FUNCTION_FAILED)
+                    .map(|s| Into::<Vec<u8>>::into(s)),
+                None => sk
+                    .try_sign(msg, b"")
+                    .map_err(|_| CKR_FUNCTION_FAILED)
+                    .map(|s| Into::<Vec<u8>>::into(s)),
             }
         }
         _ => Err(CKR_KEY_TYPE_INCONSISTENT),
     }
 }
 
-pub fn sign_slh_dsa(mech: u32, ps: u32, sk_bytes: &[u8], msg: &[u8], ctx: &[u8], deterministic: bool) -> Result<Vec<u8>, u32> {
+pub fn sign_slh_dsa(
+    mech: u32,
+    ps: u32,
+    sk_bytes: &[u8],
+    msg: &[u8],
+    ctx: &[u8],
+    deterministic: bool,
+) -> Result<Vec<u8>, u32> {
     match ps {
-        CKP_SLH_DSA_SHA2_128S => slh_dsa_sign!(fips205::slh_dsa_sha2_128s::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
-        CKP_SLH_DSA_SHAKE_128S => slh_dsa_sign!(fips205::slh_dsa_shake_128s::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
-        CKP_SLH_DSA_SHA2_128F => slh_dsa_sign!(fips205::slh_dsa_sha2_128f::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
-        CKP_SLH_DSA_SHAKE_128F => slh_dsa_sign!(fips205::slh_dsa_shake_128f::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
-        CKP_SLH_DSA_SHA2_192S => slh_dsa_sign!(fips205::slh_dsa_sha2_192s::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
-        CKP_SLH_DSA_SHAKE_192S => slh_dsa_sign!(fips205::slh_dsa_shake_192s::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
-        CKP_SLH_DSA_SHA2_192F => slh_dsa_sign!(fips205::slh_dsa_sha2_192f::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
-        CKP_SLH_DSA_SHAKE_192F => slh_dsa_sign!(fips205::slh_dsa_shake_192f::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
-        CKP_SLH_DSA_SHA2_256S => slh_dsa_sign!(fips205::slh_dsa_sha2_256s::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
-        CKP_SLH_DSA_SHAKE_256S => slh_dsa_sign!(fips205::slh_dsa_shake_256s::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
-        CKP_SLH_DSA_SHA2_256F => slh_dsa_sign!(fips205::slh_dsa_sha2_256f::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
-        CKP_SLH_DSA_SHAKE_256F => slh_dsa_sign!(fips205::slh_dsa_shake_256f::PrivateKey, mech, sk_bytes, msg, ctx, deterministic),
+        CKP_SLH_DSA_SHA2_128S => slh_dsa_sign!(
+            fips205::slh_dsa_sha2_128s::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
+        CKP_SLH_DSA_SHAKE_128S => slh_dsa_sign!(
+            fips205::slh_dsa_shake_128s::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
+        CKP_SLH_DSA_SHA2_128F => slh_dsa_sign!(
+            fips205::slh_dsa_sha2_128f::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
+        CKP_SLH_DSA_SHAKE_128F => slh_dsa_sign!(
+            fips205::slh_dsa_shake_128f::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
+        CKP_SLH_DSA_SHA2_192S => slh_dsa_sign!(
+            fips205::slh_dsa_sha2_192s::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
+        CKP_SLH_DSA_SHAKE_192S => slh_dsa_sign!(
+            fips205::slh_dsa_shake_192s::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
+        CKP_SLH_DSA_SHA2_192F => slh_dsa_sign!(
+            fips205::slh_dsa_sha2_192f::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
+        CKP_SLH_DSA_SHAKE_192F => slh_dsa_sign!(
+            fips205::slh_dsa_shake_192f::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
+        CKP_SLH_DSA_SHA2_256S => slh_dsa_sign!(
+            fips205::slh_dsa_sha2_256s::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
+        CKP_SLH_DSA_SHAKE_256S => slh_dsa_sign!(
+            fips205::slh_dsa_shake_256s::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
+        CKP_SLH_DSA_SHA2_256F => slh_dsa_sign!(
+            fips205::slh_dsa_sha2_256f::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
+        CKP_SLH_DSA_SHAKE_256F => slh_dsa_sign!(
+            fips205::slh_dsa_shake_256f::PrivateKey,
+            mech,
+            sk_bytes,
+            msg,
+            ctx,
+            deterministic
+        ),
         _ => Err(CKR_KEY_TYPE_INCONSISTENT),
     }
 }
@@ -732,8 +885,8 @@ pub fn get_sig_len(mech: u32, hkey: u32) -> u32 {
         },
         // XMSS — sig = idx(4) + random(n) + WOTS+_sig(len*n) + auth_path(h*n); n=32, len=67 (w=16)
         CKM_XMSS => {
-            let xmss_param = get_object_attr_u32(hkey, CKA_XMSS_PARAM_SET)
-                .unwrap_or(CKP_XMSS_SHA2_10_256);
+            let xmss_param =
+                get_object_attr_u32(hkey, CKA_XMSS_PARAM_SET).unwrap_or(CKP_XMSS_SHA2_10_256);
             let h: u32 = match xmss_param {
                 CKP_XMSS_SHA2_16_256 | CKP_XMSS_SHAKE_16_256 => 16,
                 CKP_XMSS_SHA2_20_256 | CKP_XMSS_SHAKE_20_256 => 20,
@@ -746,10 +899,10 @@ pub fn get_sig_len(mech: u32, hkey: u32) -> u32 {
         // For n=32: LMOTS(W1)=4+32+265*32=8724, LMOTS(W4)=4+32+67*32=2180, LMOTS(W8)=4+32+34*32=1124
         // LMS(H5/W4)=2348, LMS(H25/W4)=8188; HSS(L=8,H5/W4) ≈ 8*(2348+52)+4 = 19204
         CKM_HSS => {
-            let lms_param = get_object_attr_u32(hkey, CKA_LMS_PARAM_SET)
-                .unwrap_or(CKP_LMS_SHA256_M32_H5);
-            let lmots_param = get_object_attr_u32(hkey, CKA_LMOTS_PARAM_SET)
-                .unwrap_or(CKP_LMOTS_SHA256_N32_W4);
+            let lms_param =
+                get_object_attr_u32(hkey, CKA_LMS_PARAM_SET).unwrap_or(CKP_LMS_SHA256_M32_H5);
+            let lmots_param =
+                get_object_attr_u32(hkey, CKA_LMOTS_PARAM_SET).unwrap_or(CKP_LMOTS_SHA256_N32_W4);
             let levels = get_object_attr_u32(hkey, CKA_HSS_LMS_TYPE).unwrap_or(1);
             hss_sig_len(levels, lms_param, lmots_param)
         }
@@ -798,8 +951,8 @@ pub fn lms_single_sig_len(lms_param: u32, lmots_param: u32) -> u32 {
         0x09 | 0x0E | 0x13 | 0x18 => 25,
         _ => 5,
     };
-    let lmots_sig_len = 4 + n + p * n;               // typecode + C + y[]
-    4 + lmots_sig_len + 4 + h * n                    // q + ots_sig + typecode + path[]
+    let lmots_sig_len = 4 + n + p * n; // typecode + C + y[]
+    4 + lmots_sig_len + 4 + h * n // q + ots_sig + typecode + path[]
 }
 
 /// Compute the byte length of an HSS signature (RFC 8554 §6.3).
@@ -814,54 +967,199 @@ pub fn hss_sig_len(levels: u32, lms_param: u32, lmots_param: u32) -> u32 {
 
 // ── Verify Helpers ──────────────────────────────────────────────────────────
 
-pub fn verify_ml_dsa(mech: u32, ps: u32, pk_bytes: &[u8], msg: &[u8], sig_bytes: &[u8]) -> Result<(), u32> {
+pub fn verify_ml_dsa(
+    mech: u32,
+    ps: u32,
+    pk_bytes: &[u8],
+    msg: &[u8],
+    sig_bytes: &[u8],
+) -> Result<(), u32> {
     use fips204::traits::Verifier;
     match ps {
         CKP_ML_DSA_44 => {
-            let pk_arr: &<fips204::ml_dsa_44::PublicKey as fips204::traits::SerDes>::ByteArray = pk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
-            let pk = <fips204::ml_dsa_44::PublicKey as fips204::traits::SerDes>::try_from_bytes(*pk_arr).map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
-            let sig: <fips204::ml_dsa_44::PublicKey as fips204::traits::Verifier>::Signature = sig_bytes.try_into().map_err(|_| CKR_SIGNATURE_INVALID)?;
+            let pk_arr: &<fips204::ml_dsa_44::PublicKey as fips204::traits::SerDes>::ByteArray =
+                pk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let pk =
+                <fips204::ml_dsa_44::PublicKey as fips204::traits::SerDes>::try_from_bytes(*pk_arr)
+                    .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let sig: <fips204::ml_dsa_44::PublicKey as fips204::traits::Verifier>::Signature =
+                sig_bytes.try_into().map_err(|_| CKR_SIGNATURE_INVALID)?;
             match get_ml_dsa_ph(mech) {
-                Some(ph) => if pk.hash_verify(msg, &sig, b"", &ph) { Ok(()) } else { Err(CKR_SIGNATURE_INVALID) },
-                None => if pk.verify(msg, &sig, b"") { Ok(()) } else { Err(CKR_SIGNATURE_INVALID) },
+                Some(ph) => {
+                    if pk.hash_verify(msg, &sig, b"", &ph) {
+                        Ok(())
+                    } else {
+                        Err(CKR_SIGNATURE_INVALID)
+                    }
+                }
+                None => {
+                    if pk.verify(msg, &sig, b"") {
+                        Ok(())
+                    } else {
+                        Err(CKR_SIGNATURE_INVALID)
+                    }
+                }
             }
         }
         CKP_ML_DSA_65 | 0 => {
-            let pk_arr: &<fips204::ml_dsa_65::PublicKey as fips204::traits::SerDes>::ByteArray = pk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
-            let pk = <fips204::ml_dsa_65::PublicKey as fips204::traits::SerDes>::try_from_bytes(*pk_arr).map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
-            let sig: <fips204::ml_dsa_65::PublicKey as fips204::traits::Verifier>::Signature = sig_bytes.try_into().map_err(|_| CKR_SIGNATURE_INVALID)?;
+            let pk_arr: &<fips204::ml_dsa_65::PublicKey as fips204::traits::SerDes>::ByteArray =
+                pk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let pk =
+                <fips204::ml_dsa_65::PublicKey as fips204::traits::SerDes>::try_from_bytes(*pk_arr)
+                    .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let sig: <fips204::ml_dsa_65::PublicKey as fips204::traits::Verifier>::Signature =
+                sig_bytes.try_into().map_err(|_| CKR_SIGNATURE_INVALID)?;
             match get_ml_dsa_ph(mech) {
-                Some(ph) => if pk.hash_verify(msg, &sig, b"", &ph) { Ok(()) } else { Err(CKR_SIGNATURE_INVALID) },
-                None => if pk.verify(msg, &sig, b"") { Ok(()) } else { Err(CKR_SIGNATURE_INVALID) },
+                Some(ph) => {
+                    if pk.hash_verify(msg, &sig, b"", &ph) {
+                        Ok(())
+                    } else {
+                        Err(CKR_SIGNATURE_INVALID)
+                    }
+                }
+                None => {
+                    if pk.verify(msg, &sig, b"") {
+                        Ok(())
+                    } else {
+                        Err(CKR_SIGNATURE_INVALID)
+                    }
+                }
             }
         }
         CKP_ML_DSA_87 => {
-            let pk_arr: &<fips204::ml_dsa_87::PublicKey as fips204::traits::SerDes>::ByteArray = pk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
-            let pk = <fips204::ml_dsa_87::PublicKey as fips204::traits::SerDes>::try_from_bytes(*pk_arr).map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
-            let sig: <fips204::ml_dsa_87::PublicKey as fips204::traits::Verifier>::Signature = sig_bytes.try_into().map_err(|_| CKR_SIGNATURE_INVALID)?;
+            let pk_arr: &<fips204::ml_dsa_87::PublicKey as fips204::traits::SerDes>::ByteArray =
+                pk_bytes.try_into().map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let pk =
+                <fips204::ml_dsa_87::PublicKey as fips204::traits::SerDes>::try_from_bytes(*pk_arr)
+                    .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
+            let sig: <fips204::ml_dsa_87::PublicKey as fips204::traits::Verifier>::Signature =
+                sig_bytes.try_into().map_err(|_| CKR_SIGNATURE_INVALID)?;
             match get_ml_dsa_ph(mech) {
-                Some(ph) => if pk.hash_verify(msg, &sig, b"", &ph) { Ok(()) } else { Err(CKR_SIGNATURE_INVALID) },
-                None => if pk.verify(msg, &sig, b"") { Ok(()) } else { Err(CKR_SIGNATURE_INVALID) },
+                Some(ph) => {
+                    if pk.hash_verify(msg, &sig, b"", &ph) {
+                        Ok(())
+                    } else {
+                        Err(CKR_SIGNATURE_INVALID)
+                    }
+                }
+                None => {
+                    if pk.verify(msg, &sig, b"") {
+                        Ok(())
+                    } else {
+                        Err(CKR_SIGNATURE_INVALID)
+                    }
+                }
             }
         }
         _ => Err(CKR_KEY_TYPE_INCONSISTENT),
     }
 }
 
-pub fn verify_slh_dsa(mech: u32, ps: u32, pk_bytes: &[u8], msg: &[u8], sig_bytes: &[u8], ctx: &[u8]) -> Result<(), u32> {
+pub fn verify_slh_dsa(
+    mech: u32,
+    ps: u32,
+    pk_bytes: &[u8],
+    msg: &[u8],
+    sig_bytes: &[u8],
+    ctx: &[u8],
+) -> Result<(), u32> {
     match ps {
-        CKP_SLH_DSA_SHA2_128S => slh_dsa_verify!(fips205::slh_dsa_sha2_128s::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
-        CKP_SLH_DSA_SHAKE_128S => slh_dsa_verify!(fips205::slh_dsa_shake_128s::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
-        CKP_SLH_DSA_SHA2_128F => slh_dsa_verify!(fips205::slh_dsa_sha2_128f::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
-        CKP_SLH_DSA_SHAKE_128F => slh_dsa_verify!(fips205::slh_dsa_shake_128f::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
-        CKP_SLH_DSA_SHA2_192S => slh_dsa_verify!(fips205::slh_dsa_sha2_192s::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
-        CKP_SLH_DSA_SHAKE_192S => slh_dsa_verify!(fips205::slh_dsa_shake_192s::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
-        CKP_SLH_DSA_SHA2_192F => slh_dsa_verify!(fips205::slh_dsa_sha2_192f::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
-        CKP_SLH_DSA_SHAKE_192F => slh_dsa_verify!(fips205::slh_dsa_shake_192f::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
-        CKP_SLH_DSA_SHA2_256S => slh_dsa_verify!(fips205::slh_dsa_sha2_256s::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
-        CKP_SLH_DSA_SHAKE_256S => slh_dsa_verify!(fips205::slh_dsa_shake_256s::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
-        CKP_SLH_DSA_SHA2_256F => slh_dsa_verify!(fips205::slh_dsa_sha2_256f::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
-        CKP_SLH_DSA_SHAKE_256F => slh_dsa_verify!(fips205::slh_dsa_shake_256f::PublicKey, mech, pk_bytes, msg, sig_bytes, ctx),
+        CKP_SLH_DSA_SHA2_128S => slh_dsa_verify!(
+            fips205::slh_dsa_sha2_128s::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
+        CKP_SLH_DSA_SHAKE_128S => slh_dsa_verify!(
+            fips205::slh_dsa_shake_128s::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
+        CKP_SLH_DSA_SHA2_128F => slh_dsa_verify!(
+            fips205::slh_dsa_sha2_128f::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
+        CKP_SLH_DSA_SHAKE_128F => slh_dsa_verify!(
+            fips205::slh_dsa_shake_128f::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
+        CKP_SLH_DSA_SHA2_192S => slh_dsa_verify!(
+            fips205::slh_dsa_sha2_192s::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
+        CKP_SLH_DSA_SHAKE_192S => slh_dsa_verify!(
+            fips205::slh_dsa_shake_192s::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
+        CKP_SLH_DSA_SHA2_192F => slh_dsa_verify!(
+            fips205::slh_dsa_sha2_192f::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
+        CKP_SLH_DSA_SHAKE_192F => slh_dsa_verify!(
+            fips205::slh_dsa_shake_192f::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
+        CKP_SLH_DSA_SHA2_256S => slh_dsa_verify!(
+            fips205::slh_dsa_sha2_256s::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
+        CKP_SLH_DSA_SHAKE_256S => slh_dsa_verify!(
+            fips205::slh_dsa_shake_256s::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
+        CKP_SLH_DSA_SHA2_256F => slh_dsa_verify!(
+            fips205::slh_dsa_sha2_256f::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
+        CKP_SLH_DSA_SHAKE_256F => slh_dsa_verify!(
+            fips205::slh_dsa_shake_256f::PublicKey,
+            mech,
+            pk_bytes,
+            msg,
+            sig_bytes,
+            ctx
+        ),
         _ => Err(CKR_KEY_TYPE_INCONSISTENT),
     }
 }
@@ -945,7 +1243,8 @@ pub fn verify_ecdsa(
                 p256::ecdsa::Signature::try_from(sig_bytes).map_err(|_| CKR_SIGNATURE_INVALID)?;
             let hash_full = sha2::Sha512::digest(msg);
             let hash = &hash_full[..32]; // truncate to P-256 field size (FIPS 186-5 §6.4)
-            vk.verify_prehash(hash, &sig).map_err(|_| CKR_SIGNATURE_INVALID)
+            vk.verify_prehash(hash, &sig)
+                .map_err(|_| CKR_SIGNATURE_INVALID)
         }
         // SHA-512 prehash on P-384
         // FIPS 186-5 §6.4: truncate 64-byte hash to leftmost 48 bytes (P-384 field size)
@@ -958,7 +1257,8 @@ pub fn verify_ecdsa(
                 p384::ecdsa::Signature::try_from(sig_bytes).map_err(|_| CKR_SIGNATURE_INVALID)?;
             let hash_full = sha2::Sha512::digest(msg);
             let hash = &hash_full[..48]; // truncate to P-384 field size (FIPS 186-5 §6.4)
-            vk.verify_prehash(hash, &sig).map_err(|_| CKR_SIGNATURE_INVALID)
+            vk.verify_prehash(hash, &sig)
+                .map_err(|_| CKR_SIGNATURE_INVALID)
         }
         (CKM_ECDSA_SHA256, CURVE_K256) => {
             use k256::ecdsa::signature::Verifier;
@@ -1010,7 +1310,8 @@ pub fn verify_ecdsa(
                 .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
             let sig =
                 p256::ecdsa::Signature::try_from(sig_bytes).map_err(|_| CKR_SIGNATURE_INVALID)?;
-            vk.verify_prehash(msg, &sig).map_err(|_| CKR_SIGNATURE_INVALID)
+            vk.verify_prehash(msg, &sig)
+                .map_err(|_| CKR_SIGNATURE_INVALID)
         }
         (CKM_ECDSA, CURVE_P384) => {
             use p384::ecdsa::signature::hazmat::PrehashVerifier;
@@ -1018,7 +1319,8 @@ pub fn verify_ecdsa(
                 .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
             let sig =
                 p384::ecdsa::Signature::try_from(sig_bytes).map_err(|_| CKR_SIGNATURE_INVALID)?;
-            vk.verify_prehash(msg, &sig).map_err(|_| CKR_SIGNATURE_INVALID)
+            vk.verify_prehash(msg, &sig)
+                .map_err(|_| CKR_SIGNATURE_INVALID)
         }
         (CKM_ECDSA, CURVE_K256) => {
             use k256::ecdsa::signature::hazmat::PrehashVerifier;
@@ -1026,7 +1328,8 @@ pub fn verify_ecdsa(
                 .map_err(|_| CKR_KEY_TYPE_INCONSISTENT)?;
             let sig =
                 k256::ecdsa::Signature::try_from(sig_bytes).map_err(|_| CKR_SIGNATURE_INVALID)?;
-            vk.verify_prehash(msg, &sig).map_err(|_| CKR_SIGNATURE_INVALID)
+            vk.verify_prehash(msg, &sig)
+                .map_err(|_| CKR_SIGNATURE_INVALID)
         }
         _ => Err(CKR_MECHANISM_INVALID),
     }
