@@ -1501,6 +1501,11 @@ void SymmetricAlgorithmTests::testChaCha20EncryptDecrypt()
 	CK_SESSION_HANDLE hSession;
 	CK_OBJECT_HANDLE hKey;
 
+	// Finalize any previous tests and reset Cryptoki login state
+	CRYPTOKI_F_PTR( C_Finalize(NULL_PTR) );
+	rv = CRYPTOKI_F_PTR( C_Initialize(NULL_PTR) );
+	CPPUNIT_ASSERT(rv == CKR_OK);
+
 	rv = CRYPTOKI_F_PTR( C_OpenSession(m_initializedTokenSlotID, CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL_PTR, NULL_PTR, &hSession) );
 	CPPUNIT_ASSERT(rv == CKR_OK);
 

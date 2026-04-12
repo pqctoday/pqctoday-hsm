@@ -14,6 +14,10 @@ option(ENABLE_STRICT "Enable strict compile mode" ON)
 option(ENABLE_STATIC "Build static libraries" ON)
 option(WITH_OBJECTSTORE_BACKEND_DB "Build with object store backend database (SQLite3)" OFF)
 
+if(EMSCRIPTEN AND WITH_OBJECTSTORE_BACKEND_DB)
+    set(WITH_OBJECTSTORE_BACKEND_DB OFF CACHE BOOL "Force disabled for WebAssembly backend" FORCE)
+endif()
+
 # ECC and EdDSA are always enabled — required for PQC roadmap.
 # CompilerOptions.cmake tests ENABLE_ECC / ENABLE_EDDSA; WITH_ECC / WITH_EDDSA
 # are set by CompilerOptions after the feature tests pass.

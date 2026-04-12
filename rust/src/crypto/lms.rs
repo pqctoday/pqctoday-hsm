@@ -218,6 +218,16 @@ pub fn hss_sign(
 
 // ── HSS multi-level verify ──────────────────────────────────────────────────
 
-pub fn hss_verify(pub_key_bytes: &[u8], message: &[u8], signature: &[u8]) -> bool {
-    lms::verify::<Sha256_256>(message, signature, pub_key_bytes).is_ok()
+/// Verify an HSS/LMS signature.  `lms_param` is the CKP_LMS_* value stored in
+/// CKA_LMS_PARAM_SET of the key object; it selects the correct hash type.
+/// Note: hbs-lms 0.1.1 uses RFC 8554 internal type codes for all hash variants,
+/// so SP 800-208 SHAKE-256 type IDs (0x0F-0x18) require Shake256_* dispatch.
+pub fn hss_verify(pub_key_bytes: &[u8], message: &[u8], signature: &[u8], lms_param: u32) -> bool {
+    match lms_param {
+        0x05..=0x09 => lms::verify::<Sha256_256>(message, signature, pub_key_bytes).is_ok(),
+        0x0A..=0x0E => lms::verify::<Sha256_192>(message, signature, pub_key_bytes).is_ok(),
+        0x0F..=0x13 => lms::verify::<Shake256_256>(message, signature, pub_key_bytes).is_ok(),
+        0x14..=0x18 => lms::verify::<Shake256_192>(message, signature, pub_key_bytes).is_ok(),
+        _ => lms::verify::<Sha256_256>(message, signature, pub_key_bytes).is_ok(),
+    }
 }

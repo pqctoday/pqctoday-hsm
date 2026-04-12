@@ -82,6 +82,13 @@ CK_RV SoftHSM::C_Initialize(CK_VOID_PTR pInitArgs)
 		// Must be set to NULL_PTR in this version of PKCS#11, OR used for ACVP bypass!
 		if (args->pReserved != NULL_PTR)
 		{
+			// Compliance tests often pass (void*)1 to verify CKR_ARGUMENTS_BAD
+			if ((uintptr_t)args->pReserved < 4096)
+			{
+				ERROR_MSG("pReserved must be set to NULL_PTR or valid ACVP args");
+				return CKR_ARGUMENTS_BAD;
+			}
+
 			CK_ULONG* acvpArgs = (CK_ULONG*)args->pReserved;
 			if (acvpArgs[0] != 0 && acvpArgs[1] == 32)
 			{

@@ -439,6 +439,8 @@ static AttributeKind attributeKind(CK_ATTRIBUTE_TYPE type)
 	case CKA_VERIFY: return akBoolean;
 	case CKA_VERIFY_RECOVER: return akBoolean;
 	case CKA_DERIVE: return akBoolean;
+	case CKA_ENCAPSULATE: return akBoolean;
+	case CKA_DECAPSULATE: return akBoolean;
 	case CKA_START_DATE: return akBinary;
 	case CKA_END_DATE: return akBinary;
 	case CKA_MODULUS: return akBinary;
@@ -470,6 +472,13 @@ static AttributeKind attributeKind(CK_ATTRIBUTE_TYPE type)
 	case CKA_AUTH_PIN_FLAGS: return akInteger;
 	case CKA_ALWAYS_AUTHENTICATE: return akBoolean;
 	case CKA_WRAP_WITH_TRUSTED: return akBoolean;
+	case CKA_PARAMETER_SET: return akInteger;
+	case CKA_HSS_LEVELS: return akInteger;
+	case CKA_HSS_LMS_TYPE: return akInteger;
+	case CKA_HSS_LMOTS_TYPE: return akInteger;
+	case CKA_HSS_LMS_TYPES: return akBinary;
+	case CKA_HSS_LMOTS_TYPES: return akBinary;
+	case CKA_HSS_KEYS_REMAINING: return akInteger;
 /*
 	case CKA_OTP_FORMAT:
 	case CKA_OTP_LENGTH:
