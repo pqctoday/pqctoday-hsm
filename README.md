@@ -596,6 +596,8 @@ SoftHSMv3 introduces a **Dual-Mode Storage Architecture** to support both epheme
   - [x] Rust: `C_DestroyObject` state cleanup; `C_DeriveKey` `CKA_DERIVE` check
   - [x] Rust: output keys from KEM/derive carry proper attributes (`CKA_EXTRACTABLE`, `CKA_CLASS`, etc.)
   - [x] Rust: 10 admin function stubs + 8 multi-part stubs (63 total exports)
+  - [x] Rust: `CKA_EC_PARAMS` + `CKA_EC_POINT` stored on generated X25519/X448 keys (PKCS#11 v3.2 §6.7 — OID DER + `04 <len> <raw pubkey>`)
+  - [x] Rust: stale SP 800-108 early-dispatch path removed from `C_DeriveKey` — `CKM_SP800_108_COUNTER_KDF` / `CKM_SP800_108_FEEDBACK_KDF` now always reach the correct handler
 - [x] Phase 11: Security hardening (v0.4.0) — full remediation of March 2026 audit
   - [x] RSA X.509 integer underflow guard (sign + verify paths)
   - [x] AES-CBC IV length enforcement (exactly 16 bytes)

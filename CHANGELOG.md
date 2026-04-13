@@ -8,6 +8,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Rust: `CKA_EC_PARAMS` and `CKA_EC_POINT` now stored on generated X25519/X448 keys** — PKCS#11
+  v3.2 §6.7 requires both attributes on `CKK_EC_MONTGOMERY` keys. Previously only attributes
+  explicitly present in the caller's keygen template were stored (via `absorb_template_attrs`);
+  callers that omit these in the template received `CKR_ATTRIBUTE_TYPE_INVALID` from any
+  subsequent `C_GetAttributeValue` call. Now hardcoded after generation:
+  - **X448**: `CKA_EC_PARAMS` = `06 03 2b 65 6f` (id-X448, OID 1.3.101.111);
+    `CKA_EC_POINT` = `04 38 <56-byte raw public key>`
+  - **X25519**: `CKA_EC_PARAMS` = `06 03 2b 65 6e` (id-X25519, OID 1.3.101.110);
+    `CKA_EC_POINT` = `04 20 <32-byte raw public key>`
+
+- **Rust: stale SP 800-108 early-dispatch path removed** — `C_DeriveKey` contained a
+  dead early-return block that parsed `CK_SP800_108_KDF_PARAMS` with an incorrect field layout
+  (treating `ulNumberOfDataParams` as `pContext`, `pDataParams` as `ulContextLen`, etc.) and only
+  matched `CKM_SHA256_HMAC` as PRF, causing `CKR_MECHANISM_INVALID` whenever callers passed
+  `CKM_SHA256` as the PRF mechanism. The correct implementation — proper `pDataParams` iteration,
+  `CKM_SHA256` default PRF, `CK_SP800_108_ITERATION_VARIABLE` counter support — already existed
+  in the main `match` block at `CKM_SP800_108_COUNTER_KDF` / `CKM_SP800_108_FEEDBACK_KDF`. The
+  stale path has been removed; execution now always reaches the correct handlers. WASM binary
+  updated accordingly (`rust/pkg_bundler/softhsmrustv3_bg.wasm`).
+
 ---
 
 ## [0.4.21] — 2026-04-12
