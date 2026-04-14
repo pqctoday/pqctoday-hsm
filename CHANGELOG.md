@@ -10,7 +10,104 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.24] — 2026-04-14
+
+### Added
+
+- **`CKA_UNIQUE_ID` (PKCS#11 v3.0 §4.4) — C++ engine**: Auto-generated UUID v4 string
+  attribute, read-only after creation. Assigned to every object via `P11Object::init()`.
+  Uses OpenSSL `RAND_bytes()` for 16 random bytes with RFC 4122 version/variant bits.
+  Corrected type value from `0x00000004` to `0x00000017` per PKCS#11 v3.0 spec.
+
+- **`CKA_PROFILE_ID` (PKCS#11 v3.0 §4.5) — C++ engine**: Token profile identifier
+  attribute, defaults to 0 (no profile). Corrected type value from `0x00000601` to
+  `0x00000104` per PKCS#11 v3.0 spec.
+
+- **`C_SignRecover` / `C_VerifyRecover` — C++ engine** (`src/lib/SoftHSM_sign.cpp`):
+  Full RSA implementation for `CKM_RSA_PKCS` and `CKM_RSA_X_509` mechanisms. Previously
+  returned `CKR_FUNCTION_NOT_SUPPORTED`. New session operation types `SESSION_OP_SIGN_RECOVER`
+  (0x1A) and `SESSION_OP_VERIFY_RECOVER` (0x1B) added.
+
+- **`AsymmetricAlgorithm::verifyRecover()` — C++ engine** (`src/lib/crypto/OSSLRSA.cpp`):
+  RSA verify-recover via `EVP_PKEY_verify_recover()` for both `RSA_PKCS1_PADDING` and
+  `RSA_NO_PADDING` modes. Virtual base method added to `AsymmetricAlgorithm.h` with
+  default `false` return.
+
+- **`CKM_RIPEMD160` / `CKM_RIPEMD160_HMAC` mechanism registration — C++ engine**
+  (`src/lib/SoftHSM_slots.cpp`): Both mechanisms registered in `prepareSupportedMechanisms()`
+  and `C_GetMechanismInfo()`. RIPEMD160 HMAC reports min=20, max=MAX_HMAC_KEY_BYTES with
+  `CKF_SIGN | CKF_VERIFY`. Digest returns `CKR_MECHANISM_INVALID` (legacy provider disabled).
+
+- **SLH-DSA raw private key import — C++ engine** (`src/lib/crypto/OSSLSLHDSAPrivateKey.cpp`):
+  FIPS 205 raw private keys (64/96/128 bytes = 4×n) are now imported via
+  `EVP_PKEY_fromdata()` with `OSSL_PKEY_PARAM_PRIV_KEY` + `OSSL_PKEY_PARAM_PUB_KEY`
+  before falling back to PKCS#8 DER parsing. All 12 SLH-DSA parameter sets supported.
+
+- **Compliance test expansion** (`p11_v32_compliance_test.cpp`): Suite now covers
+  126 PASS / 1 FAIL (RIPEMD160 — expected). New test categories: ECDH (X25519), ECDSA
+  (P-256/P-521/secp256k1), EdDSA (Ed25519/Ed448), SHA-3, AES-CTR, SP800-108 Feedback KDF,
+  HKDF, PQC context signing, HSS key exhaustion state decay, and expanded negative paths
+  (boolean policy, extraction constraint, template completeness, signature forgery).
+
+### Fixed
+
+- **`CKA_PUBLIC_KEY_INFO` persistence — C++ engine** (`src/lib/object_store/DBObject.cpp`):
+  `DBObject::attributeKind()` returned `akUnknown` for `CKA_PUBLIC_KEY_INFO`, causing the
+  database layer to silently abort every token-object transaction that included the attribute.
+  This cascaded into `CKR_FUNCTION_FAILED` (RV=112) for all PQC `C_GenerateKeyPair` calls
+  with `CKA_TOKEN=true`, and caused `CKA_PUBLIC_KEY_INFO` to be missing from all private key
+  objects across ML-DSA (44/65/87), ML-KEM (512/768/1024), and SLH-DSA variants.
+  Fixed by adding `case CKA_PUBLIC_KEY_INFO: return akBinary;` to the switch.
+  Resolved 12 compliance failures simultaneously.
+
+- **`CKM_RIPEMD160` build guard — C++ engine** (`src/lib/SoftHSM_digest.cpp`):
+  The `CKM_RIPEMD160` case in `C_DigestInit` referenced `HashAlgo::RIPEMD160`, which does
+  not exist in the `HashAlgo` enum (the OpenSSL legacy provider is disabled in this build).
+  The case now falls through to the `default` branch, returning `CKR_MECHANISM_INVALID`.
+  This mirrors the `#ifndef WITH_FIPS` guard used for `CKM_MD5`.
+
+- **`C_SignRecoverInit` / `C_VerifyRecoverInit` key loading — C++ engine** (`src/lib/SoftHSM_sign.cpp`):
+  The RSA recovery init functions were using `new RSAPrivateKey()` / `new RSAPublicKey()`
+  (abstract — `PKCS8Encode`/`PKCS8Decode` are pure virtual), the undeclared free functions
+  `getPrivateKey()` / `getPublicKey()`, and the non-existent `AsymmetricAlgorithm::recycleKey()`.
+  Corrected to use the same factory idiom as `AsymSignInit`: `asymCrypto->newPrivateKey()`,
+  `getRSAPrivateKey()`, `asymCrypto->recyclePrivateKey()` (and public-key equivalents).
+
+- **Ed25519ph (`CKM_EDDSA_PH`) OpenSSL 3.x API — C++ engine** (`src/lib/crypto/OSSLEDDSA.cpp`):
+  Sign and verify init functions were passing `"Ed25519ph"` as digest name to
+  `EVP_DigestSignInit_ex` / `EVP_DigestVerifyInit_ex`. Corrected to use
+  `OSSL_PARAM_construct_utf8_string(OSSL_SIGNATURE_PARAM_INSTANCE, "Ed25519ph", 0)` with
+  NULL digest, which is the correct OpenSSL 3.x provider API for EdDSA instance selection.
+
+- **`C_GetSessionValidationFlags` — C++ engine** (`src/lib/main.cpp`):
+  Now validates `pFlags` argument and returns `CKR_OK` with `*pFlags = 0` per §5.22
+  (software token has no validation constraints). Was returning `CKR_FUNCTION_NOT_SUPPORTED`.
+
+- **Async API argument validation — C++ engine** (`src/lib/main.cpp`):
+  `C_AsyncComplete`, `C_AsyncGetID`, and `C_AsyncJoin` now validate NULL pointer arguments
+  before returning `CKR_FUNCTION_NOT_SUPPORTED`.
+
+- **`CKM_EDDSA_PH` constant value** (`constants.js`):
+  Changed from `0xffff1057` to `0x80001057` (correct vendor-defined range).
+
+### Changed
+
+- **OpenSSL WASM build** (`scripts/build-openssl-wasm.sh`): Updated from OpenSSL 3.6.1 to
+  3.6.2 with updated SHA-256 checksum.
+
+- **Gap analysis** (`docs/gap-analysis-pkcs11-v3.2.md`): Updated to v16 — documents all
+  fixes in this release; compliance suite at 120 PASS / 0 FAIL (algorithmic validator).
+
 ## [0.4.23] — 2026-04-14
+
+### Added
+
+- **PKCS#11 v3.2 Negative Path Mapping (C++ Compliance Tool)**: Extended the `p11_v32_compliance_test` utility with exhaustive structural negative boundaries. The test suite now explicitly forces and intercepts:
+  - Boolean Policy Violations (`CKR_KEY_FUNCTION_NOT_PERMITTED` via disabled `CKA_SIGN`)
+  - Template Incompleteness (`CKR_TEMPLATE_INCOMPLETE` via masked `CKA_CLASS`)
+  - Object Extraction Shields (`CKR_ATTRIBUTE_SENSITIVE` on explicit `CKA_PRIVATE_EXPONENT` polls)
+  - Signature Malleability (`CKR_SIGNATURE_LEN_RANGE` and `CKR_SIGNATURE_INVALID` through block truncation and bit-flipping)
+  This ensures the core PKCS#11 v3.0+ context parser enforces boundary constraints accurately.
 
 ### Fixed
 

@@ -37,6 +37,7 @@
 #include "AESKey.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <openssl/rand.h>
 
 // Constructor
 P11Attribute::P11Attribute(OSObject* inobject)
@@ -790,6 +791,48 @@ CK_RV P11AttrDestroyable::updateAttr(Token* /*token*/, bool /*isPrivate*/, CK_VO
 	}
 
 	return CKR_OK;
+}
+
+/*****************************************
+ * CKA_UNIQUE_ID (PKCS#11 v3.0 §4.4)
+ *****************************************/
+
+// Set default value — generate a UUID v4 string
+bool P11AttrUniqueId::setDefault()
+{
+	// Generate 16 random bytes for UUID v4
+	unsigned char uuid_bytes[16];
+	if (RAND_bytes(uuid_bytes, sizeof(uuid_bytes)) != 1)
+		return false;
+
+	// Set version (4) and variant (RFC 4122) bits
+	uuid_bytes[6] = (uuid_bytes[6] & 0x0F) | 0x40;  // version 4
+	uuid_bytes[8] = (uuid_bytes[8] & 0x3F) | 0x80;  // variant 1
+
+	// Format as standard UUID string: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	char uuid_str[37];
+	snprintf(uuid_str, sizeof(uuid_str),
+		"%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+		uuid_bytes[0], uuid_bytes[1], uuid_bytes[2], uuid_bytes[3],
+		uuid_bytes[4], uuid_bytes[5],
+		uuid_bytes[6], uuid_bytes[7],
+		uuid_bytes[8], uuid_bytes[9],
+		uuid_bytes[10], uuid_bytes[11], uuid_bytes[12], uuid_bytes[13],
+		uuid_bytes[14], uuid_bytes[15]);
+
+	OSAttribute attr(ByteString((unsigned char*)uuid_str, 36));
+	return osobject->setAttribute(type, attr);
+}
+
+/*****************************************
+ * CKA_PROFILE_ID (PKCS#11 v3.0 §4.5)
+ *****************************************/
+
+// Set default value — no profile (0)
+bool P11AttrProfileId::setDefault()
+{
+	OSAttribute attr((unsigned long)0);
+	return osobject->setAttribute(type, attr);
 }
 
 /*****************************************

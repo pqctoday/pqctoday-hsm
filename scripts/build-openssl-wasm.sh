@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-openssl-wasm.sh — Build OpenSSL 3.6.1 as a static WASM library.
+# build-openssl-wasm.sh — Build OpenSSL 3.6.2 as a static WASM library.
 #
 # Output: deps/openssl-wasm/lib/libcrypto.a  (+ headers in deps/openssl-wasm/include/)
 # Idempotent: skips the build if the output already exists.
@@ -8,8 +8,8 @@
 
 set -euo pipefail
 
-OSSL_VERSION=3.6.1
-OSSL_SHA256="b1bfedcd5b289ff22aee87c9d600f515767ebf45f77168cb6d64f231f518a82e"
+OSSL_VERSION=3.6.2
+OSSL_SHA256="aaf51a1fe064384f811daeaeb4ec4dce7340ec8bd893027eee676af31e83a04f"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"

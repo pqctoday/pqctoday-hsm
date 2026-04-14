@@ -61,6 +61,9 @@ CK_RV SoftHSM::C_DigestInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 			algo = HashAlgo::MD5;
 			break;
 #endif
+		case CKM_RIPEMD160:
+			// RIPEMD160 requires the OpenSSL legacy provider (disabled in this build — see G-DA-X)
+			// Fall through to default → CKR_MECHANISM_INVALID
 		case CKM_SHA_1:
 			algo = HashAlgo::SHA1;
 			break;

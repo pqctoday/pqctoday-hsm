@@ -1666,31 +1666,126 @@ CK_RV SoftHSM::C_SignFinal(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, C
 }
 
 // Initialise a signing operation that allows recovery of the signed data
-CK_RV SoftHSM::C_SignRecoverInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR /*pMechanism*/, CK_OBJECT_HANDLE /*hKey*/)
+CK_RV SoftHSM::C_SignRecoverInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	std::shared_ptr<Session> sessionGuard; Session* session;
-	{ CK_RV rv = acquireSession(hSession, sessionGuard, session); if (rv != CKR_OK) return rv; }
+	std::shared_ptr<Session> sessionGuard;
+	Session* session; Token* token; OSObject* key;
+	CK_RV rv = acquireSessionTokenKey(hSession, hKey, CKA_SIGN_RECOVER, pMechanism,
+	                                   sessionGuard, session, token, key);
+	if (rv != CKR_OK) return rv;
 
-	// CKM_RSA_X_509 recovery is not planned in the current Phase 0â6 roadmap.
-	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	// Check if this mechanism is supported for SignRecover (only RSA and RSA_PKCS)
+	if (pMechanism->mechanism != CKM_RSA_PKCS && pMechanism->mechanism != CKM_RSA_X_509)
+	{
+		return CKR_MECHANISM_INVALID;
+	}
+
+	AsymmetricAlgorithm* asymCrypto = CryptoFactory::i()->getAsymmetricAlgorithm(AsymAlgo::RSA);
+	if (asymCrypto == NULL) return CKR_MECHANISM_INVALID;
+
+	PrivateKey* privateKey = asymCrypto->newPrivateKey();
+	if (privateKey == NULL)
+	{
+		CryptoFactory::i()->recycleAsymmetricAlgorithm(asymCrypto);
+		return CKR_HOST_MEMORY;
+	}
+
+	if (getRSAPrivateKey((RSAPrivateKey*)privateKey, token, key) != CKR_OK)
+	{
+		asymCrypto->recyclePrivateKey(privateKey);
+		CryptoFactory::i()->recycleAsymmetricAlgorithm(asymCrypto);
+		return CKR_GENERAL_ERROR;
+	}
+
+	AsymMech::Type mechanism = (pMechanism->mechanism == CKM_RSA_PKCS) ? AsymMech::RSA_PKCS : AsymMech::RSA;
+
+	if (!asymCrypto->signInit(privateKey, mechanism, NULL, 0))
+	{
+		asymCrypto->recyclePrivateKey(privateKey);
+		CryptoFactory::i()->recycleAsymmetricAlgorithm(asymCrypto);
+		return CKR_MECHANISM_INVALID;
+	}
+
+	session->setOpType(SESSION_OP_SIGN_RECOVER);
+	session->setAsymmetricCryptoOp(asymCrypto);
+	session->setPrivateKey(privateKey);
+	session->setMechanism(mechanism);
+	session->setAllowSinglePartOp(true);
+	session->setAllowMultiPartOp(false); // SignRecover is single-part only
+
+	return CKR_OK;
 }
 
 // Perform a single part signing operation that allows recovery of the signed data
-CK_RV SoftHSM::C_SignRecover(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*pData*/, CK_ULONG /*ulDataLen*/, CK_BYTE_PTR /*pSignature*/, CK_ULONG_PTR /*pulSignatureLen*/)
+CK_RV SoftHSM::C_SignRecover(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+
+	if (pData == NULL_PTR || pulSignatureLen == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
 	// Get the session
 	auto sessionGuard = handleManager->getSessionShared(hSession);
 	Session* session = sessionGuard.get();
 	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
 
-	// CKM_RSA_X_509 recovery is not planned in the current Phase 0â6 roadmap.
-	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	// Check if we are doing the correct operation
+	if (session->getOpType() != SESSION_OP_SIGN_RECOVER || !session->getAllowSinglePartOp())
+		return CKR_OPERATION_NOT_INITIALIZED;
+
+	AsymmetricAlgorithm* asymCrypto = session->getAsymmetricCryptoOp();
+	PrivateKey* privateKey = session->getPrivateKey();
+	if (asymCrypto == NULL || privateKey == NULL)
+	{
+		session->resetOp();
+		return CKR_OPERATION_NOT_INITIALIZED;
+	}
+
+	// Check if re-authentication is required
+	if (session->getReAuthentication())
+	{
+		session->resetOp();
+		return CKR_USER_NOT_LOGGED_IN;
+	}
+
+	// Size of the signature
+	CK_ULONG size = privateKey->getOutputLength();
+	if (pSignature == NULL_PTR)
+	{
+		*pulSignatureLen = size;
+		return CKR_OK;
+	}
+
+	// Check buffer size
+	if (*pulSignatureLen < size)
+	{
+		*pulSignatureLen = size;
+		return CKR_BUFFER_TOO_SMALL;
+	}
+
+	// Get the signature
+	ByteString data(pData, ulDataLen);
+	ByteString signature;
+	if (!asymCrypto->sign(privateKey, data, signature, session->getMechanism(), NULL, 0))
+	{
+		session->resetOp();
+		return CKR_GENERAL_ERROR;
+	}
+
+	// Check size
+	if (signature.size() != size)
+	{
+		ERROR_MSG("The size of the signature differs from the size of the mechanism");
+		session->resetOp();
+		return CKR_GENERAL_ERROR;
+	}
+	memcpy(pSignature, signature.byte_str(), size);
+	*pulSignatureLen = size;
+
+	session->resetOp();
+	return CKR_OK;
 }
 
 // MacAlgorithm version of C_VerifyInit
@@ -3417,22 +3512,116 @@ CK_RV SoftHSM::C_VerifySignatureFinal(CK_SESSION_HANDLE hSession)
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Initialise a verification operation the allows recovery of the signed data from the signature
-CK_RV SoftHSM::C_VerifyRecoverInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR /*pMechanism*/, CK_OBJECT_HANDLE /*hKey*/)
+CK_RV SoftHSM::C_VerifyRecoverInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+	if (pMechanism == NULL_PTR) return CKR_ARGUMENTS_BAD;
 
-	std::shared_ptr<Session> sessionGuard; Session* session;
-	{ CK_RV rv = acquireSession(hSession, sessionGuard, session); if (rv != CKR_OK) return rv; }
+	std::shared_ptr<Session> sessionGuard;
+	Session* session; Token* token; OSObject* key;
+	CK_RV rv = acquireSessionTokenKey(hSession, hKey, CKA_VERIFY_RECOVER, pMechanism,
+	                                   sessionGuard, session, token, key);
+	if (rv != CKR_OK) return rv;
 
-	// CKM_RSA_X_509 recovery is not planned in the current Phase 0â6 roadmap.
-	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	// Check if this mechanism is supported
+	if (pMechanism->mechanism != CKM_RSA_PKCS && pMechanism->mechanism != CKM_RSA_X_509)
+	{
+		return CKR_MECHANISM_INVALID;
+	}
+
+	AsymmetricAlgorithm* asymCrypto = CryptoFactory::i()->getAsymmetricAlgorithm(AsymAlgo::RSA);
+	if (asymCrypto == NULL) return CKR_MECHANISM_INVALID;
+
+	PublicKey* publicKey = asymCrypto->newPublicKey();
+	if (publicKey == NULL)
+	{
+		CryptoFactory::i()->recycleAsymmetricAlgorithm(asymCrypto);
+		return CKR_HOST_MEMORY;
+	}
+
+	if (getRSAPublicKey((RSAPublicKey*)publicKey, token, key) != CKR_OK)
+	{
+		asymCrypto->recyclePublicKey(publicKey);
+		CryptoFactory::i()->recycleAsymmetricAlgorithm(asymCrypto);
+		return CKR_GENERAL_ERROR;
+	}
+
+	AsymMech::Type mechanism = (pMechanism->mechanism == CKM_RSA_PKCS) ? AsymMech::RSA_PKCS : AsymMech::RSA;
+
+	if (!asymCrypto->verifyInit(publicKey, mechanism, NULL, 0))
+	{
+		asymCrypto->recyclePublicKey(publicKey);
+		CryptoFactory::i()->recycleAsymmetricAlgorithm(asymCrypto);
+		return CKR_MECHANISM_INVALID;
+	}
+
+	session->setOpType(SESSION_OP_VERIFY_RECOVER);
+	session->setAsymmetricCryptoOp(asymCrypto);
+	session->setPublicKey(publicKey);
+	session->setMechanism(mechanism);
+	session->setAllowSinglePartOp(true);
+	session->setAllowMultiPartOp(false); // VerifyRecover is single-part only
+
+	return CKR_OK;
 }
 
 // Perform a single part verification operation and recover the signed data
-CK_RV SoftHSM::C_VerifyRecover(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*pSignature*/, CK_ULONG /*ulSignatureLen*/, CK_BYTE_PTR /*pData*/, CK_ULONG_PTR /*pulDataLen*/)
+CK_RV SoftHSM::C_VerifyRecover(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG ulSignatureLen, CK_BYTE_PTR pData, CK_ULONG_PTR pulDataLen)
 {
 	if (!isInitialised) return CKR_CRYPTOKI_NOT_INITIALIZED;
+
+	if (pSignature == NULL_PTR || pulDataLen == NULL_PTR) return CKR_ARGUMENTS_BAD;
+
+	// Get the session
+	auto sessionGuard = handleManager->getSessionShared(hSession);
+	Session* session = sessionGuard.get();
+	if (session == NULL) return CKR_SESSION_HANDLE_INVALID;
+
+	// Check if we are doing the correct operation
+	if (session->getOpType() != SESSION_OP_VERIFY_RECOVER || !session->getAllowSinglePartOp())
+		return CKR_OPERATION_NOT_INITIALIZED;
+
+	AsymmetricAlgorithm* asymCrypto = session->getAsymmetricCryptoOp();
+	PublicKey* publicKey = session->getPublicKey();
+	if (asymCrypto == NULL || publicKey == NULL)
+	{
+		session->resetOp();
+		return CKR_OPERATION_NOT_INITIALIZED;
+	}
+
+	// Size of the data output
+	CK_ULONG size = publicKey->getOutputLength();
+	if (pData == NULL_PTR)
+	{
+		*pulDataLen = size;
+		return CKR_OK;
+	}
+
+	// Check buffer size
+	if (*pulDataLen < size)
+	{
+		*pulDataLen = size;
+		return CKR_BUFFER_TOO_SMALL;
+	}
+
+	// Verify and recover the data
+	ByteString signature(pSignature, ulSignatureLen);
+	ByteString data;
+	if (!asymCrypto->verifyRecover(publicKey, signature, data, session->getMechanism(), NULL, 0))
+	{
+		session->resetOp();
+		return CKR_SIGNATURE_INVALID;
+	}
+
+	// Copy to buffer
+	memcpy(pData, data.const_byte_str(), data.size());
+	*pulDataLen = data.size();
+
+	session->resetOp();
+	return CKR_OK;
+}
+
+/*
 
 	// Get the session
 	auto sessionGuard = handleManager->getSessionShared(hSession);
@@ -3443,6 +3632,7 @@ CK_RV SoftHSM::C_VerifyRecover(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*pSignat
 	// Track as a future enhancement: https://github.com/pqctoday/softhsmv3/issues
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
+*/
 
 // Update a running multi-part encryption and digesting operation
 CK_RV SoftHSM::C_DigestEncryptUpdate(CK_SESSION_HANDLE hSession, CK_BYTE_PTR /*pPart*/, CK_ULONG /*ulPartLen*/, CK_BYTE_PTR /*pEncryptedPart*/, CK_ULONG_PTR /*pulEncryptedPartLen*/)

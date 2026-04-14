@@ -82,6 +82,8 @@ bool P11Object::init(OSObject *inobject)
 	P11Attribute* attrLabel = new P11AttrLabel(osobject);
 	P11Attribute* attrCopyable = new P11AttrCopyable(osobject);
 	P11Attribute* attrDestroyable = new P11AttrDestroyable(osobject);
+	P11Attribute* attrUniqueId = new P11AttrUniqueId(osobject);
+	P11Attribute* attrProfileId = new P11AttrProfileId(osobject);
 
 	// Initialize the attributes
 	if
@@ -92,7 +94,9 @@ bool P11Object::init(OSObject *inobject)
 		!attrModifiable->init() ||
 		!attrLabel->init() ||
 		!attrCopyable->init() ||
-		!attrDestroyable->init()
+		!attrDestroyable->init() ||
+		!attrUniqueId->init() ||
+		!attrProfileId->init()
 	)
 	{
 		ERROR_MSG("Could not initialize the attribute");
@@ -103,6 +107,8 @@ bool P11Object::init(OSObject *inobject)
 		delete attrLabel;
 		delete attrCopyable;
 		delete attrDestroyable;
+		delete attrUniqueId;
+		delete attrProfileId;
 		return false;
 	}
 
@@ -114,6 +120,8 @@ bool P11Object::init(OSObject *inobject)
 	attributes[attrLabel->getType()] = attrLabel;
 	attributes[attrCopyable->getType()] = attrCopyable;
 	attributes[attrDestroyable->getType()] = attrDestroyable;
+	attributes[attrUniqueId->getType()] = attrUniqueId;
+	attributes[attrProfileId->getType()] = attrProfileId;
 
 	initialized = true;
 	return true;

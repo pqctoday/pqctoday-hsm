@@ -201,6 +201,7 @@ public:
 	virtual bool verifyInit(PublicKey* publicKey, const AsymMech::Type mechanism, const void* param = NULL, const size_t paramLen = 0);
 	virtual bool verifyUpdate(const ByteString& originalData);
 	virtual bool verifyFinal(const ByteString& signature);
+	virtual bool verifyRecover(PublicKey* publicKey, const ByteString& signature, ByteString& data, const AsymMech::Type mechanism, const void* param = NULL, const size_t paramLen = 0) { return false; }
 
 	// Encryption functions
 	virtual bool encrypt(PublicKey* publicKey, const ByteString& data, ByteString& encryptedData, const AsymMech::Type padding) = 0;

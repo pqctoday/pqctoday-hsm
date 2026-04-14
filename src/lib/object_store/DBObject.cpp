@@ -466,6 +466,8 @@ static AttributeKind attributeKind(CK_ATTRIBUTE_TYPE type)
 	case CKA_KEY_GEN_MECHANISM: return akInteger;
 	case CKA_MODIFIABLE: return akBoolean;
 	case CKA_COPYABLE: return akBoolean;
+	case CKA_UNIQUE_ID: return akBinary;
+	case CKA_PROFILE_ID: return akInteger;
 	case CKA_ECDSA_PARAMS: return akBinary;
 	case CKA_EC_POINT: return akBinary;
 	case CKA_SECONDARY_AUTH: return akBoolean;
@@ -479,6 +481,7 @@ static AttributeKind attributeKind(CK_ATTRIBUTE_TYPE type)
 	case CKA_HSS_LMS_TYPES: return akBinary;
 	case CKA_HSS_LMOTS_TYPES: return akBinary;
 	case CKA_HSS_KEYS_REMAINING: return akInteger;
+	case CKA_PUBLIC_KEY_INFO: return akBinary;
 /*
 	case CKA_OTP_FORMAT:
 	case CKA_OTP_LENGTH:

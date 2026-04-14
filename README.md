@@ -77,7 +77,10 @@ import CK from '@pqctoday/softhsm-wasm/constants'
 | Message Encrypt/Decrypt API | Not supported | **Implemented** (AES-GCM per-message AEAD, both engines) |
 | C_VerifySignatureInit / C_VerifySignature | Not supported | **Implemented** (v3.2 pre-bound verify, both engines) |
 | C_VerifySignatureUpdate / C_VerifySignatureFinal | Not supported | **Implemented** (v3.2 streaming pre-bound verify — Rust engine) |
+| C_SignRecover / C_VerifyRecover | Stub (CKR_FUNCTION_NOT_SUPPORTED) | **Implemented** (RSA PKCS#1 + raw X.509 recovery) |
 | C_WrapKeyAuthenticated / C_UnwrapKeyAuthenticated | Not supported | **Implemented** (v3.2 AES-GCM key wrap) |
+| CKA_UNIQUE_ID | Not supported | **Auto-generated UUID v4** (PKCS#11 v3.0 §4.4, read-only) |
+| CKA_PROFILE_ID | Not supported | **Implemented** (PKCS#11 v3.0 §4.5, default 0) |
 | Key derivation (HKDF, KBKDF, cofactor ECDH) | Not supported | **`CKM_HKDF_DERIVE`, `CKM_SP800_108_COUNTER_KDF`, `CKM_SP800_108_FEEDBACK_KDF`, `CKM_ECDH1_COFACTOR_DERIVE`** |
 | PBKDF2 (`CKM_PKCS5_PBKD2`) | Not supported | **Implemented** — HMAC-SHA{1/224/256/384/512} PRF; BIP39 / SLIP-0010 seed derivation |
 | ECDH1 with KDF (`CKD_SHA*_KDF`) | Not supported | **Implemented** — X9.63 SHA{1/256/384/512} KDF on `CKM_ECDH1_DERIVE`; 5G SUCI deconcealment (TS 33.501 §6.12.2) |
@@ -254,6 +257,16 @@ CKM_CHACHA20_KEY_GEN     // Secret key generation
 CKM_CHACHA20_POLY1305    // Authenticated encryption and decryption
 ```
 
+### Sign/Verify Recover (RSA)
+
+```c
+// RSA signature recovery — recovers plaintext from signature (CKM_RSA_PKCS, CKM_RSA_X_509)
+C_SignRecoverInit()       // Initialize sign-recover with RSA private key
+C_SignRecover()           // Produce recoverable signature (single-part)
+C_VerifyRecoverInit()     // Initialize verify-recover with RSA public key
+C_VerifyRecover()         // Recover data from signature (single-part)
+```
+
 ### Pre-Bound Signature Verification (v3.2)
 
 ```c
@@ -290,7 +303,7 @@ CKM_ECDSA_SHA3_512         = 0x0000104a
 
 // EdDSA — pure and pre-hash (RFC 8032; PKCS#11 v3.2 §6.3.15)
 CKM_EDDSA                  = 0x00001057  // Ed25519 pure signing
-CKM_EDDSA_PH               = 0xffff1057  // Ed25519ph pre-hash mode (CKM_EDDSA_PH)
+CKM_EDDSA_PH               = 0x80001057  // Ed25519ph pre-hash mode (vendor-defined)
 
 // RSA PKCS#1 v1.5 with SHA-3 (C++ engine)
 CKM_RSA_SHA3_224_PKCS      = 0x0000004f
@@ -335,6 +348,10 @@ CKM_ECDH1_COFACTOR_DERIVE  = 0x00001051
 ### Digest & MAC
 
 ```c
+// RIPEMD (registered; returns CKR_MECHANISM_INVALID — OpenSSL legacy provider disabled)
+CKM_RIPEMD160              = 0x00000240  // RIPEMD-160 digest (strict audit only)
+CKM_RIPEMD160_HMAC         = 0x00000241  // HMAC-RIPEMD-160
+
 // SHA-2 (C++ and Rust engines)
 CKM_SHA256                 = 0x00000250  // SHA-256 digest
 CKM_SHA384                 = 0x00000260  // SHA-384 digest
@@ -355,7 +372,7 @@ The `softhsmv3` implementations maintain strict compliance with current ACVP tes
 
 - **ACVP Testing (v0.4.21+)**: Both the C++ and Rust engines pass all ACVP algorithm test vectors with **zero failures and zero skips** across all implemented mechanisms in dual HSM mode. The test suite covers: ML-KEM (Decapsulate KAT + Round-Trip, all 3 variants), ML-DSA (SigVer KAT + Functional, all 3 variants), HashML-DSA (SHA-256/SHA-512, 3 variants), SLH-DSA (Functional 2 param sets + SigGen KAT), HashSLH-DSA (SHA2-128f-SHA256, SHA2-256f-SHA512), LMS/HSS SHA-256 + SHAKE-256 (sign+verify round-trips; NIST ACVP LMS sigVer KAT, 20 SHAKE groups per engine — newly passing on both engines as of v0.4.21), AES-GCM/CBC/CTR/KW/KWP, HMAC-SHA256/384/512, RSA-PSS, ECDSA P-256/P-384, EdDSA Ed25519, **Ed25519ph / `CKM_EDDSA_PH` (C++ + Rust, both engines as of v0.4.21)**, SHA-256 (3 vectors), SHA3-256 (empty-string vector), PBKDF2, and HKDF. C++↔Rust cross-engine HSS signing verification available in dual mode.
 - **NIST ACVP LMS sigVer**: **320/320** official NIST ACVP demo vectors validated against `lm_validate_signature()` — all 80 SP 800-208 parameter combinations (SHA-256 M32/M24 + SHAKE-256 M32/M24 × 5 tree heights × 4 Winternitz params). Source: [usnistgov/ACVP-Server](https://github.com/usnistgov/ACVP-Server/tree/master/gen-val/json-files/LMS-sigVer-1.0).
-- **PKCS#11 v3.2 Semantics**: The standalone C++ algorithmic validator (`pqc_validate`) successfully passes 66/66 deep evaluation tests, including comprehensive cryptographic round-trips and negative tampering evaluations against the compiled `libsofthsmv3.dylib`.
+- **PKCS#11 v3.2 Semantics**: The standalone C++ compliance validator (`p11_v32_compliance_test`) passes **126/127** tests (1 expected failure: RIPEMD160 — legacy provider disabled), covering PQC round-trips, classical algorithms (ECDSA, EdDSA, ECDH, RSA), KDFs (PBKDF2, HKDF, SP800-108), negative boundary paths (policy violation, extraction constraint, template completeness, signature forgery), and v3.2 session/message APIs against the compiled `libsofthsmv3.dylib`.
 - **Playground E2E**: End-to-end token integration and ACVP matrix execution are verified via automated Playwright continuous integration (`playground-softhsm-acvp.spec.ts`) in dual HSM mode.
 - **Security Audit (March 2026)**: Full remediation of all HIGH and MEDIUM findings. See [`docs/security_audit_03222026.md`](docs/security_audit_03222026.md).
 
@@ -598,6 +615,16 @@ SoftHSMv3 introduces a **Dual-Mode Storage Architecture** to support both epheme
   - [x] Rust: 10 admin function stubs + 8 multi-part stubs (63 total exports)
   - [x] Rust: `CKA_EC_PARAMS` + `CKA_EC_POINT` stored on generated X25519/X448 keys (PKCS#11 v3.2 §6.7 — OID DER + `04 <len> <raw pubkey>`)
   - [x] Rust: stale SP 800-108 early-dispatch path removed from `C_DeriveKey` — `CKM_SP800_108_COUNTER_KDF` / `CKM_SP800_108_FEEDBACK_KDF` now always reach the correct handler
+- [x] Phase 18: PKCS#11 v3.0 attributes + RSA recovery + compliance hardening (v0.4.24)
+  - [x] C++: `CKA_UNIQUE_ID` — auto-generated UUID v4, read-only, all objects; type value corrected to `0x00000017`
+  - [x] C++: `CKA_PROFILE_ID` — token profile identifier, default 0; type value corrected to `0x00000104`
+  - [x] C++: `C_SignRecover` / `C_VerifyRecover` — full RSA implementation (CKM_RSA_PKCS + CKM_RSA_X_509)
+  - [x] C++: `CKA_PUBLIC_KEY_INFO` persistence fix — resolved 12 PQC keygen failures with `CKA_TOKEN=true`
+  - [x] C++: Ed25519ph corrected to use `OSSL_PARAM` instance selection (OpenSSL 3.x)
+  - [x] C++: SLH-DSA raw private key import via `EVP_PKEY_fromdata()` for FIPS 205 key sizes
+  - [x] C++: `C_GetSessionValidationFlags` returns `CKR_OK` (software token, no constraints)
+  - [x] C++: `CKM_RIPEMD160` / `CKM_RIPEMD160_HMAC` mechanism registration
+  - [x] Compliance suite: 126 PASS / 1 FAIL (RIPEMD160 expected)
 - [x] Phase 11: Security hardening (v0.4.0) — full remediation of March 2026 audit
   - [x] RSA X.509 integer underflow guard (sign + verify paths)
   - [x] AES-CBC IV length enforcement (exactly 16 bytes)

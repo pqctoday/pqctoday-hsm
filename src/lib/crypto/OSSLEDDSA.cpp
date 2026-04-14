@@ -43,6 +43,7 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/err.h>
+#include <openssl/core_names.h>
 #include <string.h>
 
 // Signing functions
@@ -88,7 +89,11 @@ bool OSSLEDDSA::sign(PrivateKey* privateKey, const ByteString& dataToSign,
 	bool init_ok = false;
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
 	if (mechanism == AsymMech::EDDSA_PH) {
-		init_ok = EVP_DigestSignInit_ex(ctx, NULL, "Ed25519ph", NULL, NULL, pkey, NULL);
+		OSSL_PARAM params[2];
+		params[0] = OSSL_PARAM_construct_utf8_string(
+			OSSL_SIGNATURE_PARAM_INSTANCE, (char*)"Ed25519ph", 0);
+		params[1] = OSSL_PARAM_construct_end();
+		init_ok = EVP_DigestSignInit_ex(ctx, NULL, NULL, NULL, NULL, pkey, params);
 	} else {
 		init_ok = EVP_DigestSignInit(ctx, NULL, NULL, NULL, pkey);
 	}
@@ -179,7 +184,11 @@ bool OSSLEDDSA::verify(PublicKey* publicKey, const ByteString& originalData,
 	bool init_ok = false;
 #if OPENSSL_VERSION_NUMBER >= 0x30000000L
 	if (mechanism == AsymMech::EDDSA_PH) {
-		init_ok = EVP_DigestVerifyInit_ex(ctx, NULL, "Ed25519ph", NULL, NULL, pkey, NULL);
+		OSSL_PARAM params[2];
+		params[0] = OSSL_PARAM_construct_utf8_string(
+			OSSL_SIGNATURE_PARAM_INSTANCE, (char*)"Ed25519ph", 0);
+		params[1] = OSSL_PARAM_construct_end();
+		init_ok = EVP_DigestVerifyInit_ex(ctx, NULL, NULL, NULL, NULL, pkey, params);
 	} else {
 		init_ok = EVP_DigestVerifyInit(ctx, NULL, NULL, NULL, pkey);
 	}
