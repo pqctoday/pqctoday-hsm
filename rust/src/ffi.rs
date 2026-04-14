@@ -5254,6 +5254,16 @@ pub fn C_MessageDecryptFinal(h_session: u32) -> u32 {
     CKR_OK
 }
 
+/// Returns the WASM linear memory as a JsValue (WebAssembly.Memory).
+/// The TypeScript host shim calls this to build Emscripten-compatible
+/// memory accessors (HEAPU8, getValue, setValue, _malloc, _free).
+/// Named `__wbg_get_memory` for backward compatibility with the pqc-timeline-app
+/// softhsm.ts shim loader — wasm-bindgen no longer auto-exports this symbol.
+#[wasm_bindgen(js_name = __wbg_get_memory)]
+pub fn get_wasm_memory() -> JsValue {
+    wasm_bindgen::memory()
+}
+
 #[wasm_bindgen]
 pub struct SoftHsmRust {}
 
