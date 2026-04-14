@@ -442,9 +442,9 @@ Multi-part, admin, and async stubs return `CKR_FUNCTION_NOT_SUPPORTED`. The brow
 **Classical:**
 
 - RSA (PKCS#1 v1.5, OAEP, PSS — keygen + sign/verify)
-- ECDSA P-256/P-384/P-521 (keygen, sign, verify) — including ECDSA-SHA512 (native for P-521; FIPS 186-5 §6.4 truncation for P-256/P-384) and ECDSA-SHA3-224/256/384/512
+- ECDSA P-256/P-384/P-521 + secp256k1 (keygen, sign, verify) — including ECDSA-SHA512 (native for P-521; FIPS 186-5 §6.4 truncation for P-256/P-384) and ECDSA-SHA3-224/256/384/512
 - Ed25519 (keygen, sign, verify) — pure (`CKM_EDDSA`) and pre-hash (`CKM_EDDSA_PH`, Ed25519ph)
-- ECDH P-256 + X25519 (key agreement via `C_DeriveKey`)
+- ECDH P-256/P-384/P-521 + X25519/X448 (key agreement via `C_DeriveKey`)
 - AES-128/256 (GCM, CBC-PAD, CTR, Key Wrap, Key Wrap with Padding, Authenticated Wrap/Unwrap)
 - SHA-256/384/512, SHA3-256/512 (digest); SHA3-256 (`CKM_SHA3_256`) validated against FIPS 202 empty-string KAT
 - HMAC-SHA256/384/512, HMAC-SHA3-256/512, HMAC-SHA3-256 (`CKM_SHA3_256_HMAC`)

@@ -1,7 +1,7 @@
 use crate::constants::*;
 use hmac::{Hmac, Mac};
 use k256::elliptic_curve::group::ff::PrimeField;
-use p256::elliptic_curve::group::ff::PrimeField as P256PrimeField;
+
 use sha2::Sha512;
 use std::vec::Vec;
 

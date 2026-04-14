@@ -10,6 +10,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.23] — 2026-04-14
+
+### Fixed
+
+- **Rust Compile Warnings**: Cleaned up `unused_mut` variable bindings in `src/ffi.rs` AES-GCM contexts to satisfy cargo lint rules. Remove orphaned `fips204::traits::SerDes`, `fips205::traits::SerDes`, and `P256PrimeField` imports spanning across `src/crypto/handlers.rs`, `src/ffi.rs`, and `src/crypto/bip32.rs`.
+- **Documentation**: Updated `README.md` to properly document `secp256k1`, `P-384`, `P-521` and `X448` support for ECDSA and ECDH algorithms.
+
+---
+
 ## [0.4.22] — 2026-04-14
 
 ### Added

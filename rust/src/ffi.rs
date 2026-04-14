@@ -11,8 +11,7 @@ use crate::constants::*;
 use crate::crypto::*;
 use crate::slh_dsa_keygen;
 use crate::state::*;
-use fips204::traits::SerDes;
-use fips205::traits::SerDes as _;
+
 use rand::rngs::OsRng;
 use rand::SeedableRng;
 
@@ -4990,7 +4989,7 @@ pub fn C_EncryptMessageNext(
                     *pul_ciphertext_part_len = ul_plaintext_part_len;
 
                     MESSAGE_ENCRYPT_STATE.with(|s| {
-                        if let Some(mut st) = s.borrow_mut().get_mut(&h_session) {
+                        if let Some(st) = s.borrow_mut().get_mut(&h_session) {
                             st.in_message = false;
                         }
                     });
@@ -4998,7 +4997,7 @@ pub fn C_EncryptMessageNext(
                 }
                 Err(e) => {
                     MESSAGE_ENCRYPT_STATE.with(|s| {
-                        if let Some(mut st) = s.borrow_mut().get_mut(&h_session) {
+                        if let Some(st) = s.borrow_mut().get_mut(&h_session) {
                             st.in_message = false;
                         }
                     });
@@ -5202,7 +5201,7 @@ pub fn C_DecryptMessageNext(
                     );
                     *pul_plaintext_part_len = ul_ciphertext_part_len;
                     MESSAGE_DECRYPT_STATE.with(|s| {
-                        if let Some(mut st) = s.borrow_mut().get_mut(&h_session) {
+                        if let Some(st) = s.borrow_mut().get_mut(&h_session) {
                             st.in_message = false;
                         }
                     });
@@ -5210,7 +5209,7 @@ pub fn C_DecryptMessageNext(
                 }
                 Err(e) => {
                     MESSAGE_DECRYPT_STATE.with(|s| {
-                        if let Some(mut st) = s.borrow_mut().get_mut(&h_session) {
+                        if let Some(st) = s.borrow_mut().get_mut(&h_session) {
                             st.in_message = false;
                         }
                     });
@@ -5252,16 +5251,6 @@ pub fn C_DecryptMessageNext(
 pub fn C_MessageDecryptFinal(h_session: u32) -> u32 {
     MESSAGE_DECRYPT_STATE.with(|s| s.borrow_mut().remove(&h_session));
     CKR_OK
-}
-
-/// Returns the WASM linear memory as a JsValue (WebAssembly.Memory).
-/// The TypeScript host shim calls this to build Emscripten-compatible
-/// memory accessors (HEAPU8, getValue, setValue, _malloc, _free).
-/// Named `__wbg_get_memory` for backward compatibility with the pqc-timeline-app
-/// softhsm.ts shim loader — wasm-bindgen no longer auto-exports this symbol.
-#[wasm_bindgen(js_name = __wbg_get_memory)]
-pub fn get_wasm_memory() -> JsValue {
-    wasm_bindgen::memory()
 }
 
 #[wasm_bindgen]

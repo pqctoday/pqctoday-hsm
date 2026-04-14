@@ -146,8 +146,7 @@ pub unsafe fn write_fixed_str(buf: *mut u8, offset: usize, s: &str, max_len: usi
 
 // ── SLH-DSA Macros ──────────────────────────────────────────────────────────
 
-use fips204::traits::SerDes;
-use fips205::traits::SerDes as _;
+
 #[macro_export]
 macro_rules! slh_dsa_keygen {
     ($func:path, $n:expr, $pub_attrs:expr, $prv_attrs:expr) => {{
