@@ -1799,32 +1799,40 @@ PKCS_API CK_RV C_VerifySignatureFinal(CK_SESSION_HANDLE hSession)
 // v3.2 additions — §5.22 Session validation flags
 // ---------------------------------------------------------------------------
 
-PKCS_API CK_RV C_GetSessionValidationFlags(CK_SESSION_HANDLE /*hSession*/,
-	CK_SESSION_VALIDATION_FLAGS_TYPE /*type*/, CK_FLAGS_PTR /*pFlags*/)
+PKCS_API CK_RV C_GetSessionValidationFlags(CK_SESSION_HANDLE hSession,
+	CK_SESSION_VALIDATION_FLAGS_TYPE /*type*/, CK_FLAGS_PTR pFlags)
 {
-	return CKR_FUNCTION_NOT_SUPPORTED;
+	if (pFlags == NULL_PTR) return CKR_ARGUMENTS_BAD;
+	// Software token has no validation constraints — return 0 flags per §5.22
+	*pFlags = 0;
+	return CKR_OK;
 }
 
 // ---------------------------------------------------------------------------
 // v3.2 additions — §5.23 Asynchronous operations
+// Async is not applicable to a software token; validate arguments then return
+// CKR_FUNCTION_NOT_SUPPORTED per spec.
 // ---------------------------------------------------------------------------
 
 PKCS_API CK_RV C_AsyncComplete(CK_SESSION_HANDLE /*hSession*/,
-	CK_UTF8CHAR_PTR /*pFunctionName*/, CK_ASYNC_DATA_PTR /*pResult*/)
+	CK_UTF8CHAR_PTR pFunctionName, CK_ASYNC_DATA_PTR pResult)
 {
+	if (pFunctionName == NULL_PTR || pResult == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
 PKCS_API CK_RV C_AsyncGetID(CK_SESSION_HANDLE /*hSession*/,
-	CK_UTF8CHAR_PTR /*pFunctionName*/, CK_ULONG_PTR /*pulID*/)
+	CK_UTF8CHAR_PTR pFunctionName, CK_ULONG_PTR pulID)
 {
+	if (pFunctionName == NULL_PTR || pulID == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 
 PKCS_API CK_RV C_AsyncJoin(CK_SESSION_HANDLE /*hSession*/,
-	CK_UTF8CHAR_PTR /*pFunctionName*/, CK_ULONG /*ulID*/,
+	CK_UTF8CHAR_PTR pFunctionName, CK_ULONG /*ulID*/,
 	CK_BYTE_PTR /*pData*/, CK_ULONG /*ulData*/)
 {
+	if (pFunctionName == NULL_PTR) return CKR_ARGUMENTS_BAD;
 	return CKR_FUNCTION_NOT_SUPPORTED;
 }
 

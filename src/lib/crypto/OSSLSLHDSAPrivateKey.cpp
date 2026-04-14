@@ -36,6 +36,8 @@
 #include "OSSLSLHDSAPrivateKey.h"
 #include <openssl/x509.h>
 #include <openssl/err.h>
+#include <openssl/core_names.h>
+#include <openssl/param_build.h>
 #include <string.h>
 
 /*static*/ const char* OSSLSLHDSAPrivateKey::type = "OpenSSL SLH-DSA Private Key";
@@ -170,6 +172,52 @@ void OSSLSLHDSAPrivateKey::createOSSLKey()
 
 	int len = (int)value.size();
 	const unsigned char* p = value.const_byte_str();
+	
+	// FIPS 205 SLH-DSA raw private keys have lengths of 64, 96, or 128 bytes (4 * n).
+	// If the value length matches, attempt raw key import using EVP_PKEY_fromdata.
+	if (len == 64 || len == 96 || len == 128)
+	{
+		OSSL_PARAM_BLD *bld = OSSL_PARAM_BLD_new();
+		if (bld != NULL) {
+			const unsigned char* raw_pk = p + (len / 2);
+			if (OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PRIV_KEY, p, len / 2) &&
+			    OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PUB_KEY, raw_pk, len / 2)) {
+				OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(bld);
+				if (params != NULL) {
+					const char* keyName = NULL;
+					switch (parameterSet) {
+						case CKP_SLH_DSA_SHA2_128S:  keyName = "slh-dsa-sha2-128s"; break;
+						case CKP_SLH_DSA_SHAKE_128S: keyName = "slh-dsa-shake-128s"; break;
+						case CKP_SLH_DSA_SHA2_128F:  keyName = "slh-dsa-sha2-128f"; break;
+						case CKP_SLH_DSA_SHAKE_128F: keyName = "slh-dsa-shake-128f"; break;
+						case CKP_SLH_DSA_SHA2_192S:  keyName = "slh-dsa-sha2-192s"; break;
+						case CKP_SLH_DSA_SHAKE_192S: keyName = "slh-dsa-shake-192s"; break;
+						case CKP_SLH_DSA_SHA2_192F:  keyName = "slh-dsa-sha2-192f"; break;
+						case CKP_SLH_DSA_SHAKE_192F: keyName = "slh-dsa-shake-192f"; break;
+						case CKP_SLH_DSA_SHA2_256S:  keyName = "slh-dsa-sha2-256s"; break;
+						case CKP_SLH_DSA_SHAKE_256S: keyName = "slh-dsa-shake-256s"; break;
+						case CKP_SLH_DSA_SHA2_256F:  keyName = "slh-dsa-sha2-256f"; break;
+						case CKP_SLH_DSA_SHAKE_256F: keyName = "slh-dsa-shake-256f"; break;
+					}
+					if (keyName != NULL) {
+						EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new_from_name(NULL, keyName, NULL);
+						if (ctx != NULL) {
+							if (EVP_PKEY_fromdata_init(ctx) == 1) {
+								if (EVP_PKEY_fromdata(ctx, &pkey, EVP_PKEY_KEYPAIR, params) <= 0) {
+									ERROR_MSG("EVP_PKEY_fromdata (SLH-DSA raw) failed (0x%08X)", ERR_get_error());
+								}
+							}
+							EVP_PKEY_CTX_free(ctx);
+						}
+					}
+					OSSL_PARAM_free(params);
+				}
+			}
+			OSSL_PARAM_BLD_free(bld);
+		}
+		if (pkey != NULL) return; // Successfully imported raw key
+	}
+
 	PKCS8_PRIV_KEY_INFO* p8 = d2i_PKCS8_PRIV_KEY_INFO(NULL, &p, len);
 	if (p8 == NULL)
 	{

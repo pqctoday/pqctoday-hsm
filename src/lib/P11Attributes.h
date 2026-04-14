@@ -289,6 +289,38 @@ protected:
 };
 
 /*****************************************
+ * CKA_UNIQUE_ID (PKCS#11 v3.0 §4.4)
+ * Read-only; auto-generated UUID v4 string
+ *****************************************/
+
+class P11AttrUniqueId : public P11Attribute
+{
+public:
+	// Constructor — read-only after creation (ck2 = not settable by user)
+	P11AttrUniqueId(OSObject* inobject) : P11Attribute(inobject) { type = CKA_UNIQUE_ID; checks = ck2|ck4|ck6; }
+
+protected:
+	// Set the default value of the attribute (generates UUID)
+	virtual bool setDefault();
+};
+
+/*****************************************
+ * CKA_PROFILE_ID (PKCS#11 v3.0 §4.5)
+ * Token profile identifier; default 0
+ *****************************************/
+
+class P11AttrProfileId : public P11Attribute
+{
+public:
+	// Constructor
+	P11AttrProfileId(OSObject* inobject) : P11Attribute(inobject) { type = CKA_PROFILE_ID; size = sizeof(CK_ULONG); checks = 0; }
+
+protected:
+	// Set the default value of the attribute
+	virtual bool setDefault();
+};
+
+/*****************************************
  * CKA_APPLICATION
  *****************************************/
 

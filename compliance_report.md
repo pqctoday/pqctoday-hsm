@@ -4,9 +4,15 @@
 **Timestamp:** Generated automatically
 
 ## Summary
-- **Total PASS:** 104
+- **Total PASS:** 126
 - **Total FAIL:** 1
 - **Total SKIP:** 0
+
+### AES-CTR
+
+| Test | Status | Details |
+|---|---|---|
+| EncryptInit | ✅ PASS | RV=0 |
 
 ### Attributes
 
@@ -15,7 +21,7 @@
 | CKA_VALUE_Pub | ✅ PASS | §1.21 G-ATTR1 check |
 | CKA_PUBLIC_KEY_INFO_Pub | ✅ PASS | Required for all PQC keys |
 | CKA_PUBLIC_KEY_INFO_Priv | ✅ PASS | Required to be exposed on private objects |
-| CKA_HSS_KEYS_REMAINING | ✅ PASS | Attribute correctly retrieved |
+| CKA_HSS_KEYS_REMAINING_Gen | ✅ PASS | Remaining=32 |
 | ML_KEM_512_CKA_VALUE_Pub | ✅ PASS | §1.21 G-ATTR1 check |
 | ML_KEM_512_CKA_PUBLIC_KEY_INFO_Pub | ✅ PASS | SPKI exposed |
 | ML_KEM_512_CKA_PUBLIC_KEY_INFO_Priv | ✅ PASS | SPKI exposed on private |
@@ -109,6 +115,33 @@
 | CKM_HKDF_DERIVE | ✅ PASS | HKDF Support (v3.0/5G) |
 | CKM_RIPEMD160 | ❌ FAIL | RIPEMD160 Support (Strict Audit) |
 
+### ECDH
+
+| Test | Status | Details |
+|---|---|---|
+| Generate_X25519 | ✅ PASS | RV=0 |
+| Derive_X25519 | ✅ PASS | RV=0 |
+
+### ECDSA
+
+| Test | Status | Details |
+|---|---|---|
+| Generate_P256 | ✅ PASS | RV=0 |
+| Sign_P256 | ✅ PASS | RV=0 |
+| Generate_P521 | ✅ PASS | RV=0 |
+| Sign_P521 | ✅ PASS | RV=0 |
+| Generate_secp256k1 | ✅ PASS | RV=0 |
+| Sign_secp256k1 | ✅ PASS | RV=0 |
+
+### EdDSA
+
+| Test | Status | Details |
+|---|---|---|
+| Generate_Ed25519 | ✅ PASS | RV=0 |
+| Sign_Ed25519 | ✅ PASS | RV=0 |
+| Generate_Ed448 | ✅ PASS | RV=0 |
+| Sign_Ed448 | ✅ PASS | RV=0 |
+
 ### FIPS
 
 | Test | Status | Details |
@@ -129,6 +162,8 @@
 |---|---|---|
 | CKM_PKCS5_PBKD2 | ✅ PASS | RV=0 |
 | CKM_SP800_108_COUNTER_KDF | ✅ PASS | RV=0 |
+| CKM_SP800_108_FEEDBACK_KDF | ✅ PASS | RV=0 |
+| CKM_HKDF_DERIVE | ✅ PASS | RV=0 |
 
 ### KEM
 
@@ -160,12 +195,24 @@
 | C_MessageSignInit | ✅ PASS | RV=0 |
 | C_SignMessageBegin | ✅ PASS | RV=0 |
 | C_SignMessageNext | ✅ PASS | RV=0 |
+| C_MessageSignInit_PQCContext | ✅ PASS | RV=113 |
 
 ### Negative
 
 | Test | Status | Details |
 |---|---|---|
 | Sign_With_KEM_Key | ✅ PASS | Expected CKR_KEY_FUNCTION_NOT_PERMITTED, got 99 |
+| Boolean_Policy_Violation | ✅ PASS | Expected CKR_KEY_FUNCTION_NOT_PERMITTED, got 104 |
+| Extraction_Constraint | ✅ PASS | Expected CKR_ATTRIBUTE_SENSITIVE, got 17 |
+| Template_Incomplete_Create | ✅ PASS | Expected CKR_TEMPLATE_INCOMPLETE, got 208 |
+| Signature_Len_Range | ✅ PASS | Expected CKR_SIGNATURE_LEN_RANGE, got 193 |
+| Signature_Forgery_Invalid | ✅ PASS | Expected CKR_SIGNATURE_INVALID, got 192 |
+
+### SHA-3
+
+| Test | Status | Details |
+|---|---|---|
+| DigestInit_256 | ✅ PASS | RV=0 |
 
 ### SLHDSA
 

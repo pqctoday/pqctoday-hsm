@@ -1211,6 +1211,67 @@ bool OSSLRSA::verifyFinal(const ByteString& signature)
 	return rv;
 }
 
+bool OSSLRSA::verifyRecover(PublicKey* publicKey, const ByteString& signature, ByteString& data, const AsymMech::Type mechanism, const void* /*param*/, const size_t /*paramLen*/)
+{
+	if (!publicKey->isOfType(OSSLRSAPublicKey::type))
+	{
+		ERROR_MSG("Invalid key type supplied");
+		return false;
+	}
+
+	OSSLRSAPublicKey* osslKey = (OSSLRSAPublicKey*) publicKey;
+	EVP_PKEY* pkey = osslKey->getOSSLKey();
+	if (pkey == NULL)
+	{
+		ERROR_MSG("Could not get the OpenSSL public key");
+		return false;
+	}
+
+	size_t nSize = osslKey->getN().size();
+	data.resize(nSize);
+	size_t recoveredLen = nSize;
+
+	EVP_PKEY_CTX* ctx = EVP_PKEY_CTX_new(pkey, NULL);
+	if (ctx == NULL || EVP_PKEY_verify_recover_init(ctx) <= 0)
+	{
+		ERROR_MSG("EVP_PKEY_verify_recover_init failed (0x%08X)", ERR_get_error());
+		if (ctx) EVP_PKEY_CTX_free(ctx);
+		return false;
+	}
+
+	if (mechanism == AsymMech::RSA_PKCS)
+	{
+		if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_PADDING) <= 0 ||
+		    EVP_PKEY_verify_recover(ctx, &data[0], &recoveredLen, signature.const_byte_str(), signature.size()) <= 0)
+		{
+			ERROR_MSG("RSA PKCS verify recover failed (0x%08X)", ERR_get_error());
+			EVP_PKEY_CTX_free(ctx);
+			return false;
+		}
+	}
+	else if (mechanism == AsymMech::RSA)
+	{
+		if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_NO_PADDING) <= 0 ||
+		    EVP_PKEY_verify_recover(ctx, &data[0], &recoveredLen, signature.const_byte_str(), signature.size()) <= 0)
+		{
+			ERROR_MSG("Raw RSA verify recover failed (0x%08X)", ERR_get_error());
+			EVP_PKEY_CTX_free(ctx);
+			return false;
+		}
+	}
+	else
+	{
+		ERROR_MSG("Invalid mechanism supplied for verifyRecover");
+		EVP_PKEY_CTX_free(ctx);
+		return false;
+	}
+
+	EVP_PKEY_CTX_free(ctx);
+	data.resize(recoveredLen);
+
+	return true;
+}
+
 // Encryption functions
 bool OSSLRSA::encrypt(PublicKey* publicKey, const ByteString& data,
 		      ByteString& encryptedData, const AsymMech::Type padding)

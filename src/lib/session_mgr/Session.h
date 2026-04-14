@@ -63,6 +63,8 @@
 #define SESSION_OP_MESSAGE_ENCRYPT_BEGIN 0x17 // PKCS#11 v3.0: between C_EncryptMessageBegin and C_EncryptMessageNext
 #define SESSION_OP_MESSAGE_DECRYPT_BEGIN 0x18 // PKCS#11 v3.0: between C_DecryptMessageBegin and C_DecryptMessageNext
 #define SESSION_OP_VERIFY_SIGNATURE	0x19  // PKCS#11 v3.2: after C_VerifySignatureInit (pre-bound signature)
+#define SESSION_OP_SIGN_RECOVER		0x1A  // PKCS#11 v3.2: C_SignRecoverInit / C_SignRecover
+#define SESSION_OP_VERIFY_RECOVER	0x1B  // PKCS#11 v3.2: C_VerifyRecoverInit / C_VerifyRecover
 
 class Session
 {

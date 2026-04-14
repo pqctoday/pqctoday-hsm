@@ -358,7 +358,8 @@ CK_RV SoftHSM::C_GetTokenInfo(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR pInfo)
 
 void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE> &t)
 {
-	// Hash algorithms (SHA-2 + SHA-3)
+	// Hash algorithms (RIPEMD, SHA-1, SHA-2 + SHA-3)
+	t["CKM_RIPEMD160"]		= CKM_RIPEMD160;
 	t["CKM_SHA_1"]			= CKM_SHA_1;
 	t["CKM_SHA224"]			= CKM_SHA224;
 	t["CKM_SHA256"]			= CKM_SHA256;
@@ -369,7 +370,8 @@ void SoftHSM::prepareSupportedMechanisms(std::map<std::string, CK_MECHANISM_TYPE
 	t["CKM_SHA3_384"]		= CKM_SHA3_384;
 	t["CKM_SHA3_512"]		= CKM_SHA3_512;
 
-	// HMAC (SHA-2 + SHA-3)
+	// HMAC (RIPEMD, SHA-1, SHA-2 + SHA-3)
+	t["CKM_RIPEMD160_HMAC"]		= CKM_RIPEMD160_HMAC;
 	t["CKM_SHA_1_HMAC"]		= CKM_SHA_1_HMAC;
 	t["CKM_SHA224_HMAC"]		= CKM_SHA224_HMAC;
 	t["CKM_SHA256_HMAC"]		= CKM_SHA256_HMAC;
@@ -678,6 +680,7 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 #ifndef WITH_FIPS
 		case CKM_MD5:
 #endif
+		case CKM_RIPEMD160:
 		case CKM_SHA_1:
 		case CKM_SHA224:
 		case CKM_SHA256:
@@ -699,6 +702,11 @@ CK_RV SoftHSM::C_GetMechanismInfo(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_
 			pInfo->flags = CKF_SIGN | CKF_VERIFY;
 			break;
 #endif
+		case CKM_RIPEMD160_HMAC:
+			pInfo->ulMinKeySize = 20;
+			pInfo->ulMaxKeySize = MAX_HMAC_KEY_BYTES;
+			pInfo->flags = CKF_SIGN | CKF_VERIFY;
+			break;
 		case CKM_SHA_1_HMAC:
 			pInfo->ulMinKeySize = 20;
 			pInfo->ulMaxKeySize = MAX_HMAC_KEY_BYTES;
