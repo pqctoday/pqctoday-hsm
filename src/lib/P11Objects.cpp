@@ -567,7 +567,7 @@ CK_RV P11X509CertificateObj::saveTemplate(Token *token, bool isPrivate, CK_ATTRI
 				X509* cert = d2i_X509(NULL, &p, certDER.size());
 				if (cert != NULL)
 				{
-					X509_PUBKEY* pubkey = X509_get_X509_PUBKEY(cert);
+					X509_PUBKEY* pubkey = (X509_PUBKEY*)X509_get_X509_PUBKEY(cert);
 					if (pubkey != NULL)
 					{
 						unsigned char* spki_der = NULL;

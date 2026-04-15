@@ -655,12 +655,14 @@ static int p11prov_ec_set_keypoint_data(const OSSL_PARAM *params, void *key)
             EC_GROUP_free(group);
             return RET_OSSL_ERR;
         }
-        pstr->length = i2d_ECPKParameters(group, &pstr->data);
+        unsigned char *der = NULL;
+        int len = i2d_ECPKParameters(group, &der);
         EC_GROUP_free(group);
-        if (pstr->length <= 0) {
+        if (len <= 0) {
             ASN1_STRING_free(pstr);
             return RET_OSSL_ERR;
         }
+        ASN1_STRING_set0(pstr, der, len);
         keypoint->curve.sequence = pstr;
         keypoint->curve_type = V_ASN1_SEQUENCE;
     }
