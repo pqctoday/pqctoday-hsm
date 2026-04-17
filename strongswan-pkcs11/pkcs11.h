@@ -381,6 +381,7 @@ typedef unsigned long ck_key_type_t;
 #define CKK_EC_EDWARDS          (0x40UL)
 #define CKK_EC_MONTGOMERY       (0x41UL)
 #define CKK_ML_KEM              (0x42UL)
+#define CKK_ML_DSA              (0x0000004aUL)
 #define CKK_VENDOR_DEFINED      (1UL << 31)
 
 
@@ -751,6 +752,8 @@ typedef unsigned long ck_mechanism_type_t;
 #define CKM_EC_MONTGOMERY_KEY_PAIR_GEN  (0x1056UL)
 #define CKM_EDDSA                       (0x1057UL)
 #define CKM_ML_KEM                      (0x1058UL)
+#define CKM_ML_DSA_KEY_PAIR_GEN         (0x0000001cUL)
+#define CKM_ML_DSA                      (0x0000001dUL)
 #define CKM_JUNIPER_KEY_GEN             (0x1060UL)
 #define CKM_JUNIPER_ECB128              (0x1061UL)
 #define CKM_JUNIPER_CBC128              (0x1062UL)

@@ -194,6 +194,7 @@ CK_MECHANISM_PTR pkcs11_signature_scheme_to_mech(pkcs11_library_t *p11,
 		 KEY_ECDSA, 384,									HASH_SHA384},
 		{SIGN_ECDSA_521,				{CKM_ECDSA,				NULL, 0},
 		 KEY_ECDSA, 521,									HASH_SHA512},
+
 	};
 
 	CK_MECHANISM_PTR mechanism;

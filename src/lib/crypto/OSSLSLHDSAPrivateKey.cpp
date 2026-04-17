@@ -180,7 +180,7 @@ void OSSLSLHDSAPrivateKey::createOSSLKey()
 		OSSL_PARAM_BLD *bld = OSSL_PARAM_BLD_new();
 		if (bld != NULL) {
 			const unsigned char* raw_pk = p + (len / 2);
-			if (OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PRIV_KEY, p, len / 2) &&
+			if (OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PRIV_KEY, p, len) &&
 			    OSSL_PARAM_BLD_push_octet_string(bld, OSSL_PKEY_PARAM_PUB_KEY, raw_pk, len / 2)) {
 				OSSL_PARAM *params = OSSL_PARAM_BLD_to_param(bld);
 				if (params != NULL) {

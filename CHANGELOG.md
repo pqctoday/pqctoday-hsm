@@ -6,6 +6,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **JavaJCE translation layer** (`JavaJCE/`): Java JCE Security Provider that bridges
+  Hyperledger Besu (and any JCA-based application) to softhsmv3 ML-DSA signing. Intercepts
+  `Signature.getInstance("ML-DSA-65")` requests and translates them to `CKM_ML_DSA`
+  (0x1d) `C_SignInit` calls via the patched SunPKCS11 JNI. Components: `SoftHSMJCEProvider`
+  (service registry), `PQC11SignatureSpi` (PKCS#11 translation engine), `PQC11KeyFactorySpi`
+  (key reconstruction). Compiles inside `Dockerfile.physics` and deploys as
+  `/opt/besu/lib/javajce-softhsm.jar`.
+
+- **ML-DSA PKCS#11 v3.2 constants — strongSwan adapter** (`strongswan-pkcs11/pkcs11.h`):
+  Added `CKK_ML_DSA` (0x4a), `CKM_ML_DSA_KEY_PAIR_GEN` (0x1c), and `CKM_ML_DSA` (0x1d)
+  to enable ML-DSA key generation and signing through the strongSwan IKEv2 PKCS#11 adapter.
+
+- **latchset vendor library** (`src/vendor/latchset/`): Added latchset crypto library as
+  vendor dependency for PKCS#11 provider support.
+
+- **pkcs11-provider `openssl_modulesdir` build option** (`src/vendor/pkcs11-provider/`):
+  Added `openssl_modulesdir` meson option to override the OpenSSL provider module install
+  path at build time, enabling custom OpenSSL builds not reflected in pkg-config to install
+  the provider to the correct location.
+
+- **Sandbox integration compatibility report** (`softhsmv3_compatibility_report.md`):
+  Documents integration pathways (YES/PARTIAL/NO) for all 15 pqctoday-sandbox tools against
+  softhsmv3's three interfaces — OpenSSL Provider, strongSwan Adapter, and direct library API.
+
+### Fixed
+
+- **SLH-DSA private key import length** (`src/lib/crypto/OSSLSLHDSAPrivateKey.cpp`):
+  `OSSL_PARAM_BLD_push_octet_string` for `OSSL_PKEY_PARAM_PRIV_KEY` now passes the full
+  key length (`len`) instead of `len / 2`. The SLH-DSA private key is the full concatenated
+  seed; halving the length caused key reconstruction failures on import.
+
+### Tests
+
+- **ML-DSA enum probe** (`strongswan-pkcs11/test_ss.c`): Minimal test binary that prints
+  `KEY_ML_DSA` at runtime to verify the integer value matches the expected PKCS#11 v3.2
+  constant.
+
+---
+
 ## [0.4.26] — 2026-04-15
 
 ### Added

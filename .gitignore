@@ -2,6 +2,7 @@
 build/
 build-wasm/
 build-san/
+build-pqctoday/
 *.o
 *.a
 *.so

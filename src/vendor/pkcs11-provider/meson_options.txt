@@ -1,3 +1,8 @@
+option('openssl_modulesdir',
+       type: 'string',
+       value: '',
+       description: 'Directory to install the OpenSSL provider module')
+
 option('preload_libasan',
        type: 'string',
        value: 'no',

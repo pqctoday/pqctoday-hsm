@@ -49,7 +49,10 @@ libcrypto = dependency('libcrypto', version: '>= 3.0.7', required: false)
 if not libcrypto.found()
   libcrypto = dependency('libcrypto3', version: '>= 3.0.7', required: true)
 endif
-provider_path = libcrypto.get_variable(pkgconfig: 'modulesdir')
+provider_path = get_option('openssl_modulesdir')
+if provider_path == ''
+  provider_path = libcrypto.get_variable(pkgconfig: 'modulesdir')
+endif
 libssl = dependency('libssl', version: '>= 3.0.7', required: false)
 if not libssl.found()
   libssl = dependency('libssl3', version: '>= 3.0.7', required: true, method: 'pkg-config')
