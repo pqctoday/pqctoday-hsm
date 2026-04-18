@@ -50,8 +50,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Documents integration pathways (YES/PARTIAL/NO) for all 15 pqctoday-sandbox tools against
   softhsmv3's three interfaces — OpenSSL Provider, strongSwan Adapter, and direct library API.
 
+- **Token Model ID cross-engine parity** (`rust/src/ffi.rs`, `src/lib/slot_mgr/Token.cpp`):
+  `CK_TOKEN_INFO.model` now reports `"PQCToday"` from both the C++ and Rust engines, aligning
+  the cross-engine token identity with the project brand and removing the legacy `SoftHSM v2`
+  string that could surface depending on which engine answered `C_GetTokenInfo`.
+
+- **webrpc/ roadmap placeholder** (`webrpc/README.md`): Documents the plan to extract
+  pqctoday-sandbox's `kms_router.py` (Python Flask + PyKCS11 signing proxy) into a proper
+  standalone softhsmv3 REST signing service. Covers current prototype location, the three
+  blockers (auth, persistence, deployment coupling), the target standalone-service shape
+  (bearer-token auth, persistent volume, shared Fly.io deployment), and why extraction
+  should wait until the orchestrator is deployed and usage patterns are observed. Marked
+  as roadmap — prerequisite is orchestrator Fly.io Milestones A–D.
+
+### Changed
+
+- **Repo / path rename — softhsmv3 → pqctoday-hsm** (`package.json`,
+  `scripts/commit_changes.sh`, `softhsm2.conf`, `tests/softhsm2-local.conf`): updates
+  `package.json` repository URLs and resolves hardcoded `/antigravity/softhsmv3/` absolute
+  paths in build scripts and test configs following the repo rename to `pqctoday-hsm`.
+
 ### Fixed
 
+- **OpenSSL 4.1.0-dev strict-structs API typing regressions**
+  (`src/lib/P11Objects.cpp`, `src/vendor/pkcs11-provider/src/encoder.c`): OpenSSL 4.1.0-dev
+  tightens several struct signatures that previously compiled cleanly; the provider encoder
+  and P11 object code now use the updated typing so softhsmv3 builds against recent OpenSSL
+  master.
+- **Docker CI compilation — quarantine compliance executable during CXX linking**
+  (`CMakeLists.txt`, `src/CMakeLists.txt`, `src/lib/main.cpp`,
+  `src/lib/session_mgr/{Session,SessionManager}.{cpp,h}`, `README.md`,
+  `openssl_test.cnf`): the `p11_v32_compliance_test` executable was being linked in the
+  default target and breaking Docker CI C++ link steps on stock toolchains. The compliance
+  runner is now quarantined behind an opt-in target so CI and the shared Docker base image
+  compile cleanly, with README + test-config updates describing the new build flow.
 - **SLH-DSA private key import length** (`src/lib/crypto/OSSLSLHDSAPrivateKey.cpp`):
   `OSSL_PARAM_BLD_push_octet_string` for `OSSL_PKEY_PARAM_PRIV_KEY` now passes the full
   key length (`len`) instead of `len / 2`. The SLH-DSA private key is the full concatenated
