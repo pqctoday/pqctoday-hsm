@@ -104,13 +104,24 @@ METHOD(key_exchange_t, get_public_key, bool,
 	CK_MECHANISM mech = { this->mech_key, NULL, 0 };
 	CK_OBJECT_HANDLE pub_key;
 	CK_BBOOL ck_true = CK_TRUE;
+	/* softhsmv3 requires CKA_PARAMETER_SET on the ML-KEM keygen template
+	 * to select the variant (512/768/1024). Without it C_GenerateKeyPair
+	 * returns CKR_TEMPLATE_INCOMPLETE. Currently pkcs11_kem only supports
+	 * ML-KEM-768; hardcode CKP_ML_KEM_768. */
+	CK_ULONG parameter_set = CKP_ML_KEM_768;
 
-	/* Setting CKA_DERIVE for KEMs as it enables the encapsulation routines implicitly */
+	/* PKCS#11 v3.2 KEM flags. softhsmv3 also sets these internally during
+	 * keygen (SoftHSM_keygen.cpp 6651/6732) but being explicit is safer
+	 * and documents intent. */
 	CK_ATTRIBUTE pub_attr[] = {
-		{ CKA_DERIVE, &ck_true, sizeof(ck_true) }
+		{ CKA_DERIVE,        &ck_true,       sizeof(ck_true)       },
+		{ CKA_ENCAPSULATE,   &ck_true,       sizeof(ck_true)       },
+		{ CKA_PARAMETER_SET, &parameter_set, sizeof(parameter_set) },
 	};
 	CK_ATTRIBUTE pri_attr[] = {
-		{ CKA_DERIVE, &ck_true, sizeof(ck_true) }
+		{ CKA_DERIVE,        &ck_true,       sizeof(ck_true)       },
+		{ CKA_DECAPSULATE,   &ck_true,       sizeof(ck_true)       },
+		{ CKA_PARAMETER_SET, &parameter_set, sizeof(parameter_set) },
 	};
 
 	CK_RV rv = this->lib->f->C_GenerateKeyPair(this->session, &mech,
@@ -121,6 +132,9 @@ METHOD(key_exchange_t, get_public_key, bool,
 		DBG1(DBG_CFG, "PKCS#11 C_GenerateKeyPair() KEM error: %N", ck_rv_names, rv);
 		return FALSE;
 	}
+	DBG1(DBG_CFG, "PKCS#11 KEM keygen OK: session=%lu pub=%lu pri=%lu",
+	     (unsigned long)this->session, (unsigned long)pub_key,
+	     (unsigned long)this->pri_key);
 
 	/* Grab the public key value */
 	if (!this->lib->get_ck_attribute(this->lib, this->session, pub_key, CKA_VALUE, &this->pub_key)) {
@@ -136,24 +150,190 @@ METHOD(key_exchange_t, get_public_key, bool,
  * Initiator: Receives the ciphertext
  * Responder: Receives the initiator's public key
  */
-METHOD(key_exchange_t, set_public_key, bool,
-	private_pkcs11_kem_t *this, chunk_t value)
+/* FIPS 203 ML-KEM pubkey sizes — strongSwan's upstream
+ * key_exchange_verify_pubkey() codes all ML_KEM_* cases as
+ * `valid = FALSE` with comment "verification currently not supported, do
+ * in plugin". So if we delegate to that helper, it fails. Do the check
+ * ourselves. */
+static bool pkcs11_kem_verify_pubkey(key_exchange_method_t group, chunk_t value)
 {
-	if (!key_exchange_verify_pubkey(this->group, value)) {
+	switch (group) {
+		case ML_KEM_512:  return value.len == 800;
+		case ML_KEM_768:  return value.len == 1184;
+		case ML_KEM_1024: return value.len == 1568;
+		default:          return key_exchange_verify_pubkey(group, value);
+	}
+}
+
+/* Resolve the v3.2 KEM entry points directly from the underlying softhsmv3
+ * module.  pkcs11-spy < 0.26 doesn't forward C_EncapsulateKey/C_DecapsulateKey
+ * in its exposed CK_FUNCTION_LIST, so the cast of `this->lib->f` to
+ * CK_FUNCTION_LIST_3_0* reads garbage at the v3 slot offsets. We dlopen the
+ * real module named in $PKCS11SPY (or fall back to the common install path)
+ * and dlsym the two symbols. They are set as the DSO's top-level C_* symbols
+ * by softhsmv3, so no session/handle sharing concern — the call still targets
+ * the same in-process instance via the same handleManager state. */
+#include <dlfcn.h>
+typedef CK_RV (*encap_fn_t)(CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE,
+                            CK_ATTRIBUTE_PTR, CK_ULONG,
+                            CK_BYTE_PTR, CK_ULONG_PTR, CK_OBJECT_HANDLE_PTR);
+typedef CK_RV (*decap_fn_t)(CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDLE,
+                            CK_ATTRIBUTE_PTR, CK_ULONG,
+                            CK_BYTE_PTR, CK_ULONG, CK_OBJECT_HANDLE_PTR);
+
+static bool get_v3_kem_funcs(encap_fn_t *enc, decap_fn_t *dec)
+{
+	static encap_fn_t cached_enc = NULL;
+	static decap_fn_t cached_dec = NULL;
+	if (cached_enc && cached_dec) {
+		*enc = cached_enc;
+		*dec = cached_dec;
+		return TRUE;
+	}
+	const char *real = getenv("PKCS11SPY");
+	if (!real || !*real) {
+		real = "/usr/local/lib/softhsm/libsofthsmv3.so";
+	}
+	void *h = dlopen(real, RTLD_NOW | RTLD_NOLOAD);
+	if (!h) h = dlopen(real, RTLD_NOW);
+	if (!h) {
+		DBG1(DBG_CFG, "PKCS#11 KEM: dlopen(%s) failed: %s", real, dlerror());
+		return FALSE;
+	}
+	cached_enc = (encap_fn_t)dlsym(h, "C_EncapsulateKey");
+	cached_dec = (decap_fn_t)dlsym(h, "C_DecapsulateKey");
+	if (!cached_enc || !cached_dec) {
+		DBG1(DBG_CFG, "PKCS#11 KEM: dlsym C_Encap/Decap missing on %s", real);
+		return FALSE;
+	}
+	*enc = cached_enc;
+	*dec = cached_dec;
+	return TRUE;
+}
+
+/* Responder encapsulation — produces ciphertext + shared secret from
+ * the initiator's public key. Called eagerly at set_public_key() time so
+ * get_public_key() can immediately return the ciphertext (IKE flow calls
+ * get_public_key BEFORE get_shared_secret on the responder). */
+static bool encapsulate_on_responder(private_pkcs11_kem_t *this)
+{
+	encap_fn_t encap_fn = NULL;
+	decap_fn_t decap_fn = NULL;
+	if (!get_v3_kem_funcs(&encap_fn, &decap_fn)) {
+		DBG1(DBG_CFG, "PKCS#11 KEM: v3 function resolution failed");
 		return FALSE;
 	}
 
-	/* Strongswan's KEM flow denotes whether we have generated our own key first.
-       If we have pri_key, we are the initiator, so this value is literally CIPHERTEXT. 
-       If we do not have pri_key, we are the responder, so this value is the PUBLIC KEY. */
+	CK_OBJECT_CLASS klass_key = CKO_PUBLIC_KEY;
+	CK_KEY_TYPE type_key = CKK_ML_KEM;
+	CK_ULONG parameter_set = CKP_ML_KEM_768;
+	CK_BBOOL ck_true_encap = CK_TRUE;
+	/* softhsmv3 enforces CKA_ENCAPSULATE=TRUE on the pub key for
+	 * C_EncapsulateKey (SoftHSM_kem.cpp returns
+	 * CKR_KEY_FUNCTION_NOT_PERMITTED otherwise). */
+	CK_ATTRIBUTE key_template[] = {
+		{ CKA_CLASS,         &klass_key,         sizeof(klass_key)     },
+		{ CKA_KEY_TYPE,      &type_key,          sizeof(type_key)      },
+		{ CKA_PARAMETER_SET, &parameter_set,     sizeof(parameter_set) },
+		{ CKA_ENCAPSULATE,   &ck_true_encap,     sizeof(ck_true_encap) },
+		{ CKA_VALUE,         this->pub_key.ptr,  this->pub_key.len     },
+	};
 
-	if (this->pri_key != CK_INVALID_HANDLE) {
-		this->ciphertext = chunk_clone(value);
-	} else {
-		this->pub_key = chunk_clone(value);
+	CK_OBJECT_HANDLE hPublicKey, hSecretKey;
+	CK_RV rv = this->lib->f->C_CreateObject(this->session, key_template,
+	                                        countof(key_template), &hPublicKey);
+	if (rv != CKR_OK) {
+		DBG1(DBG_CFG, "PKCS#11 KEM C_CreateObject(peer pubkey) failed: %N",
+		     ck_rv_names, rv);
+		return FALSE;
 	}
 
+	/* Output secret-key template per PKCS#11 v3.2 §5.20 and
+	 * pqctoday-hsm/p11_v32_compliance_test.cpp. Without this the call
+	 * mis-parses its argument list, reading garbage as ciphertext-buffer
+	 * and returning OBJECT_HANDLE_INVALID / ATTRIBUTE_VALUE_INVALID. */
+	CK_OBJECT_CLASS sec_class = CKO_SECRET_KEY;
+	CK_KEY_TYPE     sec_type  = CKK_GENERIC_SECRET;
+	CK_ULONG        sec_len   = 32;  /* ML-KEM shared secret is 32 bytes */
+	CK_BBOOL        ck_true2  = CK_TRUE;
+	CK_BBOOL        ck_false  = CK_FALSE;
+	CK_ATTRIBUTE secret_tmpl[] = {
+		{ CKA_CLASS,       &sec_class, sizeof(sec_class) },
+		{ CKA_KEY_TYPE,    &sec_type,  sizeof(sec_type)  },
+		{ CKA_VALUE_LEN,   &sec_len,   sizeof(sec_len)   },
+		{ CKA_TOKEN,       &ck_false,  sizeof(ck_false)  },
+		{ CKA_EXTRACTABLE, &ck_true2,  sizeof(ck_true2)  },
+	};
+
+	CK_MECHANISM encap_mech = { this->mech_encap, NULL, 0 };
+	unsigned long ct_len = 0;
+	rv = encap_fn(this->session, &encap_mech, hPublicKey,
+	              secret_tmpl, countof(secret_tmpl),
+	              NULL, &ct_len, &hSecretKey);
+	if (rv != CKR_OK) {
+		DBG1(DBG_CFG, "PKCS#11 KEM C_EncapsulateKey(size query) failed: %N",
+		     ck_rv_names, rv);
+		return FALSE;
+	}
+
+	this->ciphertext = chunk_alloc(ct_len);
+	rv = encap_fn(this->session, &encap_mech, hPublicKey,
+	              secret_tmpl, countof(secret_tmpl),
+	              this->ciphertext.ptr, &ct_len, &hSecretKey);
+	if (rv != CKR_OK) {
+		DBG1(DBG_CFG, "PKCS#11 KEM C_EncapsulateKey failed: %N",
+		     ck_rv_names, rv);
+		return FALSE;
+	}
+
+	if (!this->lib->get_ck_attribute(this->lib, this->session, hSecretKey,
+	                                  CKA_VALUE, &this->secret)) {
+		DBG1(DBG_CFG, "PKCS#11 KEM get CKA_VALUE on secret failed");
+		return FALSE;
+	}
+
+	DBG1(DBG_CFG, "PKCS#11 KEM encap OK: session=%lu ct_len=%lu secret_len=%zu",
+	     (unsigned long)this->session, (unsigned long)ct_len, this->secret.len);
 	return TRUE;
+}
+
+/* Expected ciphertext sizes (FIPS 203). */
+static size_t kem_ciphertext_size(key_exchange_method_t group)
+{
+	switch (group) {
+		case ML_KEM_512:  return 768;
+		case ML_KEM_768:  return 1088;
+		case ML_KEM_1024: return 1568;
+		default:          return 0;
+	}
+}
+
+METHOD(key_exchange_t, set_public_key, bool,
+	private_pkcs11_kem_t *this, chunk_t value)
+{
+	/* Strongswan's KEM flow denotes whether we have generated our own key first.
+       If we have pri_key, we are the initiator, so this value is literally CIPHERTEXT.
+       If we do not have pri_key, we are the responder, so this value is the PUBLIC KEY.
+       The length check therefore depends on role: ciphertext size (1088 for
+       ML-KEM-768) on the initiator, public key size (1184) on the responder.
+       Previous code always required pubkey-size and rejected initiator input. */
+
+	if (this->pri_key != CK_INVALID_HANDLE) {
+		size_t expected = kem_ciphertext_size(this->group);
+		if (!expected || value.len != expected) {
+			DBG1(DBG_CFG, "PKCS#11 KEM initiator: bad ciphertext size %zu (expected %zu)",
+			     value.len, expected);
+			return FALSE;
+		}
+		this->ciphertext = chunk_clone(value);
+		return TRUE;
+	}
+
+	if (!pkcs11_kem_verify_pubkey(this->group, value)) {
+		return FALSE;
+	}
+	this->pub_key = chunk_clone(value);
+	return encapsulate_on_responder(this);
 }
 
 /**
@@ -162,48 +342,52 @@ METHOD(key_exchange_t, set_public_key, bool,
 METHOD(key_exchange_t, get_shared_secret, bool,
 	private_pkcs11_kem_t *this, chunk_t *secret)
 {
-	/* Use PKCS11 v3.2 KEM API */
-	CK_FUNCTION_LIST_3_0 *funcs = (CK_FUNCTION_LIST_3_0 *)this->lib->f;
-
-	if (!funcs->C_EncapsulateKey || !funcs->C_DecapsulateKey) {
-		DBG1(DBG_CFG, "PKCS#11 HSM lacks IKEv2 PQC KEM v3.2 support (C_EncapsulateKey/C_DecapsulateKey missing)");
+	/* Resolve v3.2 KEM entry points from the real softhsmv3 module
+	 * (bypassing pkcs11-spy's v2-only function table). */
+	encap_fn_t encap_fn = NULL;
+	decap_fn_t decap_fn = NULL;
+	if (!get_v3_kem_funcs(&encap_fn, &decap_fn)) {
 		return FALSE;
 	}
 
 	if (this->pri_key == CK_INVALID_HANDLE) {
-		/* We are RESPONDER. We must ENCAPSULATE against this->pub_key */
-		CK_OBJECT_CLASS klass_key = CKO_PUBLIC_KEY;
-		CK_KEY_TYPE type_key = CKK_ML_KEM;
-		CK_ATTRIBUTE key_template[] = {
-			{ CKA_CLASS, &klass_key, sizeof(klass_key) },
-			{ CKA_KEY_TYPE, &type_key, sizeof(type_key) },
-			{ CKA_VALUE, this->pub_key.ptr, this->pub_key.len }
-		};
-
-		CK_OBJECT_HANDLE hPublicKey, hSecretKey;
-		CK_RV rv = this->lib->f->C_CreateObject(this->session, key_template, countof(key_template), &hPublicKey);
-		if (rv != CKR_OK) return FALSE;
-
-		CK_MECHANISM encap_mech = { this->mech_encap, NULL, 0 };
-		
-		unsigned long ct_len = 0;
-		/* Determine ciphertext length */
-		rv = funcs->C_EncapsulateKey(this->session, &encap_mech, hPublicKey, NULL, &ct_len, &hSecretKey);
-		if (rv != CKR_OK) return FALSE;
-
-		this->ciphertext = chunk_alloc(ct_len);
-		rv = funcs->C_EncapsulateKey(this->session, &encap_mech, hPublicKey, this->ciphertext.ptr, &ct_len, &hSecretKey);
-		if (rv != CKR_OK) return FALSE;
-
-		/* Read Secret */
-		if (!this->lib->get_ck_attribute(this->lib, this->session, hSecretKey, CKA_VALUE, &this->secret)) return FALSE;
-
+		/* We are RESPONDER — encapsulation already done in set_public_key.
+		 * Just verify we have the secret computed. */
+		if (!this->secret.ptr) {
+			DBG1(DBG_CFG, "PKCS#11 KEM responder: no secret (encap skipped?)");
+			return FALSE;
+		}
 	} else {
 		/* We are INITIATOR. We must DECAPSULATE using this->pri_key and this->ciphertext */
 		CK_MECHANISM decap_mech = { this->mech_encap, NULL, 0 };
 		CK_OBJECT_HANDLE hSecretKey;
 
-		CK_RV rv = funcs->C_DecapsulateKey(this->session, &decap_mech, this->pri_key, this->ciphertext.ptr, this->ciphertext.len, &hSecretKey);
+		DBG1(DBG_CFG, "PKCS#11 KEM decap attempt: session=%lu pri=%lu ct_len=%zu",
+		     (unsigned long)this->session, (unsigned long)this->pri_key,
+		     this->ciphertext.len);
+
+		/* Output secret-key template — PKCS#11 v3.2 §5.20 (same shape as
+		 * encap side). Omitting it shifts args and softhsmv3 returns
+		 * spurious OBJECT_HANDLE_INVALID. */
+		CK_OBJECT_CLASS sec_class = CKO_SECRET_KEY;
+		CK_KEY_TYPE     sec_type  = CKK_GENERIC_SECRET;
+		CK_ULONG        sec_len   = 32;
+		CK_BBOOL        ck_true3  = CK_TRUE;
+		CK_BBOOL        ck_false2 = CK_FALSE;
+		CK_ATTRIBUTE decap_tmpl[] = {
+			{ CKA_CLASS,       &sec_class, sizeof(sec_class) },
+			{ CKA_KEY_TYPE,    &sec_type,  sizeof(sec_type)  },
+			{ CKA_VALUE_LEN,   &sec_len,   sizeof(sec_len)   },
+			{ CKA_TOKEN,       &ck_false2, sizeof(ck_false2) },
+			{ CKA_EXTRACTABLE, &ck_true3,  sizeof(ck_true3)  },
+		};
+
+		CK_RV rv = decap_fn(this->session, &decap_mech,
+		                    this->pri_key,
+		                    decap_tmpl, countof(decap_tmpl),
+		                    this->ciphertext.ptr,
+		                    this->ciphertext.len,
+		                    &hSecretKey);
 		if (rv != CKR_OK) {
 			DBG1(DBG_CFG, "PKCS#11 C_DecapsulateKey() failed: %N", ck_rv_names, rv);
 			return FALSE;
@@ -244,7 +428,13 @@ pkcs11_kem_t *pkcs11_kem_create(key_exchange_method_t group)
 	CK_MECHANISM_TYPE encap_mech = 0;
 
 	if (group == ML_KEM_768) {
-		key_gen_mech = CKM_ML_KEM;
+		/* softhsmv3 uses SEPARATE OIDs: CKM_ML_KEM_KEY_PAIR_GEN (0x0F)
+		 * for generating the Alice keypair, CKM_ML_KEM (0x17) for the
+		 * Bob encapsulate + Alice decapsulate call.  Prior code used
+		 * CKM_ML_KEM for both, which made C_GenerateKeyPair return
+		 * CKR_MECHANISM_INVALID and strongSwan silently fall through
+		 * to the openssl plugin — see pkcs11.h note above. */
+		key_gen_mech = CKM_ML_KEM_KEY_PAIR_GEN;
 		encap_mech = CKM_ML_KEM;
 	} else {
 		return NULL;

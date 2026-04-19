@@ -380,7 +380,11 @@ typedef unsigned long ck_key_type_t;
 #define CKK_GOST28147           (0x32UL)
 #define CKK_EC_EDWARDS          (0x40UL)
 #define CKK_EC_MONTGOMERY       (0x41UL)
-#define CKK_ML_KEM              (0x42UL)
+/* Aligned with softhsmv3's src/lib/pkcs11/pkcs11t.h:439 (0x49).  Prior
+ * value 0x42 caused softhsmv3 to reject C_CreateObject(peer pubkey)
+ * with CKR_ATTRIBUTE_VALUE_INVALID because the CKA_KEY_TYPE value
+ * didn't match any registered type. */
+#define CKK_ML_KEM              (0x00000049UL)
 #define CKK_ML_DSA              (0x0000004aUL)
 #define CKK_VENDOR_DEFINED      (1UL << 31)
 
@@ -505,6 +509,14 @@ typedef unsigned long ck_attribute_type_t;
 /* PKCS#11 v3.2 §6.67.1 / §6.68.1 — shared parameter-set attribute
  * used by ML-KEM and ML-DSA keys. */
 #define CKA_PARAMETER_SET               (0x61dUL)
+/* PKCS#11 v3.2 KEM capability attributes — aligned with softhsmv3
+ * src/lib/pkcs11/pkcs11t.h lines 672-673. Public key imported via
+ * C_CreateObject must have CKA_ENCAPSULATE=TRUE for C_EncapsulateKey to
+ * succeed (SoftHSM_kem.cpp checks this; without it, returns
+ * CKR_KEY_FUNCTION_NOT_PERMITTED). Same for CKA_DECAPSULATE on the
+ * private-key side. */
+#define CKA_ENCAPSULATE                 (0x00000633UL)
+#define CKA_DECAPSULATE                 (0x00000634UL)
 #define CKA_VENDOR_DEFINED              (1UL << 31)
 
 /* PKCS#11 v3.2 §6.67.2 — ML-DSA parameter set values */
@@ -766,7 +778,15 @@ typedef unsigned long ck_mechanism_type_t;
 #define CKM_EC_EDWARDS_KEY_PAIR_GEN     (0x1055UL)
 #define CKM_EC_MONTGOMERY_KEY_PAIR_GEN  (0x1056UL)
 #define CKM_EDDSA                       (0x1057UL)
-#define CKM_ML_KEM                      (0x1058UL)
+/* Aligned with softhsmv3's src/lib/pkcs11/pkcs11t.h — those are the OIDs
+ * the linked-in token advertises via C_GetMechanismList. Without this
+ * match pkcs11_kem.c:find_token silently fails and strongSwan's
+ * crypto_factory falls through to the openssl plugin, bypassing the HSM
+ * for ML-KEM. softhsmv3 uses SEPARATE OIDs for keygen vs encap; prior
+ * code collapsed both to 0x1058 (non-existent in softhsmv3) which is why
+ * C_GenerateKeyPair returned CKR_MECHANISM_INVALID. */
+#define CKM_ML_KEM_KEY_PAIR_GEN         (0x0000000FUL)
+#define CKM_ML_KEM                      (0x00000017UL)
 #define CKM_ML_DSA_KEY_PAIR_GEN         (0x0000001cUL)
 #define CKM_ML_DSA                      (0x0000001dUL)
 #define CKM_JUNIPER_KEY_GEN             (0x1060UL)
@@ -1564,9 +1584,27 @@ struct ck_function_list_3_0
   CK_C_VerifyMessageBegin C_VerifyMessageBegin;
   CK_C_VerifyMessageNext C_VerifyMessageNext;
   CK_C_MessageVerifyFinal C_MessageVerifyFinal;
-  /* KEM functions from v3.0 / v3.2 */
-  ck_rv_t (*C_EncapsulateKey)(ck_session_handle_t, struct ck_mechanism*, ck_object_handle_t, void*, unsigned long*, ck_object_handle_t*);
-  ck_rv_t (*C_DecapsulateKey)(ck_session_handle_t, struct ck_mechanism*, ck_object_handle_t, void*, unsigned long, ck_object_handle_t*);
+  /* KEM functions — PKCS#11 v3.2 §5.20 (C_EncapsulateKey, C_DecapsulateKey).
+ * The secret-key attribute template + count are REQUIRED by the spec; our
+ * initial fork copy omitted them, causing softhsmv3 to read garbage as
+ * hKey/ciphertext and return OBJECT_HANDLE_INVALID / ATTRIBUTE_VALUE_INVALID.
+ * Signatures verified against pqctoday-hsm/p11_v32_compliance_test.cpp. */
+  ck_rv_t (*C_EncapsulateKey)(ck_session_handle_t hSession,
+                              struct ck_mechanism* pMech,
+                              ck_object_handle_t hPublicKey,
+                              struct ck_attribute* pTemplate,
+                              unsigned long ulAttributeCount,
+                              unsigned char* pCiphertext,
+                              unsigned long* pulCiphertextLen,
+                              ck_object_handle_t* phKey);
+  ck_rv_t (*C_DecapsulateKey)(ck_session_handle_t hSession,
+                              struct ck_mechanism* pMech,
+                              ck_object_handle_t hPrivateKey,
+                              struct ck_attribute* pTemplate,
+                              unsigned long ulAttributeCount,
+                              unsigned char* pCiphertext,
+                              unsigned long ulCiphertextLen,
+                              ck_object_handle_t* phKey);
 };
 
 
