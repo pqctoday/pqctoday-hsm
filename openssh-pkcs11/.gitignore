@@ -1,0 +1,29 @@
+# OpenSSH upstream sources + build artifacts (ephemeral)
+build/
+openssh-*.tar.gz
+openssh-*-src/
+
+# WASM bundles — rebuilt on demand and copied to the hub; not checked in
+dist/
+
+# Node / tooling
+node_modules/
+*.log
+npm-debug.log*
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+*.sw?
+
+# Environment
+.env
+.env.local
+
+# Private dev files
+CLAUDE.md
+.claude/
+.cursorrules
+.agent/
+.agents/

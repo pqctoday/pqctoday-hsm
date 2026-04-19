@@ -93,6 +93,7 @@ import CK from '@pqctoday/softhsm-wasm/constants'
 | npm package | N/A | **@pqctoday/softhsm-wasm** |
 | StrongSwan IKEv2 ML-DSA | Not supported | **`strongswan-pkcs11/` adapter** — `CKK_ML_DSA` (0x4a), `CKM_ML_DSA_KEY_PAIR_GEN` (0x1c), `CKM_ML_DSA` (0x1d) |
 | Java JCE / Besu integration | Not supported | **`JavaJCE/` layer** — routes JCA `ML-DSA-65` and `ML-KEM-768` requests to softhsmv3 via patched SunPKCS11 |
+| OpenSSH ML-DSA-65 signing | Not supported | **`openssh-pkcs11/` connector** — `ssh-mldsa-65` key type (draft-sfluhrer-ssh-mldsa-06) with signing via `CKM_ML_DSA` (0x1d); WASM client + privsep-free server |
 
 ## PQC Algorithms
 
@@ -703,7 +704,7 @@ SoftHSMv3 introduces a **Tri-Mode Storage Architecture** to support ephemeral, f
 
 ## Integration Interfaces
 
-SoftHSMv3 exposes four integration interfaces that cover the full stack from browser WASM to enterprise infrastructure:
+SoftHSMv3 exposes five integration interfaces that cover the full stack from browser WASM to enterprise infrastructure:
 
 | Interface | Location | Use case |
 | --- | --- | --- |
@@ -711,6 +712,7 @@ SoftHSMv3 exposes four integration interfaces that cover the full stack from bro
 | **OpenSSL 3.x Provider** | `src/vendor/pkcs11-provider/` | Transparent routing from any `openssl` CLI or linked app |
 | **StrongSwan Adapter** | `strongswan-pkcs11/` | IKEv2 VPN — ML-KEM-768 key exchange + ML-DSA signing |
 | **Java JCE Layer** | `JavaJCE/` | Hyperledger Besu and JCA-based apps — ML-DSA-65 / ML-KEM-768 |
+| **OpenSSH Connector** | `openssh-pkcs11/` | ML-DSA-65 ssh / sshd (draft-sfluhrer-ssh-mldsa-06); WASM build for in-browser demos |
 
 ---
 
@@ -826,6 +828,43 @@ RUN javac -cp /opt/jre/lib/ext/sunpkcs11.jar -d /build/javajce /JavaJCE/src/**/*
 ```
 
 The resulting JAR is added to the Besu classpath so all `Signature`/`KeyAgreement` calls transparently route through softhsmv3.
+
+---
+
+## OpenSSH PKCS#11 Connector (`openssh-pkcs11/`)
+
+The `openssh-pkcs11/` connector patches `openssh-portable` with the
+[`ssh-mldsa-65`](https://datatracker.ietf.org/doc/draft-sfluhrer-ssh-mldsa/)
+key type (draft-sfluhrer-ssh-mldsa-06, NIST Category 3, FIPS 204) and compiles
+the client and a privsep-free server to WebAssembly. All ML-DSA signing is
+delegated to softhsmv3 via `CKM_ML_DSA` (0x1d) over PKCS#11 v3.2.
+
+### Layout
+
+| File | Role |
+| --- | --- |
+| `patches/ssh-mldsa.c` | New OpenSSH key-type module — raw 1,952-byte ML-DSA-65 pubkey; signing is PKCS#11-only |
+| `patches/apply_mldsa_patches.py` | Python driver that applies source-tree patches to an extracted `openssh-portable` tree (`sshkey.c`, `ssh-pkcs11.c`, `Makefile.in`, …) |
+| `wasm-shims/sshd_wasm_main.c` | Privsep-free `sshd` entry point for the WASM build — replaces `fork()` / PAM / PTY / `setuid()` with a single-transport handshake |
+| `wasm-shims/pkcs11_static.c` | Static `C_GetFunctionList` linkage against softhsmv3 so the WASM bundle ships self-contained without `dlopen` |
+| `wasm-shims/{posix_stubs,socket_wasm}.c` | POSIX / networking stubs for Emscripten, bridging OpenSSH's file-descriptor I/O to the browser's SharedArrayBuffer transport |
+| `scripts/build-wasm.sh` | End-to-end Emscripten build producing `openssh-{client,server}.{js,wasm}` |
+| `scripts/copy-to-hub.sh` | Deploys built WASM bundles into the `pqctoday-hub` repo |
+
+### Build
+
+Run from the `pqctoday-hsm/` root after the softhsmv3 static archive and
+OpenSSL WASM prefix are already built:
+
+```bash
+bash openssh-pkcs11/scripts/build-wasm.sh
+bash openssh-pkcs11/scripts/copy-to-hub.sh   # deploys to ../pqctoday-hub/public/wasm/
+```
+
+See `openssh-pkcs11/README.md` for details and environment overrides
+(`OPENSSL_WASM`, `SOFTHSM_WASM`, `HUB`).
+
+---
 
 ## Building (Native)
 
