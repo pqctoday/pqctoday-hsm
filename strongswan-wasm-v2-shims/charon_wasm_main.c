@@ -253,6 +253,127 @@ int wasm_vpn_list_pqc_mechanisms(void)
          | (have_mlkem    ? 4 : 0);
 }
 
+/* ── ML-DSA-65 sign/verify round-trip via softhsmv3 in WASM ───────────── */
+
+#define CKA_PARAMETER_SET_VAL     0x0000061DUL
+#define CKK_ML_DSA_VAL            0x0000004AUL
+#define CKP_ML_DSA_65_VAL         0x00000002UL
+
+/* Run the full softhsmv3 PKCS#11 sign/verify sequence entirely within WASM:
+ *   C_InitToken → C_InitPIN → C_GenerateKeyPair (ML-DSA-65) → C_SignInit /
+ *   C_Sign → C_VerifyInit / C_Verify. Prove the HSM path is exercisable
+ *   from the browser before we layer on IKE transport in Phase 3c.
+ * Returns the signature length (~3293 B for ML-DSA-65) on success, -1 on err. */
+EMSCRIPTEN_KEEPALIVE
+int wasm_vpn_ml_dsa_selftest(void)
+{
+    CK_FUNCTION_LIST *p11 = NULL;
+    if (C_GetFunctionList(&p11) != CKR_OK || !p11) return -1;
+
+    CK_C_INITIALIZE_ARGS iargs = { 0 };
+    iargs.flags = CKF_OS_LOCKING_OK;
+    CK_RV rv = p11->C_Initialize(&iargs);
+    if (rv != CKR_OK && rv != CKR_CRYPTOKI_ALREADY_INITIALIZED) return -1;
+
+    CK_SLOT_ID slot_id;
+    CK_ULONG   slot_count = 1;
+    rv = p11->C_GetSlotList(CK_FALSE, &slot_id, &slot_count);
+    if (rv != CKR_OK || slot_count == 0) return -1;
+
+    /* Init token + PINs. Idempotent after first run. */
+    const char *so_pin = "1234";
+    const char *user_pin = "1234";
+    CK_UTF8CHAR label[32];
+    memset(label, ' ', sizeof(label));
+    memcpy(label, "wasm-selftest", 13);
+    p11->C_InitToken(slot_id, (CK_UTF8CHAR_PTR)so_pin, strlen(so_pin), label);
+
+    CK_SESSION_HANDLE so_sess;
+    if (p11->C_OpenSession(slot_id,
+            CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL, NULL, &so_sess) != CKR_OK)
+        return -1;
+    p11->C_Login(so_sess, CKU_SO, (CK_UTF8CHAR_PTR)so_pin, strlen(so_pin));
+    p11->C_InitPIN(so_sess, (CK_UTF8CHAR_PTR)user_pin, strlen(user_pin));
+    p11->C_Logout(so_sess);
+    p11->C_CloseSession(so_sess);
+
+    /* Normal user session — generate the ML-DSA keypair. */
+    CK_SESSION_HANDLE sess;
+    if (p11->C_OpenSession(slot_id,
+            CKF_SERIAL_SESSION | CKF_RW_SESSION, NULL, NULL, &sess) != CKR_OK)
+        return -1;
+    if (p11->C_Login(sess, CKU_USER,
+                     (CK_UTF8CHAR_PTR)user_pin, strlen(user_pin)) != CKR_OK) {
+        wasm_vpn_emit("error", "C_Login(user) failed");
+        return -1;
+    }
+
+    CK_MECHANISM keygen_mech = { CKM_ML_DSA_KEY_PAIR_GEN, NULL, 0 };
+    CK_OBJECT_CLASS pubclass = CKO_PUBLIC_KEY;
+    CK_OBJECT_CLASS privclass = CKO_PRIVATE_KEY;
+    CK_KEY_TYPE ktype = CKK_ML_DSA_VAL;
+    CK_ULONG paramset = CKP_ML_DSA_65_VAL;
+    CK_BBOOL ck_true = CK_TRUE;
+    CK_BBOOL ck_false = CK_FALSE;
+    CK_ATTRIBUTE pub_tmpl[] = {
+        { CKA_CLASS,            &pubclass, sizeof(pubclass) },
+        { CKA_KEY_TYPE,         &ktype,    sizeof(ktype)    },
+        { CKA_VERIFY,           &ck_true,  sizeof(ck_true)  },
+        { CKA_PARAMETER_SET_VAL,&paramset, sizeof(paramset) },
+        { CKA_TOKEN,            &ck_false, sizeof(ck_false) },
+    };
+    CK_ATTRIBUTE priv_tmpl[] = {
+        { CKA_CLASS,            &privclass,sizeof(privclass)},
+        { CKA_KEY_TYPE,         &ktype,    sizeof(ktype)    },
+        { CKA_SIGN,             &ck_true,  sizeof(ck_true)  },
+        { CKA_PARAMETER_SET_VAL,&paramset, sizeof(paramset) },
+        { CKA_TOKEN,            &ck_false, sizeof(ck_false) },
+    };
+
+    CK_OBJECT_HANDLE hpub, hpriv;
+    rv = p11->C_GenerateKeyPair(sess, &keygen_mech,
+                                pub_tmpl, sizeof(pub_tmpl)/sizeof(pub_tmpl[0]),
+                                priv_tmpl, sizeof(priv_tmpl)/sizeof(priv_tmpl[0]),
+                                &hpub, &hpriv);
+    if (rv != CKR_OK) {
+        char m[64]; snprintf(m, sizeof(m), "C_GenerateKeyPair rv=0x%lx", (unsigned long)rv);
+        wasm_vpn_emit("error", m);
+        return -1;
+    }
+
+    /* Sign. */
+    const char *msg = "WASM ML-DSA selftest, 32 byte msg.";
+    CK_MECHANISM sign_mech = { CKM_ML_DSA, NULL, 0 };
+    if (p11->C_SignInit(sess, &sign_mech, hpriv) != CKR_OK) return -1;
+    CK_BYTE sig[4096];
+    CK_ULONG sig_len = sizeof(sig);
+    rv = p11->C_Sign(sess, (CK_BYTE_PTR)msg, strlen(msg), sig, &sig_len);
+    if (rv != CKR_OK) {
+        char m[64]; snprintf(m, sizeof(m), "C_Sign rv=0x%lx", (unsigned long)rv);
+        wasm_vpn_emit("error", m);
+        return -1;
+    }
+
+    /* Verify. */
+    if (p11->C_VerifyInit(sess, &sign_mech, hpub) != CKR_OK) return -1;
+    rv = p11->C_Verify(sess, (CK_BYTE_PTR)msg, strlen(msg), sig, sig_len);
+    if (rv != CKR_OK) {
+        char m[64]; snprintf(m, sizeof(m), "C_Verify rv=0x%lx", (unsigned long)rv);
+        wasm_vpn_emit("error", m);
+        return -1;
+    }
+
+    char info[128];
+    snprintf(info, sizeof(info),
+             "ML-DSA-65 sign+verify round-trip OK (sig=%lu bytes)",
+             (unsigned long)sig_len);
+    wasm_vpn_emit("ml_dsa_selftest", info);
+
+    p11->C_Logout(sess);
+    p11->C_CloseSession(sess);
+    return (int)sig_len;
+}
+
 EMSCRIPTEN_KEEPALIVE
 int wasm_vpn_shutdown(void)
 {

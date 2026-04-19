@@ -7196,6 +7196,7 @@ var _wasm_vpn_boot = Module['_wasm_vpn_boot'] = makeInvalidEarlyAccess('_wasm_vp
 var _wasm_vpn_pkcs11_probe = Module['_wasm_vpn_pkcs11_probe'] = makeInvalidEarlyAccess('_wasm_vpn_pkcs11_probe');
 var _wasm_vpn_list_pqc_mechanisms = Module['_wasm_vpn_list_pqc_mechanisms'] = makeInvalidEarlyAccess('_wasm_vpn_list_pqc_mechanisms');
 var _free = Module['_free'] = makeInvalidEarlyAccess('_free');
+var _wasm_vpn_ml_dsa_selftest = Module['_wasm_vpn_ml_dsa_selftest'] = makeInvalidEarlyAccess('_wasm_vpn_ml_dsa_selftest');
 var _wasm_vpn_shutdown = Module['_wasm_vpn_shutdown'] = makeInvalidEarlyAccess('_wasm_vpn_shutdown');
 var _wasm_vpn_configure_json = Module['_wasm_vpn_configure_json'] = makeInvalidEarlyAccess('_wasm_vpn_configure_json');
 var _wasm_vpn_initiate = Module['_wasm_vpn_initiate'] = makeInvalidEarlyAccess('_wasm_vpn_initiate');
@@ -7263,6 +7264,7 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['wasm_vpn_pkcs11_probe'] != 'undefined', 'missing Wasm export: wasm_vpn_pkcs11_probe');
   assert(typeof wasmExports['wasm_vpn_list_pqc_mechanisms'] != 'undefined', 'missing Wasm export: wasm_vpn_list_pqc_mechanisms');
   assert(typeof wasmExports['free'] != 'undefined', 'missing Wasm export: free');
+  assert(typeof wasmExports['wasm_vpn_ml_dsa_selftest'] != 'undefined', 'missing Wasm export: wasm_vpn_ml_dsa_selftest');
   assert(typeof wasmExports['wasm_vpn_shutdown'] != 'undefined', 'missing Wasm export: wasm_vpn_shutdown');
   assert(typeof wasmExports['wasm_vpn_configure_json'] != 'undefined', 'missing Wasm export: wasm_vpn_configure_json');
   assert(typeof wasmExports['wasm_vpn_initiate'] != 'undefined', 'missing Wasm export: wasm_vpn_initiate');
@@ -7327,6 +7329,7 @@ function assignWasmExports(wasmExports) {
   _wasm_vpn_pkcs11_probe = Module['_wasm_vpn_pkcs11_probe'] = createExportWrapper('wasm_vpn_pkcs11_probe', 0);
   _wasm_vpn_list_pqc_mechanisms = Module['_wasm_vpn_list_pqc_mechanisms'] = createExportWrapper('wasm_vpn_list_pqc_mechanisms', 0);
   _free = Module['_free'] = createExportWrapper('free', 1);
+  _wasm_vpn_ml_dsa_selftest = Module['_wasm_vpn_ml_dsa_selftest'] = createExportWrapper('wasm_vpn_ml_dsa_selftest', 0);
   _wasm_vpn_shutdown = Module['_wasm_vpn_shutdown'] = createExportWrapper('wasm_vpn_shutdown', 0);
   _wasm_vpn_configure_json = Module['_wasm_vpn_configure_json'] = createExportWrapper('wasm_vpn_configure_json', 1);
   _wasm_vpn_initiate = Module['_wasm_vpn_initiate'] = createExportWrapper('wasm_vpn_initiate', 0);
