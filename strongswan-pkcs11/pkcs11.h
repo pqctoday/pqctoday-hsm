@@ -502,7 +502,22 @@ typedef unsigned long ck_attribute_type_t;
 #define CKA_OTP_TIME                    (0x22FUL)
 #define CKA_ALLOWED_MECHANISMS          (CKF_ARRAY_ATTRIBUTE | 0x600UL)
 #define CKA_PROFILE_ID                  (0x601UL)
+/* PKCS#11 v3.2 §6.67.1 / §6.68.1 — shared parameter-set attribute
+ * used by ML-KEM and ML-DSA keys. */
+#define CKA_PARAMETER_SET               (0x61dUL)
 #define CKA_VENDOR_DEFINED              (1UL << 31)
+
+/* PKCS#11 v3.2 §6.67.2 — ML-DSA parameter set values */
+typedef unsigned long CK_ML_DSA_PARAMETER_SET_TYPE;
+#define CKP_ML_DSA_44                   (1UL)
+#define CKP_ML_DSA_65                   (2UL)
+#define CKP_ML_DSA_87                   (3UL)
+
+/* PKCS#11 v3.2 §6.68.2 — ML-KEM parameter set values */
+typedef unsigned long CK_ML_KEM_PARAMETER_SET_TYPE;
+#define CKP_ML_KEM_512                  (1UL)
+#define CKP_ML_KEM_768                  (2UL)
+#define CKP_ML_KEM_1024                 (3UL)
 
 
 struct ck_attribute

@@ -38,6 +38,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Added `CKK_ML_DSA` (0x4a), `CKM_ML_DSA_KEY_PAIR_GEN` (0x1c), and `CKM_ML_DSA` (0x1d)
   to enable ML-DSA key generation and signing through the strongSwan IKEv2 PKCS#11 adapter.
 
+- **ML-DSA full sign/verify plumbing — strongSwan adapter**
+  (`strongswan-pkcs11/{pkcs11.h,pkcs11_plugin.c,pkcs11_private_key.c,pkcs11_public_key.c}`):
+  End-to-end ML-DSA-44/65/87 support through the strongSwan PKCS#11 plugin.
+  Adds `CKA_PARAMETER_SET` (0x61d) with `CKP_ML_DSA_*` / `CKP_ML_KEM_*` value constants
+  (PKCS#11 v3.2 §6.67/§6.68). Registers PRIVKEY/PUBKEY handlers for ML-DSA-44/65/87.
+  Maps `SIGN_ML_DSA_{44,65,87}` → `CKM_ML_DSA` with `HASH_IDENTITY` (no pre-hash).
+  `sign()` queries `C_Sign` for the variable signature length (2420/3293/4595 B) since
+  ML-DSA signatures can't be derived from the public-key size. `verify()` skips the
+  classical leading-zero strip that would corrupt opaque ML-DSA byte blobs.
+  `find_key()` detects ML-DSA keys via `CKK_ML_DSA` + `CKA_PARAMETER_SET`. Adds
+  `encode_ml_dsa()` for PUBKEY_SPKI_ASN1_DER / PUBKEY_PEM / KEYID_PUBKEY_SHA1 /
+  KEYID_PUBKEY_INFO_SHA1 encodings of raw `CKA_VALUE` keys. Compiles cleanly on native
+  and is fully reusable under the WASM path.
+
+- **strongSwan 6.0.5 ML-DSA core patch** (`strongswan-6.0.5-pqc.patch`, 882 lines, verified):
+  Upstream-applicable patch that adds `KEY_ML_DSA_{44,65,87}` and
+  `SIGN_ML_DSA_{44,65,87}` key/signature type enums plus their OID/SPKI wiring across
+  `credentials/`, `processing/jobs/`, and `utils/`. Orthogonal to the WASM work and
+  reusable by any downstream that wants ML-DSA IKEv2 authentication.
+
+- **openssh-pkcs11 connector — consolidation from standalone repo**
+  (`openssh-pkcs11/`): Folded `pqctoday/pqctoday-openssh` (now deleted) into
+  `pqctoday-hsm/` as an in-tree `openssh-pkcs11/` connector alongside
+  `strongswan-pkcs11/`, `JavaJCE/`, `openpgp/`, and `webrpc/`. Contains ML-DSA-65
+  patches (draft-sfluhrer-ssh-mldsa-06), WASM shims, and the Emscripten build driver.
+  See `openssh-pkcs11/CHANGELOG.md` for details and known issues.
+
 - **latchset vendor library** (`src/vendor/latchset/`): Added latchset crypto library as
   vendor dependency for PKCS#11 provider support.
 

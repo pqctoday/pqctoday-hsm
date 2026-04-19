@@ -1,0 +1,682 @@
+diff --git a/src/charon/Makefile.am b/src/charon/Makefile.am
+--- a/src/charon/Makefile.am	2025-11-07 13:05:36
++++ b/src/charon/Makefile.am	2026-04-18 19:34:14
+@@ -1,12 +1,17 @@
+ ipsec_PROGRAMS = charon
+ 
+ charon_SOURCES = \
+-charon.c
++charon.c \
++socket_wasm.c \
++wasm_hsm_init.c \
++wasm_backend.c \
++pkcs11_wasm_rpc.c
+ 
+ charon.o :	$(top_builddir)/config.status
+ 
+ AM_CPPFLAGS = \
+ 	-I$(top_srcdir)/src/libstrongswan \
++	-I$(top_srcdir)/src/libstrongswan/plugins/pkcs11 \
+ 	-I$(top_srcdir)/src/libcharon \
+ 	-DIPSEC_DIR=\"${ipsecdir}\" \
+ 	-DIPSEC_PIDDIR=\"${piddir}\" \
+diff --git a/src/charon/charon.c b/src/charon/charon.c
+--- a/src/charon/charon.c	2025-11-07 13:05:36
++++ b/src/charon/charon.c	2026-04-18 19:25:53
+@@ -34,6 +34,14 @@
+ #include <utils/backtrace.h>
+ #include <threading/thread.h>
+ 
++#ifdef __EMSCRIPTEN__
++#include <string.h>
++/* WASM-only entry points (implemented in strongswan-wasm-shims/). */
++extern void wasm_setup_config(int mode);
++extern void wasm_initiate(int unused);
++extern void wasm_set_proposal_mode(int mode);
++#endif
++
+ #ifdef ANDROID
+ #include <private/android_filesystem_config.h> /* for AID_VPN */
+ #endif
+@@ -456,13 +464,46 @@
+ 	action.sa_handler = SIG_IGN;
+ 	sigaction(SIGPIPE, &action, NULL);
+ 
++#ifndef __EMSCRIPTEN__
+ 	pthread_sigmask(SIG_SETMASK, &action.sa_mask, NULL);
++#endif
+ 
++#ifdef __EMSCRIPTEN__
++	/* WASM: drive config backend directly (no stroke/vici socket), pick
++	 * role from argv, and optionally kick off an IKE_SA_INIT. */
++	wasm_setup_config(0);
++	{
++		int ai;
++		bool initiator = FALSE;
++		for (ai = 1; ai < argc - 1; ai++)
++		{
++			if (!strcmp(argv[ai], "--role") &&
++				!strcmp(argv[ai + 1], "initiator"))
++			{
++				initiator = TRUE;
++				break;
++			}
++		}
++		if (initiator)
++		{
++			wasm_initiate(0);
++		}
++	}
++#endif
++
+ 	/* start daemon (i.e. the threads in the thread-pool) */
+ 	charon->start(charon);
+ 
+ 	/* main thread goes to run loop */
++#ifndef __EMSCRIPTEN__
+ 	run();
++#else
++	/* WASM: the stock run() loop uses sigwaitinfo() which the browser
++	 * has no signal support for. The socket_wasm receive path drives
++	 * everything via the SAB — we just sleep here waiting for the JS
++	 * worker to terminate us. */
++	while (1) { sleep(1); }
++#endif
+ 
+ 	status = 0;
+ 
+diff --git a/src/libcharon/daemon.c b/src/libcharon/daemon.c
+--- a/src/libcharon/daemon.c	2025-11-07 13:05:36
++++ b/src/libcharon/daemon.c	2026-04-18 19:25:19
+@@ -60,6 +60,23 @@
+ #include <processing/jobs/start_action_job.h>
+ #include <threading/mutex.h>
+ 
++#ifdef __EMSCRIPTEN__
++/* WASM is single-threaded — we never create the daemon mutex, so every
++ * this->mutex->{lock,unlock,destroy}(this->mutex) needs to short-circuit.
++ * Rather than litter the file with NULL guards we redefine the member
++ * call sites below. */
++#define WASM_MUTEX_NOOP(expr)   do { if ((expr)) (void)(expr); } while(0)
++#endif
++
++#ifdef __EMSCRIPTEN__
++/* Forward decl — implemented in strongswan-wasm-shims/socket_wasm.c and
++ * compiled into charon alongside charon.c. */
++#include <network/socket.h>
++socket_t *socket_wasm_create(void);
++/* External diagnostic populated by library.c. */
++extern const char *_library_init_fail_reason;
++#endif
++
+ #ifndef LOG_AUTHPRIV /* not defined on OpenSolaris */
+ #define LOG_AUTHPRIV LOG_AUTH
+ #endif
+@@ -607,7 +624,9 @@
+ 	char *target;
+ 	int i;
+ 
++#ifndef __EMSCRIPTEN__
+ 	this->mutex->lock(this->mutex);
++#endif
+ 	handle_syslog_identifier(this);
+ 	current_loggers = this->loggers;
+ 	this->loggers = linked_list_create();
+@@ -669,7 +688,9 @@
+ 	/* unregister and destroy any unused remaining loggers */
+ 	current_loggers->destroy_function(current_loggers,
+ 									 (void*)logger_entry_unregister_destroy);
++#ifndef __EMSCRIPTEN__
+ 	this->mutex->unlock(this->mutex);
++#endif
+ }
+ 
+ METHOD(daemon_t, set_default_loggers, void,
+@@ -677,7 +698,9 @@
+ {
+ 	debug_t group;
+ 
++#ifndef __EMSCRIPTEN__
+ 	this->mutex->lock(this->mutex);
++#endif
+ 	if (!levels)
+ 	{
+ 		free(this->levels);
+@@ -695,7 +718,9 @@
+ 		}
+ 		this->to_stderr = to_stderr;
+ 	}
++#ifndef __EMSCRIPTEN__
+ 	this->mutex->unlock(this->mutex);
++#endif
+ }
+ 
+ METHOD(daemon_t, set_level, void,
+@@ -705,7 +730,9 @@
+ 	logger_entry_t *entry;
+ 
+ 	/* we set the loglevel on ALL loggers */
++#ifndef __EMSCRIPTEN__
+ 	this->mutex->lock(this->mutex);
++#endif
+ 	enumerator = this->loggers->create_enumerator(this->loggers);
+ 	while (enumerator->enumerate(enumerator, &entry))
+ 	{
+@@ -730,7 +757,9 @@
+ 		}
+ 	}
+ 	enumerator->destroy(enumerator);
++#ifndef __EMSCRIPTEN__
+ 	this->mutex->unlock(this->mutex);
++#endif
+ }
+ 
+ /**
+@@ -787,7 +816,9 @@
+ 	dbg = dbg_old;
+ 	DESTROY_IF(this->public.bus);
+ 	this->loggers->destroy_function(this->loggers, (void*)logger_entry_destroy);
++#ifndef __EMSCRIPTEN__
+ 	this->mutex->destroy(this->mutex);
++#endif
+ 	free(this->levels);
+ 	free(this);
+ }
+@@ -926,8 +957,13 @@
+ 			PLUGIN_DEPENDS(NONCE_GEN),
+ 			PLUGIN_DEPENDS(CUSTOM, "libcharon-sa-managers"),
+ 			PLUGIN_DEPENDS(CUSTOM, "libcharon-receiver"),
++#ifdef __EMSCRIPTEN__
++			PLUGIN_SDEPEND(CUSTOM, "kernel-ipsec"),
++			PLUGIN_SDEPEND(CUSTOM, "kernel-net"),
++#else
+ 			PLUGIN_DEPENDS(CUSTOM, "kernel-ipsec"),
+ 			PLUGIN_DEPENDS(CUSTOM, "kernel-net"),
++#endif
+ 		PLUGIN_CALLBACK((plugin_feature_callback_t)sender_receiver_cb, this),
+ 			PLUGIN_PROVIDE(CUSTOM, "libcharon-receiver"),
+ 				PLUGIN_DEPENDS(HASHER, HASH_SHA1),
+@@ -941,6 +977,20 @@
+ 	lib->plugins->add_static_features(lib->plugins, lib->ns, features,
+ 									  countof(features), TRUE, NULL, NULL);
+ 
++#ifdef __EMSCRIPTEN__
++	{
++		static plugin_feature_t wasm_features[] = {
++			PLUGIN_CALLBACK(socket_register, socket_wasm_create),
++				PLUGIN_PROVIDE(CUSTOM, "socket"),
++					PLUGIN_SDEPEND(CUSTOM, "kernel-ipsec"),
++		};
++		lib->plugins->add_static_features(lib->plugins, "socket-wasm",
++										  wasm_features,
++										  countof(wasm_features),
++										  TRUE, NULL, NULL);
++	}
++#endif
++
+ 	/* load plugins, further infrastructure may need it */
+ 	if (!lib->plugins->load(lib->plugins, plugins))
+ 	{
+@@ -979,7 +1029,11 @@
+ 			.bus = bus_create(),
+ 		},
+ 		.loggers = linked_list_create(),
++#ifdef __EMSCRIPTEN__
++		.mutex = NULL,
++#else
+ 		.mutex = mutex_create(MUTEX_TYPE_DEFAULT),
++#endif
+ 		.ref = 1,
+ 	);
+ 	charon = &this->public;
+diff --git a/src/libcharon/network/receiver.c b/src/libcharon/network/receiver.c
+--- a/src/libcharon/network/receiver.c	2025-11-07 13:05:36
++++ b/src/libcharon/network/receiver.c	2026-04-18 19:27:36
+@@ -518,6 +518,10 @@
+ 		}
+ 		else
+ 		{	/* this seems to be an ESP packet */
++#ifdef __EMSCRIPTEN__
++			/* WASM: drop ESP (no kernel interface in the browser). */
++			packet->destroy(packet);
++#else
+ 			this->esp_cb_mutex->lock(this->esp_cb_mutex);
+ 			if (this->esp_cb.cb)
+ 			{
+@@ -528,6 +532,7 @@
+ 				packet->destroy(packet);
+ 			}
+ 			this->esp_cb_mutex->unlock(this->esp_cb_mutex);
++#endif
+ 			return JOB_REQUEUE_DIRECT;
+ 		}
+ 	}
+@@ -627,30 +632,49 @@
+ 			}
+ 		}
+ 	}
++#ifdef __EMSCRIPTEN__
++	{
++		/* WASM: synchronously process the message instead of queuing a
++		 * job. The receiver runs on the charon main thread (there is
++		 * only one thread); queueing would deadlock without a worker
++		 * pool. */
++		job_t *job = (job_t*)process_message_job_create(message);
++		job->execute(job);
++	}
++#else
+ 	lib->processor->queue_job(lib->processor,
+ 							  (job_t*)process_message_job_create(message));
++#endif
+ 	return JOB_REQUEUE_DIRECT;
+ }
+ 
+ METHOD(receiver_t, add_esp_cb, void,
+ 	private_receiver_t *this, receiver_esp_cb_t callback, void *data)
+ {
++#ifndef __EMSCRIPTEN__
+ 	this->esp_cb_mutex->lock(this->esp_cb_mutex);
++#endif
+ 	this->esp_cb.cb = callback;
+ 	this->esp_cb.data = data;
++#ifndef __EMSCRIPTEN__
+ 	this->esp_cb_mutex->unlock(this->esp_cb_mutex);
++#endif
+ }
+ 
+ METHOD(receiver_t, del_esp_cb, void,
+ 	private_receiver_t *this, receiver_esp_cb_t callback)
+ {
++#ifndef __EMSCRIPTEN__
+ 	this->esp_cb_mutex->lock(this->esp_cb_mutex);
++#endif
+ 	if (this->esp_cb.cb == callback)
+ 	{
+ 		this->esp_cb.cb = NULL;
+ 		this->esp_cb.data = NULL;
+ 	}
++#ifndef __EMSCRIPTEN__
+ 	this->esp_cb_mutex->unlock(this->esp_cb_mutex);
++#endif
+ }
+ 
+ METHOD(receiver_t, destroy, void,
+@@ -658,7 +682,9 @@
+ {
+ 	DESTROY_IF(this->rng);
+ 	DESTROY_IF(this->hasher);
++#ifndef __EMSCRIPTEN__
+ 	this->esp_cb_mutex->destroy(this->esp_cb_mutex);
++#endif
+ 	free(this);
+ }
+ 
+@@ -676,7 +702,11 @@
+ 			.del_esp_cb = _del_esp_cb,
+ 			.destroy = _destroy,
+ 		},
++#ifdef __EMSCRIPTEN__
++		.esp_cb_mutex = NULL,
++#else
+ 		.esp_cb_mutex = mutex_create(MUTEX_TYPE_DEFAULT),
++#endif
+ 		.secret_offset = now ? random() % now : 0,
+ 	);
+ 
+@@ -735,9 +765,21 @@
+ 	}
+ 	memcpy(this->secret_old, this->secret, SECRET_LENGTH);
+ 
++#ifdef __EMSCRIPTEN__
++	/* WASM: no thread-pool. Drive receive_packets directly from the
++	 * charon main loop. We launch a lightweight callback_job that
++	 * the library's synchronous processor (stubbed in WASM) will run. */
++	(void)receive_packets;
++	/* The replacement main loop in src/charon/charon.c spins forever;
++	 * receive_packets() is invoked from there via charon->receiver's
++	 * socket->receive() indirection. For now we leave the receiver as a
++	 * passive object and rely on the socket_wasm_create() plugin to
++	 * drive packet delivery. */
++#else
+ 	lib->processor->queue_job(lib->processor,
+ 		(job_t*)callback_job_create_with_prio((callback_job_cb_t)receive_packets,
+ 			this, NULL, callback_job_cancel_thread, JOB_PRIO_CRITICAL));
++#endif
+ 
+ 	return &this->public;
+ }
+diff --git a/src/libcharon/network/sender.c b/src/libcharon/network/sender.c
+--- a/src/libcharon/network/sender.c	2025-11-07 13:05:36
++++ b/src/libcharon/network/sender.c	2026-04-18 19:26:34
+@@ -84,10 +84,17 @@
+ METHOD(sender_t, send_no_marker, void,
+ 	private_sender_t *this, packet_t *packet)
+ {
++#ifdef __EMSCRIPTEN__
++	/* WASM: no job queue, no condvar — synchronously hand the packet to
++	 * the socket and free it. */
++	charon->socket->send(charon->socket, packet);
++	packet->destroy(packet);
++#else
+ 	this->mutex->lock(this->mutex);
+ 	this->list->insert_last(this->list, packet);
+ 	this->got->signal(this->got);
+ 	this->mutex->unlock(this->mutex);
++#endif
+ }
+ 
+ METHOD(sender_t, send_, void,
+@@ -167,6 +174,10 @@
+ METHOD(sender_t, flush, void,
+ 	private_sender_t *this)
+ {
++#ifdef __EMSCRIPTEN__
++	/* WASM: send is synchronous so the queue is always empty. */
++	(void)this;
++#else
+ 	/* send all packets in the queue */
+ 	this->mutex->lock(this->mutex);
+ 	while (this->list->get_count(this->list))
+@@ -174,15 +185,18 @@
+ 		this->sent->wait(this->sent, this->mutex);
+ 	}
+ 	this->mutex->unlock(this->mutex);
++#endif
+ }
+ 
+ METHOD(sender_t, destroy, void,
+ 	private_sender_t *this)
+ {
+ 	this->list->destroy_offset(this->list, offsetof(packet_t, destroy));
++#ifndef __EMSCRIPTEN__
+ 	this->got->destroy(this->got);
+ 	this->sent->destroy(this->sent);
+ 	this->mutex->destroy(this->mutex);
++#endif
+ 	free(this);
+ }
+ 
+@@ -201,9 +215,16 @@
+ 			.destroy = _destroy,
+ 		},
+ 		.list = linked_list_create(),
++#ifdef __EMSCRIPTEN__
++		/* WASM: no threading primitives — send() is synchronous. */
++		.mutex = NULL,
++		.got = NULL,
++		.sent = NULL,
++#else
+ 		.mutex = mutex_create(MUTEX_TYPE_DEFAULT),
+ 		.got = condvar_create(CONDVAR_TYPE_DEFAULT),
+ 		.sent = condvar_create(CONDVAR_TYPE_DEFAULT),
++#endif
+ 		.send_delay = lib->settings->get_int(lib->settings,
+ 									"%s.send_delay", 0, lib->ns),
+ 		.send_delay_type = lib->settings->get_int(lib->settings,
+@@ -214,9 +235,11 @@
+ 									"%s.send_delay_response", TRUE, lib->ns),
+ 	);
+ 
++#ifndef __EMSCRIPTEN__
+ 	lib->processor->queue_job(lib->processor,
+ 		(job_t*)callback_job_create_with_prio((callback_job_cb_t)send_packets,
+ 			this, NULL, callback_job_cancel_thread, JOB_PRIO_CRITICAL));
++#endif
+ 
+ 	return &this->public;
+ }
+diff --git a/src/libstrongswan/library.c b/src/libstrongswan/library.c
+--- a/src/libstrongswan/library.c	2025-11-07 13:05:36
++++ b/src/libstrongswan/library.c	2026-04-18 19:23:06
+@@ -131,6 +131,14 @@
+  */
+ library_t *lib = NULL;
+ 
++#ifdef __EMSCRIPTEN__
++/**
++ * WASM-only diagnostic: populated by library_init() on failure so the
++ * JS worker can surface the exact reason via Module._library_init_fail_reason.
++ */
++const char *_library_init_fail_reason = NULL;
++#endif
++
+ #ifdef LEAK_DETECTIVE
+ /**
+  * Default leak report callback
+@@ -413,12 +421,36 @@
+ 									 (hashtable_equals_t)equals, 4);
+ 
+ 	this->public.settings = settings_create(NULL);
++#ifdef __EMSCRIPTEN__
++	{
++		/* In WASM builds we cannot reliably read strongswan.conf from a
++		 * virtual FS, so the JS worker injects the raw config text via
++		 * the STRONGSWAN_CONF_DATA env var and we parse it in-memory. */
++		const char *conf_data = getenv("STRONGSWAN_CONF_DATA");
++		if (conf_data && *conf_data)
++		{
++			if (!this->public.settings->load_string(this->public.settings,
++													conf_data, FALSE))
++			{
++				_library_init_fail_reason = "load_string(STRONGSWAN_CONF_DATA) failed";
++				this->init_failed = TRUE;
++			}
++		}
++		else if (!this->public.settings->load_files(this->public.settings,
++													this->public.conf, FALSE))
++		{
++			_library_init_fail_reason = "load_files(conf) failed";
++			this->init_failed = TRUE;
++		}
++	}
++#else
+ 	if (!this->public.settings->load_files(this->public.settings,
+ 										   this->public.conf, FALSE))
+ 	{
+ 		DBG1(DBG_LIB, "abort initialization due to invalid configuration");
+ 		this->init_failed = TRUE;
+ 	}
++#endif
+ 
+ 	/* add registered aliases */
+ 	for (i = 0; i < ns_count; ++i)
+@@ -446,7 +478,7 @@
+ 	this->public.streams = stream_manager_create();
+ 	this->public.plugins = plugin_loader_create();
+ 
+-#ifndef NO_CHECK_MEMWIPE
++#if !defined(NO_CHECK_MEMWIPE) && !defined(__EMSCRIPTEN__)
+ 	if (!check_memwipe())
+ 	{
+ 		return FALSE;
+diff --git a/src/libstrongswan/plugins/pkcs11/pkcs11_library.c b/src/libstrongswan/plugins/pkcs11/pkcs11_library.c
+--- a/src/libstrongswan/plugins/pkcs11/pkcs11_library.c	2026-04-18 19:32:55
++++ b/src/libstrongswan/plugins/pkcs11/pkcs11_library.c	2026-04-18 19:33:55
+@@ -1007,7 +1007,9 @@
+ 	private_pkcs11_library_t *this)
+ {
+ 	this->public.f->C_Finalize(NULL);
++#ifndef __EMSCRIPTEN__
+ 	dlclose(this->handle);
++#endif
+ 	free(this->name);
+ 	free(this);
+ }
+@@ -1113,6 +1115,29 @@
+ 		.flags = CKF_OS_LOCKING_OK,
+ 	};
+ 
++#ifdef __EMSCRIPTEN__
++	{
++		/* WASM / softhsmv3 static-link: dlopen returned a fake handle.
++		 * Call the statically-linked C_GetFunctionList directly, then
++		 * route through the wrap/rpc shim depending on g_pkcs11_rpc_mode. */
++		extern CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR);
++		extern CK_FUNCTION_LIST_PTR pkcs11_wasm_wrap_function_list(CK_FUNCTION_LIST_PTR);
++		extern CK_FUNCTION_LIST_PTR pkcs11_wasm_rpc_function_list(CK_FUNCTION_LIST_PTR);
++		extern int g_pkcs11_rpc_mode;
++		CK_FUNCTION_LIST_PTR raw = NULL;
++		(void)pC_GetFunctionList;
++		rv = C_GetFunctionList(&raw);
++		if (rv != CKR_OK || !raw)
++		{
++			DBG1(DBG_CFG, "static C_GetFunctionList() error: %N",
++				 ck_rv_names, rv);
++			return FALSE;
++		}
++		this->public.f = g_pkcs11_rpc_mode
++			? pkcs11_wasm_rpc_function_list(raw)
++			: pkcs11_wasm_wrap_function_list(raw);
++	}
++#else
+ 	pC_GetFunctionList = dlsym(this->handle, "C_GetFunctionList");
+ 	if (!pC_GetFunctionList)
+ 	{
+@@ -1126,6 +1151,7 @@
+ 			 name, ck_rv_names, rv);
+ 		return FALSE;
+ 	}
++#endif
+ 	if (os_locking)
+ 	{
+ 		rv = CKR_CANT_LOCK;
+@@ -1139,6 +1165,12 @@
+ 		os_locking = TRUE;
+ 		rv = this->public.f->C_Initialize(&args_os);
+ 	}
++#ifdef __EMSCRIPTEN__
++	if (rv == CKR_CRYPTOKI_ALREADY_INITIALIZED)
++	{
++		rv = CKR_OK;
++	}
++#endif
+ 	if (rv != CKR_OK)
+ 	{
+ 		DBG1(DBG_CFG, "C_Initialize() error for '%s': %N",
+@@ -1191,7 +1223,12 @@
+ 			.destroy = _destroy,
+ 		},
+ 		.name = strdup(name),
++#ifdef __EMSCRIPTEN__
++		/* WASM / static-link: no dlopen — fake a non-NULL handle. */
++		.handle = (void *)0x1,
++#else
+ 		.handle = dlopen(file, RTLD_LAZY),
++#endif
+ 	);
+ 
+ 	if (!this->handle)
+@@ -1204,7 +1241,9 @@
+ 
+ 	if (!initialize(this, name, file, os_locking))
+ 	{
++#ifndef __EMSCRIPTEN__
+ 		dlclose(this->handle);
++#endif
+ 		free(this->name);
+ 		free(this);
+ 		return NULL;
+diff --git a/src/libstrongswan/settings/settings_lexer.c b/src/libstrongswan/settings/settings_lexer.c
+--- a/src/libstrongswan/settings/settings_lexer.c	2025-11-07 15:43:39
++++ b/src/libstrongswan/settings/settings_lexer.c	2026-04-18 19:21:33
+@@ -3062,8 +3062,16 @@
+ /**
+  * Load the given string to be parsed next
+  */
++#ifdef __EMSCRIPTEN__
++bool settings_parser_load_string(parser_helper_t *ctx, const char *content)
++{
++	settings_parser__scan_string(content, ctx->scanner);
++	return TRUE;
++}
++#else
+ void settings_parser_load_string(parser_helper_t *ctx, const char *content)
+ {
+ 	settings_parser__scan_string(content, ctx->scanner);
+ }
++#endif
+ 
+diff --git a/src/libstrongswan/threading/rwlock.c b/src/libstrongswan/threading/rwlock.c
+--- a/src/libstrongswan/threading/rwlock.c	2025-11-07 13:05:36
++++ b/src/libstrongswan/threading/rwlock.c	2026-04-18 19:28:07
+@@ -122,6 +122,7 @@
+ METHOD(rwlock_t, read_lock, void,
+ 	private_rwlock_t *this)
+ {
++#ifndef __EMSCRIPTEN__
+ 	int err;
+ 
+ 	profiler_start(&this->profile);
+@@ -131,11 +132,15 @@
+ 		DBG1(DBG_LIB, "!!! RWLOCK READ LOCK ERROR: %s !!!", strerror(err));
+ 	}
+ 	profiler_end(&this->profile);
++#else
++	(void)this;
++#endif
+ }
+ 
+ METHOD(rwlock_t, write_lock, void,
+ 	private_rwlock_t *this)
+ {
++#ifndef __EMSCRIPTEN__
+ 	int err;
+ 
+ 	profiler_start(&this->profile);
+@@ -145,17 +150,26 @@
+ 		DBG1(DBG_LIB, "!!! RWLOCK WRITE LOCK ERROR: %s !!!", strerror(err));
+ 	}
+ 	profiler_end(&this->profile);
++#else
++	(void)this;
++#endif
+ }
+ 
+ METHOD(rwlock_t, try_write_lock, bool,
+ 	private_rwlock_t *this)
+ {
++#ifndef __EMSCRIPTEN__
+ 	return pthread_rwlock_trywrlock(&this->rwlock) == 0;
++#else
++	(void)this;
++	return TRUE;
++#endif
+ }
+ 
+ METHOD(rwlock_t, unlock, void,
+ 	private_rwlock_t *this)
+ {
++#ifndef __EMSCRIPTEN__
+ 	int err;
+ 
+ 	err = pthread_rwlock_unlock(&this->rwlock);
+@@ -163,13 +177,18 @@
+ 	{
+ 		DBG1(DBG_LIB, "!!! RWLOCK UNLOCK ERROR: %s !!!", strerror(err));
+ 	}
++#else
++	(void)this;
++#endif
+ }
+ 
+ METHOD(rwlock_t, destroy, void,
+ 	private_rwlock_t *this)
+ {
++#ifndef __EMSCRIPTEN__
+ 	pthread_rwlock_destroy(&this->rwlock);
+ 	profiler_cleanup(&this->profile);
++#endif
+ 	free(this);
+ }
+ 
+@@ -195,8 +214,10 @@
+ 				}
+ 			);
+ 
++#ifndef __EMSCRIPTEN__
+ 			pthread_rwlock_init(&this->rwlock, NULL);
+ 			profiler_init(&this->profile);
++#endif
+ 
+ 			return &this->public;
+ 		}

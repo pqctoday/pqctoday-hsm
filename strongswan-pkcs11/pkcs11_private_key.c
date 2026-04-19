@@ -194,6 +194,12 @@ CK_MECHANISM_PTR pkcs11_signature_scheme_to_mech(pkcs11_library_t *p11,
 		 KEY_ECDSA, 384,									HASH_SHA384},
 		{SIGN_ECDSA_521,				{CKM_ECDSA,				NULL, 0},
 		 KEY_ECDSA, 521,									HASH_SHA512},
+		{SIGN_ML_DSA_44,				{CKM_ML_DSA,			NULL, 0},
+		 KEY_ML_DSA_44, 0,								  HASH_IDENTITY},
+		{SIGN_ML_DSA_65,				{CKM_ML_DSA,			NULL, 0},
+		 KEY_ML_DSA_65, 0,								  HASH_IDENTITY},
+		{SIGN_ML_DSA_87,				{CKM_ML_DSA,			NULL, 0},
+		 KEY_ML_DSA_87, 0,								  HASH_IDENTITY},
 
 	};
 
@@ -460,7 +466,7 @@ METHOD(private_key_t, sign, bool,
 		DBG1(DBG_LIB, "C_SignInit() failed: %N", ck_rv_names, rv);
 		goto end;
 	}
-	if (hash_alg != HASH_UNKNOWN)
+	if (hash_alg != HASH_UNKNOWN && hash_alg != HASH_IDENTITY)
 	{
 		hasher_t *hasher;
 
@@ -489,10 +495,30 @@ METHOD(private_key_t, sign, bool,
 		}
 		data = hash;
 	}
-	len = (get_keysize(this) + 7) / 8;
-	if (this->type == KEY_ECDSA)
-	{	/* signature is twice the length of the base point order */
-		len *= 2;
+	switch (scheme)
+	{
+		case SIGN_ML_DSA_44:
+		case SIGN_ML_DSA_65:
+		case SIGN_ML_DSA_87:
+			/* ML-DSA signatures are variable-length per variant (2420/3293/4595)
+			 * and cannot be derived from the public key size. Query the token
+			 * for the required buffer length first. */
+			len = 0;
+			rv = this->lib->f->C_Sign(session, data.ptr, data.len, NULL, &len);
+			if (rv != CKR_OK || len == 0)
+			{
+				DBG1(DBG_LIB, "C_Sign() size query failed: %N", ck_rv_names, rv);
+				this->lib->f->C_CloseSession(session);
+				goto end;
+			}
+			break;
+		default:
+			len = (get_keysize(this) + 7) / 8;
+			if (this->type == KEY_ECDSA)
+			{	/* signature is twice the length of the base point order */
+				len *= 2;
+			}
+			break;
 	}
 	buf = malloc(len);
 	rv = this->lib->f->C_Sign(session, data.ptr, data.len, buf, &len);
@@ -878,6 +904,46 @@ static bool find_key(private_pkcs11_private_key_t *this, chunk_t keyid)
 				this->object = object;
 				found = TRUE;
 				break;
+			case CKK_ML_DSA:
+			{
+				CK_ML_DSA_PARAMETER_SET_TYPE param_set = 0;
+				CK_ATTRIBUTE attr_ps[] = {
+					{CKA_PARAMETER_SET, &param_set, sizeof(param_set)},
+				};
+				if (this->lib->f->C_GetAttributeValue(this->session, object,
+												attr_ps, 1) != CKR_OK)
+				{
+					DBG1(DBG_CFG, "PKCS#11 CKA_PARAMETER_SET missing on "
+						 "CKK_ML_DSA key");
+					break;
+				}
+				switch (param_set)
+				{
+					case CKP_ML_DSA_44:
+						this->type = KEY_ML_DSA_44;
+						break;
+					case CKP_ML_DSA_65:
+						this->type = KEY_ML_DSA_65;
+						break;
+					case CKP_ML_DSA_87:
+						this->type = KEY_ML_DSA_87;
+						break;
+					default:
+						DBG1(DBG_CFG, "PKCS#11 unknown ML-DSA parameter set: %lu",
+							 param_set);
+						break;
+				}
+				if (this->type != KEY_RSA)
+				{
+					if (attr[1].ulValueLen != CK_UNAVAILABLE_INFORMATION)
+					{
+						this->reauth = reauth;
+					}
+					this->object = object;
+					found = TRUE;
+				}
+				break;
+			}
 			default:
 				DBG1(DBG_CFG, "PKCS#11 key type %d not supported", type);
 				break;
