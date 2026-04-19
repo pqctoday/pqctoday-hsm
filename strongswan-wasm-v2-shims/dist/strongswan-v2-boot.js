@@ -7197,6 +7197,7 @@ var _wasm_vpn_pkcs11_probe = Module['_wasm_vpn_pkcs11_probe'] = makeInvalidEarly
 var _wasm_vpn_list_pqc_mechanisms = Module['_wasm_vpn_list_pqc_mechanisms'] = makeInvalidEarlyAccess('_wasm_vpn_list_pqc_mechanisms');
 var _free = Module['_free'] = makeInvalidEarlyAccess('_free');
 var _wasm_vpn_ml_dsa_selftest = Module['_wasm_vpn_ml_dsa_selftest'] = makeInvalidEarlyAccess('_wasm_vpn_ml_dsa_selftest');
+var _wasm_vpn_ml_kem_selftest = Module['_wasm_vpn_ml_kem_selftest'] = makeInvalidEarlyAccess('_wasm_vpn_ml_kem_selftest');
 var _wasm_vpn_shutdown = Module['_wasm_vpn_shutdown'] = makeInvalidEarlyAccess('_wasm_vpn_shutdown');
 var _wasm_vpn_configure_json = Module['_wasm_vpn_configure_json'] = makeInvalidEarlyAccess('_wasm_vpn_configure_json');
 var _wasm_vpn_initiate = Module['_wasm_vpn_initiate'] = makeInvalidEarlyAccess('_wasm_vpn_initiate');
@@ -7218,6 +7219,7 @@ var __emscripten_stack_alloc = makeInvalidEarlyAccess('__emscripten_stack_alloc'
 var _emscripten_stack_get_current = makeInvalidEarlyAccess('_emscripten_stack_get_current');
 var ___set_stack_limits = Module['___set_stack_limits'] = makeInvalidEarlyAccess('___set_stack_limits');
 var dynCall_ii = makeInvalidEarlyAccess('dynCall_ii');
+var dynCall_iiiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiiii');
 var dynCall_i = makeInvalidEarlyAccess('dynCall_i');
 var dynCall_iiii = makeInvalidEarlyAccess('dynCall_iiii');
 var dynCall_iii = makeInvalidEarlyAccess('dynCall_iii');
@@ -7237,7 +7239,6 @@ var dynCall_viidi = makeInvalidEarlyAccess('dynCall_viidi');
 var dynCall_diidi = makeInvalidEarlyAccess('dynCall_diidi');
 var dynCall_vij = makeInvalidEarlyAccess('dynCall_vij');
 var dynCall_iijii = makeInvalidEarlyAccess('dynCall_iijii');
-var dynCall_iiiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiiii');
 var dynCall_iiiiiiiiii = makeInvalidEarlyAccess('dynCall_iiiiiiiiii');
 var dynCall_jii = makeInvalidEarlyAccess('dynCall_jii');
 var dynCall_vjii = makeInvalidEarlyAccess('dynCall_vjii');
@@ -7265,6 +7266,7 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['wasm_vpn_list_pqc_mechanisms'] != 'undefined', 'missing Wasm export: wasm_vpn_list_pqc_mechanisms');
   assert(typeof wasmExports['free'] != 'undefined', 'missing Wasm export: free');
   assert(typeof wasmExports['wasm_vpn_ml_dsa_selftest'] != 'undefined', 'missing Wasm export: wasm_vpn_ml_dsa_selftest');
+  assert(typeof wasmExports['wasm_vpn_ml_kem_selftest'] != 'undefined', 'missing Wasm export: wasm_vpn_ml_kem_selftest');
   assert(typeof wasmExports['wasm_vpn_shutdown'] != 'undefined', 'missing Wasm export: wasm_vpn_shutdown');
   assert(typeof wasmExports['wasm_vpn_configure_json'] != 'undefined', 'missing Wasm export: wasm_vpn_configure_json');
   assert(typeof wasmExports['wasm_vpn_initiate'] != 'undefined', 'missing Wasm export: wasm_vpn_initiate');
@@ -7286,6 +7288,7 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['emscripten_stack_get_current'] != 'undefined', 'missing Wasm export: emscripten_stack_get_current');
   assert(typeof wasmExports['__set_stack_limits'] != 'undefined', 'missing Wasm export: __set_stack_limits');
   assert(typeof wasmExports['dynCall_ii'] != 'undefined', 'missing Wasm export: dynCall_ii');
+  assert(typeof wasmExports['dynCall_iiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiiii');
   assert(typeof wasmExports['dynCall_i'] != 'undefined', 'missing Wasm export: dynCall_i');
   assert(typeof wasmExports['dynCall_iiii'] != 'undefined', 'missing Wasm export: dynCall_iiii');
   assert(typeof wasmExports['dynCall_iii'] != 'undefined', 'missing Wasm export: dynCall_iii');
@@ -7305,7 +7308,6 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['dynCall_diidi'] != 'undefined', 'missing Wasm export: dynCall_diidi');
   assert(typeof wasmExports['dynCall_vij'] != 'undefined', 'missing Wasm export: dynCall_vij');
   assert(typeof wasmExports['dynCall_iijii'] != 'undefined', 'missing Wasm export: dynCall_iijii');
-  assert(typeof wasmExports['dynCall_iiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiiii');
   assert(typeof wasmExports['dynCall_iiiiiiiiii'] != 'undefined', 'missing Wasm export: dynCall_iiiiiiiiii');
   assert(typeof wasmExports['dynCall_jii'] != 'undefined', 'missing Wasm export: dynCall_jii');
   assert(typeof wasmExports['dynCall_vjii'] != 'undefined', 'missing Wasm export: dynCall_vjii');
@@ -7330,6 +7332,7 @@ function assignWasmExports(wasmExports) {
   _wasm_vpn_list_pqc_mechanisms = Module['_wasm_vpn_list_pqc_mechanisms'] = createExportWrapper('wasm_vpn_list_pqc_mechanisms', 0);
   _free = Module['_free'] = createExportWrapper('free', 1);
   _wasm_vpn_ml_dsa_selftest = Module['_wasm_vpn_ml_dsa_selftest'] = createExportWrapper('wasm_vpn_ml_dsa_selftest', 0);
+  _wasm_vpn_ml_kem_selftest = Module['_wasm_vpn_ml_kem_selftest'] = createExportWrapper('wasm_vpn_ml_kem_selftest', 0);
   _wasm_vpn_shutdown = Module['_wasm_vpn_shutdown'] = createExportWrapper('wasm_vpn_shutdown', 0);
   _wasm_vpn_configure_json = Module['_wasm_vpn_configure_json'] = createExportWrapper('wasm_vpn_configure_json', 1);
   _wasm_vpn_initiate = Module['_wasm_vpn_initiate'] = createExportWrapper('wasm_vpn_initiate', 0);
@@ -7351,6 +7354,7 @@ function assignWasmExports(wasmExports) {
   _emscripten_stack_get_current = wasmExports['emscripten_stack_get_current'];
   ___set_stack_limits = Module['___set_stack_limits'] = createExportWrapper('__set_stack_limits', 2);
   dynCall_ii = dynCalls['ii'] = createExportWrapper('dynCall_ii', 2);
+  dynCall_iiiiiiiii = dynCalls['iiiiiiiii'] = createExportWrapper('dynCall_iiiiiiiii', 9);
   dynCall_i = dynCalls['i'] = createExportWrapper('dynCall_i', 1);
   dynCall_iiii = dynCalls['iiii'] = createExportWrapper('dynCall_iiii', 4);
   dynCall_iii = dynCalls['iii'] = createExportWrapper('dynCall_iii', 3);
@@ -7370,7 +7374,6 @@ function assignWasmExports(wasmExports) {
   dynCall_diidi = dynCalls['diidi'] = createExportWrapper('dynCall_diidi', 5);
   dynCall_vij = dynCalls['vij'] = createExportWrapper('dynCall_vij', 3);
   dynCall_iijii = dynCalls['iijii'] = createExportWrapper('dynCall_iijii', 5);
-  dynCall_iiiiiiiii = dynCalls['iiiiiiiii'] = createExportWrapper('dynCall_iiiiiiiii', 9);
   dynCall_iiiiiiiiii = dynCalls['iiiiiiiiii'] = createExportWrapper('dynCall_iiiiiiiiii', 10);
   dynCall_jii = dynCalls['jii'] = createExportWrapper('dynCall_jii', 3);
   dynCall_vjii = dynCalls['vjii'] = createExportWrapper('dynCall_vjii', 4);

@@ -181,7 +181,7 @@ emcc \
     -s ALLOW_MEMORY_GROWTH=1 \
     -s INITIAL_MEMORY=32MB \
     -s MAXIMUM_MEMORY=256MB \
-    -s EXPORTED_FUNCTIONS='["_main","_wasm_vpn_boot","_wasm_vpn_shutdown","_wasm_vpn_pkcs11_probe","_wasm_vpn_list_pqc_mechanisms","_wasm_vpn_ml_dsa_selftest","_wasm_vpn_configure_json","_wasm_vpn_initiate","_wasm_vpn_get_result","_malloc","_free"]' \
+    -s EXPORTED_FUNCTIONS='["_main","_wasm_vpn_boot","_wasm_vpn_shutdown","_wasm_vpn_pkcs11_probe","_wasm_vpn_list_pqc_mechanisms","_wasm_vpn_ml_dsa_selftest","_wasm_vpn_ml_kem_selftest","_wasm_vpn_configure_json","_wasm_vpn_initiate","_wasm_vpn_get_result","_malloc","_free"]' \
     -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","UTF8ToString","stringToUTF8","lengthBytesUTF8"]' \
     -s ENVIRONMENT=web,worker,node \
     -o "$DIST_DIR/strongswan-v2-boot.js" \

@@ -33,6 +33,7 @@
 #include <library.h>
 #include <utils/debug.h>
 #include <plugins/plugin_loader.h>
+#include <crypto/key_exchange.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -372,6 +373,70 @@ int wasm_vpn_ml_dsa_selftest(void)
     p11->C_Logout(sess);
     p11->C_CloseSession(sess);
     return (int)sig_len;
+}
+
+/* ── ML-KEM-768 loopback through softhsmv3 in WASM ─────────────────────
+ * Two pkcs11_kem_t instances (alice = initiator, bob = responder) are
+ * created from strongSwan's key_exchange factory. Alice generates a
+ * keypair, Bob encapsulates against Alice's pubkey, Alice decapsulates
+ * Bob's ciphertext. If both derived secrets match, the softhsmv3 ML-KEM
+ * path works end-to-end in WASM — same 10-bug-fix code path we
+ * committed in pqctoday-hsm 236d9a4 for the native sandbox.
+ * Returns 1 on secret match, 0 on mismatch, -1 on any error. */
+EMSCRIPTEN_KEEPALIVE
+int wasm_vpn_ml_kem_selftest(void)
+{
+    key_exchange_t *alice = NULL;
+    key_exchange_t *bob = NULL;
+    chunk_t alice_pub = chunk_empty;
+    chunk_t bob_ct = chunk_empty;
+    chunk_t alice_secret = chunk_empty;
+    chunk_t bob_secret = chunk_empty;
+    int result = -1;
+
+    alice = lib->crypto->create_ke(lib->crypto, ML_KEM_768);
+    if (!alice) { wasm_vpn_emit("error", "create_ke(alice) failed"); goto out; }
+
+    if (!alice->get_public_key(alice, &alice_pub)) {
+        wasm_vpn_emit("error", "alice get_public_key failed"); goto out;
+    }
+
+    bob = lib->crypto->create_ke(lib->crypto, ML_KEM_768);
+    if (!bob) { wasm_vpn_emit("error", "create_ke(bob) failed"); goto out; }
+
+    if (!bob->set_public_key(bob, alice_pub)) {
+        wasm_vpn_emit("error", "bob set_public_key(alice_pub) failed"); goto out;
+    }
+    if (!bob->get_public_key(bob, &bob_ct)) {
+        wasm_vpn_emit("error", "bob get_public_key (=ciphertext) failed"); goto out;
+    }
+    if (!bob->get_shared_secret(bob, &bob_secret)) {
+        wasm_vpn_emit("error", "bob get_shared_secret failed"); goto out;
+    }
+
+    if (!alice->set_public_key(alice, bob_ct)) {
+        wasm_vpn_emit("error", "alice set_public_key(ciphertext) failed"); goto out;
+    }
+    if (!alice->get_shared_secret(alice, &alice_secret)) {
+        wasm_vpn_emit("error", "alice get_shared_secret failed"); goto out;
+    }
+
+    result = chunk_equals(alice_secret, bob_secret) ? 1 : 0;
+
+    char msg[160];
+    snprintf(msg, sizeof(msg),
+             "ML-KEM-768 loopback: pub=%zu ct=%zu secret=%zu match=%d",
+             alice_pub.len, bob_ct.len, alice_secret.len, result);
+    wasm_vpn_emit("ml_kem_selftest", msg);
+
+out:
+    chunk_free(&alice_pub);
+    chunk_free(&bob_ct);
+    chunk_free(&alice_secret);
+    chunk_free(&bob_secret);
+    if (alice) alice->destroy(alice);
+    if (bob) bob->destroy(bob);
+    return result;
 }
 
 EMSCRIPTEN_KEEPALIVE

@@ -22,8 +22,22 @@ typedef unsigned long CK_RV;
 struct CK_FUNCTION_LIST;
 typedef struct CK_FUNCTION_LIST **CK_FUNCTION_LIST_PTR_PTR;
 
-/* Forward-declare softhsmv3's function-list entry point — statically linked. */
+/* Forward-declare softhsmv3's statically-linked PKCS#11 v3.2 entry points.
+ * pkcs11_kem.c's get_v3_kem_funcs() dlsyms C_EncapsulateKey / C_DecapsulateKey
+ * on the "real module" to bypass pkcs11-spy's v2-only function list. In WASM
+ * there's no real shared library — softhsmv3 is statically archived into
+ * the WASM binary. Our dlsym shim below forwards the names directly to the
+ * static symbols so the same code path works without recompiling pkcs11_kem.c
+ * with WASM-specific branches. */
 extern CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR ppFunctionList);
+extern CK_RV C_EncapsulateKey(unsigned long hSession, void *mech, unsigned long hPub,
+                              void *tmpl, unsigned long tmpl_count,
+                              unsigned char *ct, unsigned long *ct_len,
+                              unsigned long *phKey);
+extern CK_RV C_DecapsulateKey(unsigned long hSession, void *mech, unsigned long hPriv,
+                              void *tmpl, unsigned long tmpl_count,
+                              unsigned char *ct, unsigned long ct_len,
+                              unsigned long *phKey);
 
 /* Sentinel handle that strongSwan will pass back to dlsym/dlclose.
  * Any non-NULL value works; this one is mnemonic without being a valid hex. */
@@ -42,10 +56,12 @@ void *dlopen(const char *filename, int flags) {
 }
 
 void *dlsym(void *handle, const char *symbol) {
-    if (handle == SOFTHSM_FAKE_HANDLE &&
-        symbol && strcmp(symbol, "C_GetFunctionList") == 0) {
-        return (void *)C_GetFunctionList;
+    if (handle != SOFTHSM_FAKE_HANDLE || !symbol) {
+        return NULL;
     }
+    if (strcmp(symbol, "C_GetFunctionList") == 0) return (void *)C_GetFunctionList;
+    if (strcmp(symbol, "C_EncapsulateKey")  == 0) return (void *)C_EncapsulateKey;
+    if (strcmp(symbol, "C_DecapsulateKey")  == 0) return (void *)C_DecapsulateKey;
     return NULL;
 }
 
