@@ -90,13 +90,9 @@ echo "[build] Applying $PQC_PATCH..."
 patch -p1 --no-backup-if-mismatch < "$PQC_PATCH"
 
 # 4. Regenerate ASN.1 OID tables from patched oid.txt
-echo "[build] Regenerating ASN.1 OID tables..."
+echo "[build] Regenerating ASN.1 OID tables (strongSwan uses oid.pl, not oid_maker.pl)..."
 cd src/libstrongswan/asn1
-if [[ -f oid_maker.pl ]]; then
-    perl oid_maker.pl oid.txt oid.h oid.c
-else
-    echo "[build] WARNING: oid_maker.pl not found — build will regenerate via make"
-fi
+perl oid.pl oid.txt oid.h oid.c
 cd "$SRC_DIR"
 
 # 5. Overlay pqctoday pkcs11 plugin (must happen before the WASM patch

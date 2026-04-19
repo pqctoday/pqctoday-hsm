@@ -8,6 +8,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **strongswan-pkcs11 ECDH use-after-free** (`strongswan-pkcs11/pkcs11_dh.c`): Upstream strongSwan
+  6.0.5 `set_public_key()` allocated the `0x04 || X || Y` peer-pubkey buffer via `chunk_cata` (alloca)
+  and stored a `CK_ECDH1_DERIVE_PARAMS` struct whose `pPublicData` pointed into that stack buffer.
+  When `derive_secret()` later ran (different stack frame), the buffer was already freed and softhsmv3
+  received uninitialized bytes → `CKR_GENERAL_ERROR`. Only classical ECP curves hit this path (X25519
+  and ML-KEM use separate code). Fix: add a new `peer_pub_key` chunk on `private_pkcs11_dh_t` that
+  heap-allocates via `chunk_alloc`, keep it alive for the object's lifetime, and free in `destroy`.
+  This was the root cause of the sandbox VPN matrix's classical-mode failures; the same code path
+  runs in WASM, so rebuilding `scripts/build-strongswan-wasm.sh` picks up the fix there too.
+
+- **strongswan-pkcs11 derived-secret sensitivity attributes** (`strongswan-pkcs11/pkcs11_dh.c`):
+  Upstream `derive_secret()` template set only `CKA_CLASS` + `CKA_KEY_TYPE` on the shared-secret
+  output. softhsmv3 (PKCS#11 v3.2) defaults derived keys to `CKA_SENSITIVE=TRUE` /
+  `CKA_EXTRACTABLE=FALSE`, so the follow-up `C_GetAttributeValue(CKA_VALUE)` strongSwan uses to
+  read the secret back into the IKE state machine returned `CKR_ATTRIBUTE_SENSITIVE` (17). Fix:
+  set `CKA_SENSITIVE=FALSE` + `CKA_EXTRACTABLE=TRUE` in the derive template. Upstream works on
+  softhsm2 because of different default attribute policies.
+
+- **strongswan-pkcs11 ML-DSA public-key builder accepts `BUILD_BLOB`**
+  (`strongswan-pkcs11/pkcs11_public_key.c`): `pkcs1_builder::parse_public_key` unwraps the SPKI
+  and re-enters the builder chain with the raw FIPS 204 public key via `BUILD_BLOB` (not
+  `BUILD_BLOB_ASN1_DER`). Previously `pkcs11_public_key_load` only accepted the ASN.1 DER path,
+  so ML-DSA builder L3 via pkcs11 never produced a key and strongSwan fell through to PEM —
+  which rejected the raw bytes. Now accepts either input and validates `pubkey.len` against
+  `get_public_key_size(type)` before constructing.
+
+- **WASM build — correct OID-table generator** (`scripts/build-strongswan-wasm.sh`): strongSwan
+  ships `oid.pl` (not `oid_maker.pl`); the fallback branch was dead code. Call `oid.pl` directly
+  so the regenerated `oid.h`/`oid.c` pick up ML-DSA OIDs from the PQC patch.
+
 ### Added
 
 - **OpenPGP PKCS#11 bridge — vendored** (`openpgp/`): Vendored copy of

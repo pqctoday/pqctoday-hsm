@@ -61,9 +61,21 @@ struct private_pkcs11_dh_t {
 	chunk_t pub_key;
 
 	/**
-	 * Public value provided by peer
+	 * Public value provided by peer. For ECP curves this holds a cloned
+	 * CK_ECDH1_DERIVE_PARAMS struct whose pPublicData points into
+	 * `peer_pub_key` below — NOT into a transient stack buffer.
 	 */
 	chunk_t other;
+
+	/**
+	 * Heap copy of the peer's tagged EC public value (0x04 || x || y).
+	 * Kept alive for the lifetime of the object because
+	 * CK_ECDH1_DERIVE_PARAMS.pPublicData (inside `other`) points here.
+	 * Upstream pkcs11_dh.c uses chunk_cata (alloca) for this buffer,
+	 * which is freed when set_public_key() returns — softhsmv3 then
+	 * reads garbage at derive time and returns CKR_GENERAL_ERROR.
+	 */
+	chunk_t peer_pub_key;
 
 	/**
 	 * Shared secret
@@ -91,9 +103,20 @@ static bool derive_secret(private_pkcs11_dh_t *this, chunk_t other)
 {
 	CK_OBJECT_CLASS klass = CKO_SECRET_KEY;
 	CK_KEY_TYPE type = CKK_GENERIC_SECRET;
+	CK_BBOOL ck_false = CK_FALSE;
+	CK_BBOOL ck_true  = CK_TRUE;
+	/* PKCS#11 v3.2 requires CKA_SENSITIVE=FALSE + CKA_EXTRACTABLE=TRUE on
+	 * the derived secret for get_ck_attribute(CKA_VALUE) to succeed;
+	 * softhsmv3 defaults derived keys to SENSITIVE=TRUE / EXTRACTABLE=FALSE
+	 * which makes CKA_VALUE return CKR_ATTRIBUTE_SENSITIVE. Without these
+	 * two attributes the IKE shared secret cannot be read back into
+	 * strongSwan after C_DeriveKey succeeds. Upstream omits them, which
+	 * works on softhsm2 (different default) but fails on softhsmv3. */
 	CK_ATTRIBUTE attr[] = {
-		{ CKA_CLASS, &klass, sizeof(klass) },
-		{ CKA_KEY_TYPE, &type, sizeof(type) },
+		{ CKA_CLASS,       &klass,    sizeof(klass)    },
+		{ CKA_KEY_TYPE,    &type,     sizeof(type)     },
+		{ CKA_SENSITIVE,   &ck_false, sizeof(ck_false) },
+		{ CKA_EXTRACTABLE, &ck_true,  sizeof(ck_true)  },
 	};
 	CK_MECHANISM mech = {
 		this->mech_derive,
@@ -136,15 +159,19 @@ METHOD(key_exchange_t, set_public_key, bool,
 		case ECP_384_BIT:
 		case ECP_521_BIT:
 		{	/* we expect the public value to just be the concatenated x and y
-			 * coordinates, so we tag the value as an uncompressed ECPoint */
-			chunk_t tag = chunk_from_chars(0x04);
-			chunk_t pubkey = chunk_cata("cc", tag, value);
+			 * coordinates, so we tag the value as an uncompressed ECPoint.
+			 * Persist on the heap (not alloca) — `other` holds a struct that
+			 * points at these bytes and must stay valid until derive_secret(). */
+			chunk_clear(&this->peer_pub_key);
+			this->peer_pub_key = chunk_alloc(1 + value.len);
+			this->peer_pub_key.ptr[0] = 0x04;
+			memcpy(this->peer_pub_key.ptr + 1, value.ptr, value.len);
 			CK_ECDH1_DERIVE_PARAMS params = {
 				CKD_NULL,
 				0,
 				NULL,
-				pubkey.len,
-				pubkey.ptr,
+				this->peer_pub_key.len,
+				this->peer_pub_key.ptr,
 			};
 			this->other = chunk_clone(chunk_from_thing(params));
 			break;
@@ -188,6 +215,7 @@ METHOD(key_exchange_t, destroy, void,
 	chunk_clear(&this->pub_key);
 	chunk_clear(&this->secret);
 	chunk_clear(&this->other);
+	chunk_clear(&this->peer_pub_key);
 	free(this);
 }
 

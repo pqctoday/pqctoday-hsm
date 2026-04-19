@@ -949,16 +949,22 @@ static private_pkcs11_public_key_t* create_ml_dsa_key(chunk_t pubkey,
 pkcs11_public_key_t *pkcs11_public_key_load(key_type_t type, va_list args)
 {
 	private_pkcs11_public_key_t *this;
-	chunk_t n, e, blob;
+	chunk_t n, e, blob, raw;
 	size_t keylen = 0;
 
-	n = e = blob = chunk_empty;
+	n = e = blob = raw = chunk_empty;
 	while (TRUE)
 	{
 		switch (va_arg(args, builder_part_t))
 		{
 			case BUILD_BLOB_ASN1_DER:
 				blob = va_arg(args, chunk_t);
+				continue;
+			case BUILD_BLOB:
+				/* Raw public key bytes — used by pkcs1_builder's
+				 * parse_public_key for ML-DSA (it unwraps the SPKI and
+				 * re-enters the builder chain with the raw key material). */
+				raw = va_arg(args, chunk_t);
 				continue;
 			case BUILD_RSA_MODULUS:
 				n = va_arg(args, chunk_t);
@@ -1009,16 +1015,29 @@ pkcs11_public_key_t *pkcs11_public_key_load(key_type_t type, va_list args)
 			}
 		}
 	}
-	else if ((type == KEY_ML_DSA_44 || type == KEY_ML_DSA_65 ||
-			  type == KEY_ML_DSA_87) && blob.ptr)
+	else if (type == KEY_ML_DSA_44 || type == KEY_ML_DSA_65 ||
+			 type == KEY_ML_DSA_87)
 	{
 		chunk_t pubkey = chunk_empty;
-		key_type_t decoded;
 
-		/* The builder chain feeds us the SubjectPublicKeyInfo blob; unwrap to
-		 * the raw FIPS 204 public key. */
-		decoded = public_key_info_decode(blob, &pubkey);
-		if (decoded == type && pubkey.len == (size_t)get_public_key_size(type))
+		/* Two inputs possible from the builder chain:
+		 *   BUILD_BLOB          — raw FIPS 204 public key (unwrapped from
+		 *                         SPKI by pkcs1_builder's parse_public_key)
+		 *   BUILD_BLOB_ASN1_DER — full SubjectPublicKeyInfo (alternative
+		 *                         entry point, e.g., from a direct caller)
+		 */
+		if (raw.ptr)
+		{
+			pubkey = raw;
+		}
+		else if (blob.ptr)
+		{
+			if (public_key_info_decode(blob, &pubkey) != type)
+			{
+				return NULL;
+			}
+		}
+		if (pubkey.ptr && pubkey.len == (size_t)get_public_key_size(type))
 		{
 			keylen = pubkey.len * 8;
 			this = find_ml_dsa_key(pubkey, type, keylen);
