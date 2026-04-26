@@ -839,7 +839,7 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 		case CKM_ML_DSA:
 		{
 			mechanism = AsymMech::MLDSA;
-			bAllowMultiPartOp = false;
+			bAllowMultiPartOp = true;
 			isMLDSA = true;
 			CK_RV rv2 = parseMLDSASignContext(pMechanism, mldsaSignParam);
 			if (rv2 != CKR_OK) return rv2;
@@ -856,7 +856,7 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 				return CKR_ARGUMENTS_BAD;
 			}
 			mechanism = AsymMech::HASH_MLDSA;
-			bAllowMultiPartOp = false;
+			bAllowMultiPartOp = true;
 			isMLDSA = true;
 			CK_RV rv2 = parseMLDSASignContext(pMechanism, mldsaSignParam);
 			if (rv2 != CKR_OK) return rv2;
@@ -885,7 +885,7 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 		case CKM_CONST: \
 		{ \
 			mechanism = AsymMech::MECH_ENUM; \
-			bAllowMultiPartOp = false; \
+			bAllowMultiPartOp = true; \
 			isMLDSA = true; \
 			CK_RV rv2 = parseMLDSASignContext(pMechanism, mldsaSignParam); \
 			if (rv2 != CKR_OK) return rv2; \
@@ -917,7 +917,7 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 				paramLen = sizeof(slhdsaSignParam);
 			}
 			mechanism = AsymMech::SLHDSA;
-			bAllowMultiPartOp = false;
+			bAllowMultiPartOp = true;
 			isSLHDSA = true;
 			break;
 		case CKM_HASH_SLH_DSA:
@@ -929,7 +929,7 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 				return CKR_ARGUMENTS_BAD;
 			}
 			mechanism = AsymMech::HASH_SLHDSA;
-			bAllowMultiPartOp = false;
+			bAllowMultiPartOp = true;
 			isSLHDSA = true;
 			CK_RV rv2 = parseSLHDSASignContext(pMechanism, slhdsaSignParam);
 			if (rv2 != CKR_OK) return rv2;
@@ -958,7 +958,7 @@ CK_RV SoftHSM::AsymSignInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechan
 		case CKM_CONST: \
 		{ \
 			mechanism = AsymMech::MECH_ENUM; \
-			bAllowMultiPartOp = false; \
+			bAllowMultiPartOp = true; \
 			isSLHDSA = true; \
 			CK_RV rv2 = parseSLHDSASignContext(pMechanism, slhdsaSignParam); \
 			if (rv2 != CKR_OK) return rv2; \
@@ -2251,7 +2251,7 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 		case CKM_ML_DSA:
 		{
 			mechanism = AsymMech::MLDSA;
-			bAllowMultiPartOp = false;
+			bAllowMultiPartOp = true;
 			isMLDSA = true;
 			CK_RV rv2 = parseMLDSASignContext(pMechanism, mldsaSignParam);
 			if (rv2 != CKR_OK) return rv2;
@@ -2268,7 +2268,7 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 				return CKR_ARGUMENTS_BAD;
 			}
 			mechanism = AsymMech::HASH_MLDSA;
-			bAllowMultiPartOp = false;
+			bAllowMultiPartOp = true;
 			isMLDSA = true;
 			CK_RV rv2 = parseMLDSASignContext(pMechanism, mldsaSignParam);
 			if (rv2 != CKR_OK) return rv2;
@@ -2296,7 +2296,7 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 		case CKM_CONST: \
 		{ \
 			mechanism = AsymMech::MECH_ENUM; \
-			bAllowMultiPartOp = false; \
+			bAllowMultiPartOp = true; \
 			isMLDSA = true; \
 			CK_RV rv2 = parseMLDSASignContext(pMechanism, mldsaSignParam); \
 			if (rv2 != CKR_OK) return rv2; \
@@ -2328,7 +2328,7 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 				paramLen = sizeof(slhdsaSignParam);
 			}
 			mechanism = AsymMech::SLHDSA;
-			bAllowMultiPartOp = false;
+			bAllowMultiPartOp = true;
 			isSLHDSA = true;
 			break;
 		case CKM_HASH_SLH_DSA:
@@ -2340,7 +2340,7 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 				return CKR_ARGUMENTS_BAD;
 			}
 			mechanism = AsymMech::HASH_SLHDSA;
-			bAllowMultiPartOp = false;
+			bAllowMultiPartOp = true;
 			isSLHDSA = true;
 			CK_RV rv2 = parseSLHDSASignContext(pMechanism, slhdsaSignParam);
 			if (rv2 != CKR_OK) return rv2;
@@ -2369,7 +2369,7 @@ CK_RV SoftHSM::AsymVerifyInit(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMech
 		case CKM_CONST: \
 		{ \
 			mechanism = AsymMech::MECH_ENUM; \
-			bAllowMultiPartOp = false; \
+			bAllowMultiPartOp = true; \
 			isSLHDSA = true; \
 			CK_RV rv2 = parseSLHDSASignContext(pMechanism, slhdsaSignParam); \
 			if (rv2 != CKR_OK) return rv2; \

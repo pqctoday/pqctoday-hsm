@@ -8,6 +8,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **ML-DSA multi-part signing / verification** (`src/lib/crypto/OSSLMLDSA.cpp`, `OSSLMLDSA.h`,
+  `src/lib/SoftHSM_sign.cpp`): `signInit`, `signUpdate`, and `signFinal` (and the verify
+  counterparts) previously returned `false` immediately with "ML-DSA does not support multi-part
+  signing". PKCS#11 v3.2 §5.2 requires `C_SignUpdate` / `C_SignFinal` to work for any mechanism
+  where `ulMaxMultiPart > 0` in `CK_MECHANISM_INFO`. Consequently `bAllowMultiPartOp` was hardcoded
+  `false` for all `CKM_ML_DSA`, `CKM_HASH_ML_DSA`, and `HASH_MLDSA_CASE` blocks, so
+  `C_SignUpdate` always returned `CKR_OPERATION_NOT_INITIALIZED`. This broke pkcs11-provider's
+  `EVP_DigestSign*` streaming path, which is invoked by `X509_sign_ctx` (cert minting) and the TLS
+  1.3 state machine (CertificateVerify).
+  
+  Fix: `OSSLMLDSA` now accumulates chunks in `m_signMsg` / `m_verifyMsg` `ByteString` members
+  during `signUpdate` / `verifyUpdate`, then calls the existing one-shot `sign()` / `verify()` with
+  the accumulated message in `signFinal` / `verifyFinal`. `bAllowMultiPartOp` is flipped to `true`
+  for the three ML-DSA mechanism blocks in both the `C_SignInit` and `C_VerifyInit` dispatch.
+  PKCS#11 compliance test (`p11_v32_compliance_test.cpp`) extended with `test_multipart_signing()`
+  that validates the full `C_SignInit → C_SignUpdate(×2) → C_SignFinal → C_VerifyInit →
+  C_VerifyUpdate(×2) → C_VerifyFinal` round-trip plus a one-shot cross-check against the same
+  message — all 10 assertions pass.
+
+- **SLH-DSA multi-part signing / verification** (`src/lib/crypto/OSSLSLHDSA.cpp`, `OSSLSLHDSA.h`,
+  `src/lib/SoftHSM_sign.cpp`): Identical bug and fix as ML-DSA above; affects `CKM_SLH_DSA`,
+  `CKM_HASH_SLH_DSA`, and `HASH_SLHDSA_CASE` blocks. Uses `SLHDSA_SIGN_PARAMS` in place of
+  `MLDSA_SIGN_PARAMS`.
+
 ### Added
 
 - **strongSwan WASM Phase 3a validation exports** (`strongswan-wasm-v2-shims/charon_wasm_main.c`):

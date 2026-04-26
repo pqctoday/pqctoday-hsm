@@ -376,23 +376,33 @@ bool OSSLMLDSA::sign(PrivateKey* privateKey, const ByteString& dataToSign,
 	return true;
 }
 
-bool OSSLMLDSA::signInit(PrivateKey* /*pk*/, const AsymMech::Type /*mech*/,
-                          const void* /*param*/, const size_t /*paramLen*/)
+bool OSSLMLDSA::signInit(PrivateKey* pk, const AsymMech::Type mech,
+                          const void* param, const size_t paramLen)
 {
-	ERROR_MSG("ML-DSA does not support multi-part signing");
-	return false;
+	if (!AsymmetricAlgorithm::signInit(pk, mech, param, paramLen)) return false;
+	m_signMsg.wipe();
+	m_hasSignParams = (param != NULL && paramLen == sizeof(MLDSA_SIGN_PARAMS));
+	if (m_hasSignParams) memcpy(&m_signParams, param, sizeof(MLDSA_SIGN_PARAMS));
+	return true;
 }
 
-bool OSSLMLDSA::signUpdate(const ByteString& /*data*/)
+bool OSSLMLDSA::signUpdate(const ByteString& data)
 {
-	ERROR_MSG("ML-DSA does not support multi-part signing");
-	return false;
+	if (!AsymmetricAlgorithm::signUpdate(data)) return false;
+	m_signMsg += data;
+	return true;
 }
 
-bool OSSLMLDSA::signFinal(ByteString& /*sig*/)
+bool OSSLMLDSA::signFinal(ByteString& signature)
 {
-	ERROR_MSG("ML-DSA does not support multi-part signing");
-	return false;
+	PrivateKey* pk   = currentPrivateKey;
+	AsymMech::Type m = currentMechanism;
+	if (!AsymmetricAlgorithm::signFinal(signature)) return false;
+	bool ok = sign(pk, m_signMsg, signature, m,
+	               m_hasSignParams ? &m_signParams : NULL,
+	               m_hasSignParams ? sizeof(m_signParams) : 0);
+	m_signMsg.wipe();
+	return ok;
 }
 
 // ─── Verification ────────────────────────────────────────────────────────────
@@ -511,23 +521,34 @@ bool OSSLMLDSA::verify(PublicKey* publicKey, const ByteString& originalData,
 	return true;
 }
 
-bool OSSLMLDSA::verifyInit(PublicKey* /*pk*/, const AsymMech::Type /*mech*/,
-                            const void* /*param*/, const size_t /*paramLen*/)
+bool OSSLMLDSA::verifyInit(PublicKey* pk, const AsymMech::Type mech,
+                            const void* param, const size_t paramLen)
 {
-	ERROR_MSG("ML-DSA does not support multi-part verifying");
-	return false;
+	if (!AsymmetricAlgorithm::verifyInit(pk, mech, param, paramLen)) return false;
+	m_verifyMsg.wipe();
+	m_hasVerifyParams = (param != NULL && paramLen == sizeof(MLDSA_SIGN_PARAMS));
+	if (m_hasVerifyParams) memcpy(&m_verifyParams, param, sizeof(MLDSA_SIGN_PARAMS));
+	return true;
 }
 
-bool OSSLMLDSA::verifyUpdate(const ByteString& /*data*/)
+bool OSSLMLDSA::verifyUpdate(const ByteString& data)
 {
-	ERROR_MSG("ML-DSA does not support multi-part verifying");
-	return false;
+	if (!AsymmetricAlgorithm::verifyUpdate(data)) return false;
+	m_verifyMsg += data;
+	return true;
 }
 
-bool OSSLMLDSA::verifyFinal(const ByteString& /*sig*/)
+bool OSSLMLDSA::verifyFinal(const ByteString& signature)
 {
-	ERROR_MSG("ML-DSA does not support multi-part verifying");
-	return false;
+	PublicKey* pk    = currentPublicKey;
+	AsymMech::Type m = currentMechanism;
+	ByteString dummy;
+	if (!AsymmetricAlgorithm::verifyFinal(dummy)) return false;
+	bool ok = verify(pk, m_verifyMsg, signature, m,
+	                 m_hasVerifyParams ? &m_verifyParams : NULL,
+	                 m_hasVerifyParams ? sizeof(m_verifyParams) : 0);
+	m_verifyMsg.wipe();
+	return ok;
 }
 
 // ─── Encryption / decryption (not supported) ─────────────────────────────────

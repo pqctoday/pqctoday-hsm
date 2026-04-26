@@ -602,6 +602,95 @@ void test_pqc_dsa() {
 }
 
 
+void test_multipart_signing() {
+    CK_OBJECT_CLASS pubClass = CKO_PUBLIC_KEY;
+    CK_OBJECT_CLASS privClass = CKO_PRIVATE_KEY;
+    CK_KEY_TYPE ktypeDsa = 0x0000004a; // CKK_ML_DSA
+    CK_BBOOL bTrue = CK_TRUE, bFalse = CK_FALSE;
+    CK_ULONG paramSet65 = 2; // ML-DSA-65
+
+    CK_MECHANISM genMech = { CKM_ML_DSA_KEY_PAIR_GEN, NULL_PTR, 0 };
+    CK_ATTRIBUTE pubTmpl[] = {
+        { CKA_CLASS,         &pubClass,   sizeof(pubClass) },
+        { CKA_KEY_TYPE,      &ktypeDsa,   sizeof(ktypeDsa) },
+        { CKA_VERIFY,        &bTrue,      sizeof(bTrue) },
+        { CKA_PARAMETER_SET, &paramSet65, sizeof(paramSet65) },
+        { CKA_TOKEN,         &bFalse,     sizeof(bFalse) }
+    };
+    CK_ATTRIBUTE privTmpl[] = {
+        { CKA_CLASS,         &privClass,  sizeof(privClass) },
+        { CKA_KEY_TYPE,      &ktypeDsa,   sizeof(ktypeDsa) },
+        { CKA_SIGN,          &bTrue,      sizeof(bTrue) },
+        { CKA_PARAMETER_SET, &paramSet65, sizeof(paramSet65) },
+        { CKA_TOKEN,         &bFalse,     sizeof(bFalse) }
+    };
+
+    CK_OBJECT_HANDLE hPub = 0, hPriv = 0;
+    CK_RV rv = fl->C_GenerateKeyPair(hSess, &genMech, pubTmpl, 5, privTmpl, 5, &hPub, &hPriv);
+    if (rv != CKR_OK) {
+        record_result("MultiPart", "Setup_KeyGen", "FAIL", "RV=" + std::to_string(rv));
+        return;
+    }
+    record_result("MultiPart", "Setup_KeyGen", "PASS", "ML-DSA-65 key pair generated");
+
+    // --- Multi-part signing ---
+    CK_MECHANISM signMech = { CKM_ML_DSA, NULL_PTR, 0 };
+    rv = fl->C_SignInit(hSess, &signMech, hPriv);
+    record_result("MultiPart", "C_SignInit", rv == CKR_OK ? "PASS" : "FAIL",
+                  "PKCS#11 v3.2 §5.2 — RV=" + std::to_string(rv));
+    if (rv != CKR_OK) return;
+
+    CK_BYTE chunk1[] = "hello ";
+    CK_BYTE chunk2[] = "world";
+    rv = fl->C_SignUpdate(hSess, chunk1, sizeof(chunk1) - 1);
+    record_result("MultiPart", "C_SignUpdate_chunk1", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+    if (rv != CKR_OK) {
+        // Abort so session isn't left in a bad state
+        fl->C_SignFinal(hSess, NULL, 0);
+        return;
+    }
+
+    rv = fl->C_SignUpdate(hSess, chunk2, sizeof(chunk2) - 1);
+    record_result("MultiPart", "C_SignUpdate_chunk2", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+
+    CK_BYTE sig[5000];
+    CK_ULONG sigLen = sizeof(sig);
+    rv = fl->C_SignFinal(hSess, sig, &sigLen);
+    record_result("MultiPart", "C_SignFinal", rv == CKR_OK ? "PASS" : "FAIL",
+                  "SigLen=" + std::to_string(sigLen) + " RV=" + std::to_string(rv));
+    if (rv != CKR_OK) return;
+
+    // --- Multi-part verification ---
+    rv = fl->C_VerifyInit(hSess, &signMech, hPub);
+    record_result("MultiPart", "C_VerifyInit", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+    if (rv != CKR_OK) return;
+
+    rv = fl->C_VerifyUpdate(hSess, chunk1, sizeof(chunk1) - 1);
+    record_result("MultiPart", "C_VerifyUpdate_chunk1", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+
+    rv = fl->C_VerifyUpdate(hSess, chunk2, sizeof(chunk2) - 1);
+    record_result("MultiPart", "C_VerifyUpdate_chunk2", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+
+    rv = fl->C_VerifyFinal(hSess, sig, sigLen);
+    record_result("MultiPart", "C_VerifyFinal", rv == CKR_OK ? "PASS" : "FAIL",
+                  "PKCS#11 v3.2 §5.2 round-trip — RV=" + std::to_string(rv));
+
+    // --- Cross-check: one-shot verify of the same message ---
+    CK_BYTE fullMsg[] = "hello world";
+    rv = fl->C_VerifyInit(hSess, &signMech, hPub);
+    if (rv == CKR_OK) {
+        rv = fl->C_Verify(hSess, fullMsg, sizeof(fullMsg) - 1, sig, sigLen);
+        record_result("MultiPart", "C_Verify_oneshot_xcheck",
+                      rv == CKR_OK ? "PASS" : "FAIL",
+                      "Multi-part sig matches one-shot verify — RV=" + std::to_string(rv));
+    }
+}
+
 // Additions for PKCS#11 v3.2 compliance tool
 
 #ifndef CKM_HASH_SLH_DSA
@@ -1795,6 +1884,7 @@ int main(int argc, char** argv) {
     if (opt_category == "all" || opt_category == "attr") { refresh_session(); test_key_attributes(); }
     if (opt_category == "all" || opt_category == "pqc-kem") { refresh_session(); test_pqc_kem(); }
     if (opt_category == "all" || opt_category == "pqc-dsa") { refresh_session(); test_pqc_dsa(); }
+    if (opt_category == "all" || opt_category == "pqc-dsa") { refresh_session(); test_multipart_signing(); }
 
     if (opt_category == "all" || opt_category == "v32-adv") {
         refresh_session(); test_v32_kdfs();

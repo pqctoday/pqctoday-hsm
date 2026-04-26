@@ -35,12 +35,21 @@
 
 #include "config.h"
 #include "AsymmetricAlgorithm.h"
+#include "ByteString.h"
 #include <openssl/evp.h>
 
 class OSSLMLDSA : public AsymmetricAlgorithm
 {
 public:
 	virtual ~OSSLMLDSA() { }
+
+private:
+	ByteString        m_signMsg;    // accumulated bytes across signUpdate calls
+	ByteString        m_verifyMsg;  // accumulated bytes across verifyUpdate calls
+	MLDSA_SIGN_PARAMS m_signParams; // saved from signInit
+	MLDSA_SIGN_PARAMS m_verifyParams; // saved from verifyInit
+	bool              m_hasSignParams;
+	bool              m_hasVerifyParams;
 
 	// Signing functions (one-shot; multi-part not supported by ML-DSA)
 	virtual bool sign(PrivateKey* privateKey, const ByteString& dataToSign, ByteString& signature, const AsymMech::Type mechanism, const void* param = NULL, const size_t paramLen = 0);
