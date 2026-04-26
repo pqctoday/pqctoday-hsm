@@ -30,3 +30,68 @@ Supersedes the (broken) `../strongswan-wasm-shims/` reconstruction.
   conflicting return types, causing the `array_destroy_function`
   invalid-function-pointer crash at `library_init` time. Clean upstream
   6.0.5 + `strongswan-6.0.5-pqc.patch` is sufficient.
+
+## Plugin set (must stay in sync with hub side)
+
+The hub's worker (`pqctoday-hub/public/wasm/strongswan_worker.js`) and the
+panel's `buildCharonConf` both write a `strongswan.conf` with this `load =`
+list. **Every plugin named here must be compiled in via `--enable-*` in
+`scripts/build-strongswan-wasm-v2.sh`** — listing a plugin charon was not
+linked with is silently ignored by the loader, but `pkcs11`, `kdf`, and
+`socket-default` are required for the IKE flow to work at all.
+
+Required runtime plugin list (kept identical in three places — hub worker,
+hub panel `buildCharonConf`, and `WASM_STRONGSWAN_CONF` in
+`charon_wasm_main.c`):
+
+```text
+pem pkcs1 pkcs8 x509 pkcs11 nonce kdf openssl random constraints revocation socket-default
+```
+
+`aes`, `sha1`, `sha2`, `hmac` are intentionally absent — the `openssl` plugin
+provides them. Listing them anyway adds noise to charon's plugin-load log.
+
+### Verifying the WASM binary actually has them
+
+After `scripts/build-strongswan-wasm-v2.sh` completes, run:
+
+```sh
+wasm-objdump -x dist/strongswan-v2.wasm \
+  | grep -E "(pem|pkcs1|pkcs8|x509|pkcs11|nonce|kdf|openssl|random|constraints|revocation|socket-default)_plugin_create"
+```
+
+Each plugin name should produce exactly one hit. If `socket-default_plugin_create`
+is missing the IKE socket layer is not linked in — the bridge's syscall
+overrides will receive nothing because charon never opens a socket. If
+`pkcs11_plugin_create` is missing, softhsmv3 RPC is unreachable.
+
+## IKEv2 fragmentation (RFC 7383)
+
+strongSwan 6.x compiles RFC 7383 fragmentation support directly into charon's
+core IKEv2 engine — there is no separate plugin to enable. Activation is
+controlled by:
+
+- `charon.fragment_size` in `strongswan.conf` (the hub passes this from the
+  MTU slider).
+- `fragmentation = yes` in the connection block of `ipsec.conf`.
+
+If the hub UI's "Enable IKE Message Fragmentation" toggle has no observable
+effect, check the charon log for `received fragment #1 of …` lines on the
+responder side. Their absence means charon's core IKE state machine is not
+fragmenting — the proposal may be small enough to fit in one packet, or the
+toggle did not propagate to the connection block.
+
+## ML-KEM / ML-DSA via the PKCS#11 bridge
+
+ML-KEM is **not** a strongSwan transform plugin. It reaches charon through
+the PKCS#11 plugin's `C_EncapsulateKey` / `C_DecapsulateKey` calls, which we
+intercept on the JS side and route to softhsmv3's CKM_ML_KEM mechanisms. The
+proposal token charon recognizes is `mlkem768`; the C-side has no #ifdef
+gating it as long as the `strongswan-6.0.5-pqc.patch` is applied.
+
+Verify the patch wired the proposal grammar correctly:
+
+```sh
+emstrip dist/strongswan-v2.wasm  # optional
+wasm-objdump -d dist/strongswan-v2.wasm | grep -A2 mlkem768
+```

@@ -29,8 +29,12 @@ struct pkcs11_kem_t {
  * Create a pkcs11_kem_t instance for a specific method.
  *
  * @param group		key exchange algorithm
+ * @param ...		variadic args required by ke_constructor_t typedef (unused
+ *					for ML-KEM; matching the typedef avoids a WASM
+ *					function-signature trap when the plugin loader casts this
+ *					pointer to (*)(method, ...))
  * @return			pkcs11_kem_t instance, or NULL
  */
-pkcs11_kem_t *pkcs11_kem_create(key_exchange_method_t group);
+pkcs11_kem_t *pkcs11_kem_create(key_exchange_method_t group, ...);
 
 #endif

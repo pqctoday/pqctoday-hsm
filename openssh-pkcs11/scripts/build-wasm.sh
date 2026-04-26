@@ -192,6 +192,20 @@ mkdir -p "$ROOT/build/ssh-wasm"
         CFLAGS="$COMMON_CFLAGS -DWASM_SSH_CLIENT" \
         LDFLAGS="${SHARED_LDFLAGS[*]} -s EXPORT_NAME=createSshModule ${COMMON_LIBS}")
 
+# ── Step 3.5: Patch generated config.h ────────────────────────────────────────
+# OpenSSH's configure incorrectly defines HAVE_GETRRSETBYNAME=1 under emscripten
+# despite ac_cv_func_getrrsetbyname=no being set in the env above. The cache
+# variable name disagrees with the AC_CHECK_DECL test that ultimately writes
+# the #define, so the override leaks. With HAVE_GETRRSETBYNAME defined the
+# openbsd-compat shim (which provides ERRSET_*, struct rrsetinfo, RRSET_*) is
+# skipped and dns.c fails to compile. Strip it post-configure.
+for cfg in "$ROOT/build/sshd-wasm/config.h" "$ROOT/build/ssh-wasm/config.h"; do
+    if [[ -f "$cfg" ]] && grep -q '^#define HAVE_GETRRSETBYNAME 1' "$cfg"; then
+        echo "[openssh-pkcs11] Patching out HAVE_GETRRSETBYNAME in $cfg"
+        sed -i.bak 's|^#define HAVE_GETRRSETBYNAME 1|/* #undef HAVE_GETRRSETBYNAME */|' "$cfg"
+    fi
+done
+
 # ── Step 4: Build ─────────────────────────────────────────────────────────────
 NCPU=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 echo "[openssh-pkcs11] Building sshd WASM with ${NCPU} jobs..."

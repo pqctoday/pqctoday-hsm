@@ -87,7 +87,7 @@ cd "$SRC_DIR"
 
 # 3. Apply PQC core patch
 echo "[build] Applying $PQC_PATCH..."
-patch -p1 --no-backup-if-mismatch < "$PQC_PATCH"
+patch -p1 --forward --no-backup-if-mismatch < "$PQC_PATCH" || true
 
 # 4. Regenerate ASN.1 OID tables from patched oid.txt
 echo "[build] Regenerating ASN.1 OID tables (strongSwan uses oid.pl, not oid_maker.pl)..."
@@ -104,7 +104,7 @@ cp -R "$PLUGIN_SRC"/* src/libstrongswan/plugins/pkcs11/
 #    hooks). Applied AFTER the plugin overlay so its pkcs11_library.c hunks
 #    target the pqctoday version that's now in the tree.
 echo "[build] Applying $WASM_PATCH..."
-patch -p1 --no-backup-if-mismatch < "$WASM_PATCH"
+patch -p1 --forward --no-backup-if-mismatch < "$WASM_PATCH" || true
 
 # 7. Copy WASM shim sources into the charon source dir. These are
 #    referenced by the Makefile.am hunk in the WASM patch; copying here
@@ -116,12 +116,291 @@ cp "$SHIMS_SRC"/wasm_hsm_init.c     src/charon/
 cp "$SHIMS_SRC"/wasm_backend.c      src/charon/
 cp "$SHIMS_SRC"/pkcs11_wasm_rpc.c   src/charon/
 
+# 7.5. Patch Makefile.am to actually compile plugin_constructors.c into the
+#      archive. Upstream lists the generated file under BUILT_SOURCES but
+#      never adds it to *_la_SOURCES, so the static plugin constructor never
+#      runs and 7 of 16 enabled libstrongswan plugins (x509, pubkey, pem,
+#      pkcs1, pkcs8, constraints, revocation) get dead-stripped at link time.
+#      One-line fix per Makefile.am, applied before autoreconf so the
+#      regenerated Makefile.in picks it up. Idempotent via grep -q guard.
+# Only patch libstrongswan — libcharon has no plugins enabled in our config,
+# so its plugin_constructors.c has an empty register_plugins() body. With the
+# non-static patch (step 7.6), compiling both would produce duplicate
+# `register_plugins` symbols. Skip libcharon to avoid the collision.
+echo "[build] Patching libstrongswan/Makefile.am to compile plugin_constructors.c..."
+makefile_am="src/libstrongswan/Makefile.am"
+if ! grep -q "_la_SOURCES += \$(srcdir)/plugin_constructors.c" "$makefile_am"; then
+    sed -i.bak '/^if STATIC_PLUGIN_CONSTRUCTORS$/,/^endif$/{
+        /^CLEANFILES = \$(srcdir)\/plugin_constructors\.c$/a\
+libstrongswan_la_SOURCES += $(srcdir)/plugin_constructors.c
+    }' "$makefile_am"
+    echo "[build]   patched $makefile_am"
+else
+    echo "[build]   $makefile_am already patched, skipping"
+fi
+
+# 7.6. Patch the constructor generator to emit a non-static, used register_plugins.
+#      wasm-ld's archive selection only pulls a .o from a .a when one of its
+#      EXTERNAL symbols is referenced. The upstream generator declares
+#      `register_plugins` as static (file-local, no external symbol), so even
+#      with the .o in libstrongswan.a the linker never selects it — the
+#      constructor body never enters __wasm_call_ctors. Making the symbol
+#      non-static + __attribute__((used)) lets us force-link via
+#      -Wl,--undefined=register_plugins below.
+# 7.55. Skip getopt_long in WASM build. Upstream charon.c calls getopt_long
+#       BEFORE the WASM `__EMSCRIPTEN__` block that handles `--role`. Result:
+#       getopt sees `--role` as unrecognized and aborts via usage(""). The
+#       WASM patch positions its handler too late. Quick fix: under EMSCRIPTEN,
+#       short-circuit `c = EOF` so the loop exits and execution falls through
+#       to the WASM role parser.
+# 7.45. Patch array_destroy_function callbacks where 1-arg destructors are
+#       cast via `(void*)` to the 3-arg array_callback_t typedef. WASM is
+#       strict about function-pointer arity; native x86 forgives this via
+#       cdecl, but wasm-ld emits an indirect-call signature trap. Add static
+#       wrapper functions in each affected file and replace the cast with
+#       the wrapper. The trap in our current build fires from
+#       settings_parser_parse_string -> destroy -> array_destroy_function ->
+#       array_invoke -> *(void*)free  (1-arg vs 3-arg expected).
+echo "[build] Patching array_destroy_function callbacks for WASM strict typing..."
+
+# Helper: insert a forward declaration of the wrapper near the top of the
+# file (after the last #include, where it's at file scope), and append the
+# full body at the END of the file (where every type and destructor is in
+# scope). This avoids both "function definition not allowed here" (when the
+# wrapper would land inside another function) and "use of undeclared
+# identifier" (when the call site precedes the wrapper definition).
+# Idempotent via sentinel comment markers. Targeted sed so the replacement
+# only fires inside `array_destroy_function(...)` calls — not in struct
+# initializers that incidentally contain `(void*)free`.
+patch_array_cb() {
+    local file="$1"           # path to .c source
+    local marker="$2"         # unique sentinel comment
+    local wrapper_name="$3"   # name of the wrapper to insert
+    local wrapper_body="$4"   # full function body (single line)
+    local cast_token="$5"     # the bare cast token, e.g. "(void*)free"
+
+    if grep -q "$marker" "$file"; then
+        echo "[build]   $file already patched, skipping"
+        return
+    fi
+
+    local escaped_cast
+    escaped_cast=$(printf '%s' "$cast_token" | sed 's/[][\.*^$/]/\\&/g')
+
+    # 1. Insert forward declaration after the last #include (file scope, no
+    #    type/function bodies needed at this point — just a name + signature).
+    awk -v marker="$marker" -v fwd="static void $wrapper_name(void *data, int idx, void *user);" '
+        /^#include / { last_inc = NR }
+        { lines[NR] = $0 }
+        END {
+            for (i = 1; i <= NR; i++) {
+                print lines[i]
+                if (i == last_inc) {
+                    print ""
+                    print "/* " marker " (forward decl) */"
+                    print fwd
+                }
+            }
+        }
+    ' "$file" > "$file.tmp" && mv "$file.tmp" "$file"
+
+    # 2. Append the full body at end of file (all referenced types and the
+    #    underlying destructor are now in scope).
+    {
+        echo ""
+        echo "/* $marker (definition) */"
+        echo "$wrapper_body"
+    } >> "$file"
+
+    # 3. Replace the cast at every array_destroy_function call site.
+    sed -i.bak "s#array_destroy_function(\\([^,]*\\), $escaped_cast, \\([^)]*\\))#array_destroy_function(\\1, $wrapper_name, \\2)#g" "$file"
+    echo "[build]   patched $file"
+}
+
+WASM_FREE_CB_BODY='static void _wasm_free_cb(void *data, int idx, void *user) { (void)idx; (void)user; free(data); }'
+
+# settings_parser.c (YACC-generated): (void*)free on refs array
+patch_array_cb "src/libstrongswan/settings/settings_parser.c" \
+    "WASM_ARRAY_CB_FREE_CB" \
+    "_wasm_free_cb" \
+    "$WASM_FREE_CB_BODY" \
+    "(void*)free"
+
+# settings_parser.y (kept in sync in case yacc regenerates the .c)
+patch_array_cb "src/libstrongswan/settings/settings_parser.y" \
+    "WASM_ARRAY_CB_FREE_CB" \
+    "_wasm_free_cb" \
+    "$WASM_FREE_CB_BODY" \
+    "(void*)free"
+
+# identification.c: (void*)free on rdns. Other (void*)free uses in struct
+# initializers (line ~221) are NOT touched because the targeted sed only
+# matches inside array_destroy_function(...) calls.
+patch_array_cb "src/libstrongswan/utils/identification.c" \
+    "WASM_ARRAY_CB_FREE_CB" \
+    "_wasm_free_cb" \
+    "$WASM_FREE_CB_BODY" \
+    "(void*)free"
+
+# parser_helper.c: (void*)parser_helper_file_destroy is 1-arg
+patch_array_cb "src/libstrongswan/utils/parser_helper.c" \
+    "WASM_ARRAY_CB_PHFD" \
+    "_wasm_phfd_cb" \
+    "static void _wasm_phfd_cb(void *data, int idx, void *user) { (void)idx; (void)user; parser_helper_file_destroy((parser_helper_file_t*)data); }" \
+    "(void*)parser_helper_file_destroy"
+
+# metadata_set.c: (void*)destroy_entry is 1-arg
+patch_array_cb "src/libstrongswan/metadata/metadata_set.c" \
+    "WASM_ARRAY_CB_DESTROY_ENTRY" \
+    "_wasm_destroy_entry_cb" \
+    "static void _wasm_destroy_entry_cb(void *data, int idx, void *user) { (void)idx; (void)user; destroy_entry((entry_t*)data); }" \
+    "(void*)destroy_entry"
+
+# message.c: (void*)fragment_destroy is 1-arg
+patch_array_cb "src/libcharon/encoding/message.c" \
+    "WASM_ARRAY_CB_FRAGMENT_DESTROY" \
+    "_wasm_fragment_destroy_cb" \
+    "static void _wasm_fragment_destroy_cb(void *data, int idx, void *user) { (void)idx; (void)user; fragment_destroy((fragment_t*)data); }" \
+    "(void*)fragment_destroy"
+
+# 7.5. Wrap 2-arg comparator passed to array_sort in plugin_loader.c.
+#      `array_sort` typedef expects `int (*)(const void*, const void*, void*)`
+#      but `plugin_priority_cmp_name` is 2-arg. Native x86 forgives this; WASM
+#      traps in qsort_r -> compare_elements with function-signature mismatch.
+#      Add a 3-arg wrapper that drops the unused `user` and calls the 2-arg
+#      comparator. Forward decl after last #include, body at EOF, cast
+#      replaced at the call site only.
+PLUGIN_LOADER_C="src/libstrongswan/plugins/plugin_loader.c"
+if ! grep -q "WASM_PLUGIN_PRIORITY_CMP_NAME_CB" "$PLUGIN_LOADER_C"; then
+    awk -v fwd='static int _wasm_ppcn_cb(const void *a, const void *b, void *user);' '
+        /^#include / { last_inc = NR }
+        { lines[NR] = $0 }
+        END {
+            for (i = 1; i <= NR; i++) {
+                print lines[i]
+                if (i == last_inc) {
+                    print ""
+                    print "/* WASM_PLUGIN_PRIORITY_CMP_NAME_CB (forward decl) */"
+                    print fwd
+                }
+            }
+        }
+    ' "$PLUGIN_LOADER_C" > "$PLUGIN_LOADER_C.tmp" && mv "$PLUGIN_LOADER_C.tmp" "$PLUGIN_LOADER_C"
+    cat >> "$PLUGIN_LOADER_C" <<'WASM_EOF'
+
+/* WASM_PLUGIN_PRIORITY_CMP_NAME_CB (definition) */
+static int _wasm_ppcn_cb(const void *a, const void *b, void *user)
+{
+    (void)user;
+    return plugin_priority_cmp_name((const plugin_priority_t*)a,
+                                    (const plugin_priority_t*)b);
+}
+WASM_EOF
+    # Targeted replacement: only inside array_sort(...) calls (3-arg comparator).
+    # Do NOT touch array_bsearch(...) at line 1274 — that one expects a 2-arg
+    # comparator typedef, and the original (void*)plugin_priority_cmp_name cast
+    # is the right shape for it (2-arg → 2-arg, just discards type info).
+    sed -i.bak 's|array_sort(\([^,]*\), (void\*)plugin_priority_cmp_name, \([^)]*\))|array_sort(\1, _wasm_ppcn_cb, \2)|g' "$PLUGIN_LOADER_C"
+    echo "[build]   patched $PLUGIN_LOADER_C"
+else
+    echo "[build]   $PLUGIN_LOADER_C already patched, skipping"
+fi
+
+echo "[build] Patching charon.c to skip getopt_long under __EMSCRIPTEN__..."
+CHARON_C="src/charon/charon.c"
+if ! grep -q "EMSCRIPTEN_SKIP_GETOPT" "$CHARON_C"; then
+    sed -i.bak \
+        's|int c = getopt_long(argc, argv, "", long_opts, NULL);|/* EMSCRIPTEN_SKIP_GETOPT */\
+#ifdef __EMSCRIPTEN__\
+		int c = EOF;\
+		(void)long_opts;\
+#else\
+		int c = getopt_long(argc, argv, "", long_opts, NULL);\
+#endif|' "$CHARON_C"
+    echo "[build]   patched $CHARON_C"
+else
+    echo "[build]   $CHARON_C already patched, skipping"
+fi
+
+# 7.7. WASM receiver driver — strongswan-6.0.5-wasm.patch already short-circuits
+#      the queue_job in receiver_create() (no thread pool in WASM), but never
+#      wired anything to actually call receive_packets(). The patch comment
+#      says "the replacement main loop in src/charon/charon.c spins forever;
+#      receive_packets() is invoked from there" — but charon.c just sleep(1)s.
+#      Result: incoming packets sit in the netInbox SAB forever and the
+#      responder never advances past IKE_SA_INIT receipt.
+#
+#      Fix: append a non-static `wasm_receiver_drain_once()` to receiver.c
+#      that drives one pass of receive_packets() (which itself synchronously
+#      dispatches process_message_job under EMSCRIPTEN), and replace charon.c's
+#      busy loop with a tight loop calling it. socket_wasm's wasm_net_receive
+#      blocks on Atomics.wait, so the loop is naturally event-driven (the
+#      bridge's Atomics.notify wakes it).
+RECEIVER_C="src/libcharon/network/receiver.c"
+if ! grep -q "wasm_receiver_drain_once" "$RECEIVER_C"; then
+    cat >> "$RECEIVER_C" <<'WASM_EOF'
+
+#ifdef __EMSCRIPTEN__
+/* WASM single-thread receive driver. Called from charon.c's main loop.
+ * receive_packets() blocks inside socket->receive() (wasm_net_receive
+ * Atomics.wait), then dispatches process_message_job synchronously per
+ * the EMSCRIPTEN ifdef inside receive_packets above. The receiver_t
+ * pointed to by charon->receiver is in fact a private_receiver_t (the
+ * METHOD pattern guarantees public is the first member), so the cast is
+ * layout-safe. */
+void wasm_receiver_drain_once(void)
+{
+    if (charon && charon->receiver) {
+        (void)receive_packets((private_receiver_t*)charon->receiver);
+    }
+}
+#endif
+WASM_EOF
+    echo "[build]   patched $RECEIVER_C — appended wasm_receiver_drain_once"
+else
+    echo "[build]   $RECEIVER_C already has wasm_receiver_drain_once, skipping"
+fi
+if ! grep -q "wasm_receiver_drain_once" "$CHARON_C"; then
+    sed -i.bak 's|while (1) { sleep(1); }|extern void wasm_receiver_drain_once(void); while (1) { wasm_receiver_drain_once(); }|' "$CHARON_C"
+    echo "[build]   patched $CHARON_C — main loop now drives receiver"
+fi
+
+echo "[build] Patching plugin_constructors.py to emit non-static constructor..."
+PLUGIN_CTORS_PY="src/libstrongswan/plugins/plugin_constructors.py"
+if grep -q '__attribute__ ((constructor))' "$PLUGIN_CTORS_PY"; then
+    # Use weak linkage so libtool's tendency to list libstrongswan.a twice in
+    # the link line (once directly, once via libcharon.la's dependency chain)
+    # doesn't cause duplicate-symbol errors. With weak, the second definition
+    # is simply discarded. `used` prevents compiler dead-strip; the
+    # -Wl,--undefined=register_plugins flag below triggers archive lookup.
+    sed -i.bak \
+        -e 's|"static void register_plugins() __attribute__ ((constructor));"|"void register_plugins(void) __attribute__((weak,used,constructor));"|' \
+        -e 's|"static void register_plugins()"|"void register_plugins(void)"|' \
+        -e 's|"static void unregister_plugins() __attribute__ ((destructor));"|"void unregister_plugins(void) __attribute__((weak,used,destructor));"|' \
+        -e 's|"static void unregister_plugins()"|"void unregister_plugins(void)"|' \
+        "$PLUGIN_CTORS_PY"
+    echo "[build]   patched $PLUGIN_CTORS_PY"
+else
+    echo "[build]   $PLUGIN_CTORS_PY already patched, skipping"
+fi
+
 # 8a. autoreconf (Makefile.am changes in our plugin + patch → need
 #     regenerated Makefile.in)
 echo "[build] Running autoreconf..."
 autoreconf -i
 
 # 8b. Emscripten configure — strip everything except charon + pkcs11
+# Export CFLAGS/LDFLAGS so configure's libcrypto link-test can find the
+# openssl-wasm install. Without these, --enable-openssl aborts at:
+#   checking for EVP_CIPHER_CTX_new in -lcrypto... no
+#   configure: error: OpenSSL libcrypto not found
+OPENSSL_WASM_DIR_FOR_CONFIGURE="${OPENSSL_WASM_LIB_DIR:-${HSM_ROOT}/deps/openssl-wasm/lib}"
+OPENSSL_WASM_INC_DIR="$(dirname "$OPENSSL_WASM_DIR_FOR_CONFIGURE")/include"
+export CFLAGS="${CFLAGS:-} -g -I${OPENSSL_WASM_INC_DIR}"
+export LDFLAGS="${LDFLAGS:-} -L${OPENSSL_WASM_DIR_FOR_CONFIGURE}"
+echo "[build] CFLAGS=${CFLAGS}"
+echo "[build] LDFLAGS=${LDFLAGS}"
+
 echo "[build] Running emconfigure..."
 emconfigure ./configure \
     --host=wasm32-unknown-emscripten \
@@ -129,6 +408,7 @@ emconfigure ./configure \
     --enable-static \
     --disable-defaults \
     --enable-charon \
+    --enable-ikev2 \
     --enable-monolithic \
     --enable-pkcs11 \
     --enable-nonce \
@@ -140,6 +420,12 @@ emconfigure ./configure \
     --enable-pem \
     --enable-pkcs1 \
     --enable-pkcs8 \
+    --enable-x509 \
+    --enable-pubkey \
+    --enable-constraints \
+    --enable-revocation \
+    --enable-openssl \
+    --enable-kdf \
     --disable-kernel-netlink \
     --disable-socket-default
 
@@ -195,7 +481,9 @@ fi
 # link steps use emar — Emscripten flags like -s ALLOW_MEMORY_GROWTH
 # are ignored by emar so they're safe. EXPORTED_FUNCTIONS etc. only
 # take effect on final-executable links.
-LINK_FLAGS="-s ALLOW_MEMORY_GROWTH=1 \
+LINK_FLAGS="-L${OPENSSL_WASM_DIR_FOR_CONFIGURE} \
+    -g \
+    -s ALLOW_MEMORY_GROWTH=1 \
     -s ALLOW_TABLE_GROWTH=1 \
     -s ERROR_ON_UNDEFINED_SYMBOLS=0 \
     -s EXPORTED_FUNCTIONS=[${EXPORTED_FUNCS}] \
@@ -207,8 +495,14 @@ LINK_FLAGS="-s ALLOW_MEMORY_GROWTH=1 \
     -fexceptions \
     -s NO_DISABLE_EXCEPTION_CATCHING=1"
 
+# Force-link the plugin constructor: wasm-ld archive selection requires an
+# external symbol reference. Step 7.5 added plugin_constructors.c to
+# libstrongswan_la_SOURCES; step 7.6 made `register_plugins` non-static. This
+# -Wl,--undefined flag triggers archive lookup and pulls plugin_constructors.o
+# into the link, which transitively retains all 16 xxx_plugin_create symbols
+# referenced from inside register_plugins().
 emmake make -j"$NCPU" \
-    LDFLAGS="$LINK_FLAGS" \
+    LDFLAGS="$LINK_FLAGS -Wl,--undefined=register_plugins" \
     charon_LDADD="\$(top_builddir)/src/libstrongswan/libstrongswan.la \$(top_builddir)/src/libcharon/libcharon.la -lm \$(PTHREADLIB) \$(ATOMICLIB) \$(DLLIB) $CHARON_EXTRA_LDADD" \
     || { echo "[build] emmake failed — see /tmp/wasm-build.log"; exit 1; }
 

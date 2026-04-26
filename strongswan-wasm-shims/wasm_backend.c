@@ -33,6 +33,7 @@
 
 #include <daemon.h>
 #include <library.h>
+#include <utils/debug.h>
 #include <config/backend.h>
 #include <config/peer_cfg.h>
 #include <config/ike_cfg.h>
@@ -143,12 +144,25 @@ void wasm_setup_config(int unused)
         default: ike_prop = proposal_ike_classical; break;
     }
 
-    /* IKE config — local=0.0.0.0, remote=0.0.0.0 for either role. */
+    /* IKE config — local/remote addresses depend on the worker's role.
+     * The JS worker sets WASM_ROLE = "initiator" | "responder" before main();
+     * we hard-code 192.168.0.1 / 192.168.0.2 to match bridge.ts's SAB-based
+     * UDP loopback. Without explicit addresses, charon aborts IKE_SA_INIT
+     * with "unable to resolve 0.0.0.0". */
     memset(&ike_data, 0, sizeof(ike_data));
     ike_data.version     = IKEV2;
-    ike_data.local       = "0.0.0.0";
+    {
+        const char *role_env = getenv("WASM_ROLE");
+        if (role_env && !strcmp(role_env, "initiator")) {
+            ike_data.local  = "192.168.0.1";
+            ike_data.remote = "192.168.0.2";
+        } else {
+            /* responder (or unset → default to responder) */
+            ike_data.local  = "192.168.0.2";
+            ike_data.remote = "192.168.0.1";
+        }
+    }
     ike_data.local_port  = 500;
-    ike_data.remote      = "0.0.0.0";
     ike_data.remote_port = 500;
     ike_cfg = ike_cfg_create(&ike_data);
     ike_cfg->add_proposal(ike_cfg, proposal_create_from_string(PROTO_IKE,
@@ -185,6 +199,10 @@ void wasm_setup_config(int unused)
     peer_cfg->add_child_cfg(peer_cfg, child_cfg);
 
     peer_cfgs->insert_last(peer_cfgs, peer_cfg);
+
+    DBG1(DBG_CFG, "WASM: registered static config (role=%s, local=%s, remote=%s)",
+         getenv("WASM_ROLE") ? getenv("WASM_ROLE") : "responder",
+         ike_data.local, ike_data.remote);
 
     /* Register the backend the first time. */
     if (!wasm_backend)

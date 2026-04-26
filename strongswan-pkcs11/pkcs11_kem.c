@@ -75,6 +75,26 @@ static pkcs11_library_t *find_token(private_pkcs11_kem_t *this, CK_SESSION_HANDL
 			/* Look for proper KEM mechanism support */
 			if (type == this->mech_encap) {
 				if (current->f->C_OpenSession(slot, CKF_SERIAL_SESSION, NULL, NULL, session) == CKR_OK) {
+#ifdef __EMSCRIPTEN__
+					/* WASM static-link path: ML-KEM private keys default to
+					 * CKA_PRIVATE=TRUE per PKCS#11 v3.2 §6.68.3 + §4.7, so
+					 * C_GenerateKeyPair without C_Login returns
+					 * CKR_USER_NOT_LOGGED_IN (§5.18.2). The slot was
+					 * provisioned by wasm_hsm_init with USER_PIN="1234";
+					 * uninitialized append-on-probe slots will fail login
+					 * and be skipped (we try the next slot). */
+					static const CK_UTF8CHAR wasm_pin[] = {'1','2','3','4'};
+					CK_RV login_rv = current->f->C_Login(*session, CKU_USER,
+						(CK_UTF8CHAR_PTR)wasm_pin, sizeof(wasm_pin));
+					if (login_rv != CKR_OK &&
+						login_rv != CKR_USER_ALREADY_LOGGED_IN)
+					{
+						DBG2(DBG_CFG, "pkcs11_kem WASM C_Login slot=%lu: %N — skipping",
+							 (unsigned long)slot, ck_rv_names, login_rv);
+						current->f->C_CloseSession(*session);
+						break;
+					}
+#endif
 					found = current;
 					break;
 				}
@@ -420,8 +440,13 @@ METHOD(key_exchange_t, destroy, void,
 
 /**
  * See header
+ *
+ * The variadic args are required by ke_constructor_t (crypto_factory.h) for
+ * MODP_CUSTOM-style runtime parameters; ML-KEM ignores them but the signature
+ * MUST match the typedef or wasm-ld emits a function-pointer-cast trap when
+ * the plugin loader calls this through the (*)(method, ...) dispatcher.
  */
-pkcs11_kem_t *pkcs11_kem_create(key_exchange_method_t group)
+pkcs11_kem_t *pkcs11_kem_create(key_exchange_method_t group, ...)
 {
 	private_pkcs11_kem_t *this;
 	CK_MECHANISM_TYPE key_gen_mech = 0;
