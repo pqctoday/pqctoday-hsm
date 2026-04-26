@@ -34,6 +34,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `CKM_HASH_SLH_DSA`, and `HASH_SLHDSA_CASE` blocks. Uses `SLHDSA_SIGN_PARAMS` in place of
   `MLDSA_SIGN_PARAMS`.
 
+- **ECDSA multi-part signing / verification** (`src/lib/crypto/OSSLECDSA.cpp`, `OSSLECDSA.h`,
+  `src/lib/SoftHSM_sign.cpp`): `signInit`, `signUpdate`, `signFinal` (and verify counterparts)
+  previously returned `false` with "ECDSA does not support multi-part signing".  This blocked
+  pkcs11-provider's `EVP_DigestSign*` streaming path for all 10 `CKM_ECDSA*` mechanisms
+  (`CKM_ECDSA`, `CKM_ECDSA_SHA{1,224,256,384,512}`, `CKM_ECDSA_SHA3_{224,256,384,512}`).
+  Fix: ByteString accumulator pattern (`m_signMsg` / `m_verifyMsg`) identical to the ML-DSA fix;
+  delegates accumulated message to the existing one-shot `sign()` / `verify()` in Final.
+  `bAllowMultiPartOp` flipped to `true` for all 10 ECDSA mechanism cases in both the
+  `C_SignInit` and `C_VerifyInit` dispatch tables.  Closes GH-58.
+
+- **EdDSA multi-part signing / verification** (`src/lib/crypto/OSSLEDDSA.cpp`, `OSSLEDDSA.h`,
+  `src/lib/SoftHSM_sign.cpp`): Same stub bug for `CKM_EDDSA` and `CKM_EDDSA_PH`.
+  Same ByteString accumulator fix.  `bAllowMultiPartOp` flipped to `true` for both EdDSA
+  mechanisms in sign and verify dispatch.  Closes GH-58.
+
 ### Added
 
 - **strongSwan WASM Phase 3a validation exports** (`strongswan-wasm-v2-shims/charon_wasm_main.c`):
