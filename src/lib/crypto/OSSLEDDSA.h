@@ -35,6 +35,7 @@
 
 #include "config.h"
 #include "AsymmetricAlgorithm.h"
+#include "ByteString.h"
 #include <openssl/evp.h>
 
 class OSSLEDDSA : public AsymmetricAlgorithm
@@ -75,6 +76,8 @@ public:
 	virtual AsymmetricParameters* newParameters();
 
 private:
+	ByteString m_signMsg;
+	ByteString m_verifyMsg;
 };
 
 #endif // !_SOFTHSM_V2_OSSLEDDSA_H

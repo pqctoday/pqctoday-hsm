@@ -116,26 +116,32 @@ bool OSSLEDDSA::sign(PrivateKey* privateKey, const ByteString& dataToSign,
 	return true;
 }
 
-bool OSSLEDDSA::signInit(PrivateKey* /*privateKey*/, const AsymMech::Type /*mechanism*/,
-			 const void* /* param = NULL */, const size_t /* paramLen = 0 */)
+bool OSSLEDDSA::signInit(PrivateKey* privateKey, const AsymMech::Type mechanism,
+			 const void* param, const size_t paramLen)
 {
-	ERROR_MSG("EDDSA does not support multi part signing");
-
-	return false;
+	if (!AsymmetricAlgorithm::signInit(privateKey, mechanism, param, paramLen))
+		return false;
+	m_signMsg.wipe();
+	return true;
 }
 
-bool OSSLEDDSA::signUpdate(const ByteString& /*dataToSign*/)
+bool OSSLEDDSA::signUpdate(const ByteString& dataToSign)
 {
-	ERROR_MSG("EDDSA does not support multi part signing");
-
-	return false;
+	if (!AsymmetricAlgorithm::signUpdate(dataToSign))
+		return false;
+	m_signMsg += dataToSign;
+	return true;
 }
 
-bool OSSLEDDSA::signFinal(ByteString& /*signature*/)
+bool OSSLEDDSA::signFinal(ByteString& signature)
 {
-	ERROR_MSG("EDDSA does not support multi part signing");
-
-	return false;
+	PrivateKey*    pk = currentPrivateKey;
+	AsymMech::Type m  = currentMechanism;
+	if (!AsymmetricAlgorithm::signFinal(signature))
+		return false;
+	bool ok = sign(pk, m_signMsg, signature, m);
+	m_signMsg.wipe();
+	return ok;
 }
 
 // Verification functions
@@ -213,26 +219,32 @@ bool OSSLEDDSA::verify(PublicKey* publicKey, const ByteString& originalData,
 	return true;
 }
 
-bool OSSLEDDSA::verifyInit(PublicKey* /*publicKey*/, const AsymMech::Type /*mechanism*/,
-			   const void* /* param = NULL */, const size_t /* paramLen = 0 */)
+bool OSSLEDDSA::verifyInit(PublicKey* publicKey, const AsymMech::Type mechanism,
+			   const void* param, const size_t paramLen)
 {
-	ERROR_MSG("EDDSA does not support multi part verifying");
-
-	return false;
+	if (!AsymmetricAlgorithm::verifyInit(publicKey, mechanism, param, paramLen))
+		return false;
+	m_verifyMsg.wipe();
+	return true;
 }
 
-bool OSSLEDDSA::verifyUpdate(const ByteString& /*originalData*/)
+bool OSSLEDDSA::verifyUpdate(const ByteString& originalData)
 {
-	ERROR_MSG("EDDSA does not support multi part verifying");
-
-	return false;
+	if (!AsymmetricAlgorithm::verifyUpdate(originalData))
+		return false;
+	m_verifyMsg += originalData;
+	return true;
 }
 
-bool OSSLEDDSA::verifyFinal(const ByteString& /*signature*/)
+bool OSSLEDDSA::verifyFinal(const ByteString& signature)
 {
-	ERROR_MSG("EDDSA does not support multi part verifying");
-
-	return false;
+	PublicKey*     pk = currentPublicKey;
+	AsymMech::Type m  = currentMechanism;
+	if (!AsymmetricAlgorithm::verifyFinal(signature))
+		return false;
+	bool ok = verify(pk, m_verifyMsg, signature, m);
+	m_verifyMsg.wipe();
+	return ok;
 }
 
 // Encryption functions
