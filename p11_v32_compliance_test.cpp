@@ -105,7 +105,7 @@ using json = nlohmann::json;
 
 
 // Options
-std::string opt_engine = "./build/src/lib/libsofthsmv3.dylib";
+std::string opt_engine = "./build_fresh/src/lib/libsofthsmv3.dylib";
 std::string opt_category = "all";
 std::string opt_report = "compliance_report";
 std::string opt_pin = "1234";
@@ -686,6 +686,170 @@ void test_multipart_signing() {
     if (rv == CKR_OK) {
         rv = fl->C_Verify(hSess, fullMsg, sizeof(fullMsg) - 1, sig, sigLen);
         record_result("MultiPart", "C_Verify_oneshot_xcheck",
+                      rv == CKR_OK ? "PASS" : "FAIL",
+                      "Multi-part sig matches one-shot verify — RV=" + std::to_string(rv));
+    }
+}
+
+// ── Multi-part signing tests for ECDSA and EdDSA (PKCS#11 v3.2 §5.2) ──────
+
+void test_multipart_ecdsa() {
+    CK_OBJECT_CLASS pubClass = CKO_PUBLIC_KEY;
+    CK_OBJECT_CLASS privClass = CKO_PRIVATE_KEY;
+    CK_KEY_TYPE ecType = CKK_EC;
+    CK_BBOOL bTrue = CK_TRUE, bFalse = CK_FALSE;
+    // P-256 OID (DER): 1.2.840.10045.3.1.7
+    CK_BYTE oid_p256[] = { 0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07 };
+
+    CK_ATTRIBUTE pubTmpl[] = {
+        { CKA_CLASS,     &pubClass, sizeof(pubClass) },
+        { CKA_KEY_TYPE,  &ecType,   sizeof(ecType)   },
+        { CKA_TOKEN,     &bFalse,   sizeof(bFalse)   },
+        { CKA_VERIFY,    &bTrue,    sizeof(bTrue)    },
+        { CKA_EC_PARAMS, oid_p256,  sizeof(oid_p256) }
+    };
+    CK_ATTRIBUTE privTmpl[] = {
+        { CKA_CLASS,     &privClass, sizeof(privClass) },
+        { CKA_KEY_TYPE,  &ecType,    sizeof(ecType)    },
+        { CKA_TOKEN,     &bFalse,    sizeof(bFalse)    },
+        { CKA_PRIVATE,   &bTrue,     sizeof(bTrue)     },
+        { CKA_SIGN,      &bTrue,     sizeof(bTrue)     }
+    };
+
+    CK_MECHANISM genMech = { CKM_EC_KEY_PAIR_GEN, NULL_PTR, 0 };
+    CK_OBJECT_HANDLE hPub = 0, hPriv = 0;
+    CK_RV rv = fl->C_GenerateKeyPair(hSess, &genMech, pubTmpl, 5, privTmpl, 5, &hPub, &hPriv);
+    if (rv != CKR_OK) {
+        record_result("MultiPart_ECDSA", "Setup_KeyGen", "FAIL", "RV=" + std::to_string(rv));
+        return;
+    }
+    record_result("MultiPart_ECDSA", "Setup_KeyGen", "PASS", "P-256 key pair generated");
+
+    CK_MECHANISM signMech = { CKM_ECDSA_SHA256, NULL_PTR, 0 };
+    rv = fl->C_SignInit(hSess, &signMech, hPriv);
+    record_result("MultiPart_ECDSA", "C_SignInit", rv == CKR_OK ? "PASS" : "FAIL",
+                  "CKM_ECDSA_SHA256 — RV=" + std::to_string(rv));
+    if (rv != CKR_OK) return;
+
+    CK_BYTE chunk1[] = "hello ";
+    CK_BYTE chunk2[] = "world";
+    rv = fl->C_SignUpdate(hSess, chunk1, sizeof(chunk1) - 1);
+    record_result("MultiPart_ECDSA", "C_SignUpdate_chunk1", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+    if (rv != CKR_OK) { fl->C_SignFinal(hSess, NULL, 0); return; }
+
+    rv = fl->C_SignUpdate(hSess, chunk2, sizeof(chunk2) - 1);
+    record_result("MultiPart_ECDSA", "C_SignUpdate_chunk2", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+
+    CK_BYTE sig[512];
+    CK_ULONG sigLen = sizeof(sig);
+    rv = fl->C_SignFinal(hSess, sig, &sigLen);
+    record_result("MultiPart_ECDSA", "C_SignFinal", rv == CKR_OK ? "PASS" : "FAIL",
+                  "SigLen=" + std::to_string(sigLen) + " RV=" + std::to_string(rv));
+    if (rv != CKR_OK) return;
+
+    rv = fl->C_VerifyInit(hSess, &signMech, hPub);
+    record_result("MultiPart_ECDSA", "C_VerifyInit", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+    if (rv != CKR_OK) return;
+
+    rv = fl->C_VerifyUpdate(hSess, chunk1, sizeof(chunk1) - 1);
+    record_result("MultiPart_ECDSA", "C_VerifyUpdate_chunk1", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+    rv = fl->C_VerifyUpdate(hSess, chunk2, sizeof(chunk2) - 1);
+    record_result("MultiPart_ECDSA", "C_VerifyUpdate_chunk2", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+    rv = fl->C_VerifyFinal(hSess, sig, sigLen);
+    record_result("MultiPart_ECDSA", "C_VerifyFinal", rv == CKR_OK ? "PASS" : "FAIL",
+                  "PKCS#11 v3.2 §5.2 P-256 round-trip — RV=" + std::to_string(rv));
+
+    CK_BYTE fullMsg[] = "hello world";
+    rv = fl->C_VerifyInit(hSess, &signMech, hPub);
+    if (rv == CKR_OK) {
+        rv = fl->C_Verify(hSess, fullMsg, sizeof(fullMsg) - 1, sig, sigLen);
+        record_result("MultiPart_ECDSA", "C_Verify_oneshot_xcheck",
+                      rv == CKR_OK ? "PASS" : "FAIL",
+                      "Multi-part sig matches one-shot verify — RV=" + std::to_string(rv));
+    }
+}
+
+void test_multipart_eddsa() {
+    CK_OBJECT_CLASS pubClass = CKO_PUBLIC_KEY;
+    CK_OBJECT_CLASS privClass = CKO_PRIVATE_KEY;
+    CK_KEY_TYPE edType = CKK_EC_EDWARDS;
+    CK_BBOOL bTrue = CK_TRUE, bFalse = CK_FALSE;
+    // Ed25519 OID (DER encoded): 1.3.101.112 (RFC 8037)
+    CK_BYTE oid_ed25519[] = { 0x13, 0x0c, 0x65, 0x64, 0x77, 0x61, 0x72, 0x64, 0x73, 0x32, 0x35, 0x35, 0x31, 0x39 };
+
+    CK_ATTRIBUTE pubTmpl[] = {
+        { CKA_CLASS,     &pubClass,    sizeof(pubClass)    },
+        { CKA_KEY_TYPE,  &edType,      sizeof(edType)      },
+        { CKA_TOKEN,     &bFalse,      sizeof(bFalse)      },
+        { CKA_VERIFY,    &bTrue,       sizeof(bTrue)       },
+        { CKA_EC_PARAMS, oid_ed25519,  sizeof(oid_ed25519) }
+    };
+    CK_ATTRIBUTE privTmpl[] = {
+        { CKA_CLASS,     &privClass,   sizeof(privClass)   },
+        { CKA_KEY_TYPE,  &edType,      sizeof(edType)      },
+        { CKA_TOKEN,     &bFalse,      sizeof(bFalse)      },
+        { CKA_PRIVATE,   &bTrue,       sizeof(bTrue)       },
+        { CKA_SIGN,      &bTrue,       sizeof(bTrue)       }
+    };
+
+    CK_MECHANISM genMech = { CKM_EC_EDWARDS_KEY_PAIR_GEN, NULL_PTR, 0 };
+    CK_OBJECT_HANDLE hPub = 0, hPriv = 0;
+    CK_RV rv = fl->C_GenerateKeyPair(hSess, &genMech, pubTmpl, 5, privTmpl, 5, &hPub, &hPriv);
+    if (rv != CKR_OK) {
+        record_result("MultiPart_EdDSA", "Setup_KeyGen", "FAIL", "RV=" + std::to_string(rv));
+        return;
+    }
+    record_result("MultiPart_EdDSA", "Setup_KeyGen", "PASS", "Ed25519 key pair generated");
+
+    CK_MECHANISM signMech = { CKM_EDDSA, NULL_PTR, 0 };
+    rv = fl->C_SignInit(hSess, &signMech, hPriv);
+    record_result("MultiPart_EdDSA", "C_SignInit", rv == CKR_OK ? "PASS" : "FAIL",
+                  "CKM_EDDSA — RV=" + std::to_string(rv));
+    if (rv != CKR_OK) return;
+
+    CK_BYTE chunk1[] = "hello ";
+    CK_BYTE chunk2[] = "world";
+    rv = fl->C_SignUpdate(hSess, chunk1, sizeof(chunk1) - 1);
+    record_result("MultiPart_EdDSA", "C_SignUpdate_chunk1", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+    if (rv != CKR_OK) { fl->C_SignFinal(hSess, NULL, 0); return; }
+
+    rv = fl->C_SignUpdate(hSess, chunk2, sizeof(chunk2) - 1);
+    record_result("MultiPart_EdDSA", "C_SignUpdate_chunk2", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+
+    CK_BYTE sig[512];
+    CK_ULONG sigLen = sizeof(sig);
+    rv = fl->C_SignFinal(hSess, sig, &sigLen);
+    record_result("MultiPart_EdDSA", "C_SignFinal", rv == CKR_OK ? "PASS" : "FAIL",
+                  "SigLen=" + std::to_string(sigLen) + " RV=" + std::to_string(rv));
+    if (rv != CKR_OK) return;
+
+    rv = fl->C_VerifyInit(hSess, &signMech, hPub);
+    record_result("MultiPart_EdDSA", "C_VerifyInit", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+    if (rv != CKR_OK) return;
+
+    rv = fl->C_VerifyUpdate(hSess, chunk1, sizeof(chunk1) - 1);
+    record_result("MultiPart_EdDSA", "C_VerifyUpdate_chunk1", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+    rv = fl->C_VerifyUpdate(hSess, chunk2, sizeof(chunk2) - 1);
+    record_result("MultiPart_EdDSA", "C_VerifyUpdate_chunk2", rv == CKR_OK ? "PASS" : "FAIL",
+                  "RV=" + std::to_string(rv));
+    rv = fl->C_VerifyFinal(hSess, sig, sigLen);
+    record_result("MultiPart_EdDSA", "C_VerifyFinal", rv == CKR_OK ? "PASS" : "FAIL",
+                  "PKCS#11 v3.2 §5.2 Ed25519 round-trip — RV=" + std::to_string(rv));
+
+    CK_BYTE fullMsg[] = "hello world";
+    rv = fl->C_VerifyInit(hSess, &signMech, hPub);
+    if (rv == CKR_OK) {
+        rv = fl->C_Verify(hSess, fullMsg, sizeof(fullMsg) - 1, sig, sigLen);
+        record_result("MultiPart_EdDSA", "C_Verify_oneshot_xcheck",
                       rv == CKR_OK ? "PASS" : "FAIL",
                       "Multi-part sig matches one-shot verify — RV=" + std::to_string(rv));
     }
@@ -1885,6 +2049,8 @@ int main(int argc, char** argv) {
     if (opt_category == "all" || opt_category == "pqc-kem") { refresh_session(); test_pqc_kem(); }
     if (opt_category == "all" || opt_category == "pqc-dsa") { refresh_session(); test_pqc_dsa(); }
     if (opt_category == "all" || opt_category == "pqc-dsa") { refresh_session(); test_multipart_signing(); }
+    if (opt_category == "all" || opt_category == "classical") { refresh_session(); test_multipart_ecdsa(); }
+    if (opt_category == "all" || opt_category == "classical") { refresh_session(); test_multipart_eddsa(); }
 
     if (opt_category == "all" || opt_category == "v32-adv") {
         refresh_session(); test_v32_kdfs();
