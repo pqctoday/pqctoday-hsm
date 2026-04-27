@@ -97,19 +97,46 @@ enumerator_t *wasm_create_peer_enum(backend_t *this,
     return peer_cfgs->create_enumerator(peer_cfgs);
 }
 
+CALLBACK(ike_cfg_filter, bool,
+    void *data, enumerator_t *orig, va_list args)
+{
+    peer_cfg_t *peer_cfg;
+    ike_cfg_t **out;
+
+    VA_ARGS_VGET(args, out);
+
+    while (orig->enumerate(orig, &peer_cfg))
+    {
+        *out = peer_cfg->get_ike_cfg(peer_cfg);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 enumerator_t *wasm_create_ike_enum(backend_t *this,
                                    host_t *me, host_t *other)
 {
-    /* Derive ike_cfg from each peer_cfg. strongSwan treats this as a
-     * thin enumerator — we just enumerate the ike_cfgs referenced by
-     * the registered peer_cfgs. Simplest correct implementation: wrap
-     * the peer_cfgs enumerator and project each to its ike_cfg. */
+    /* find_ike_cfg() (config/backends/backend_manager.c) drives this on
+     * the responder when an IKE_SA_INIT request arrives — no peer_cfg has
+     * been chosen yet because IDs only show up in IKE_AUTH, so charon
+     * picks the ike_cfg first by host match (me/other vs the cfg's
+     * local/remote), then negotiates proposals from it.
+     *
+     * Earlier this returned enumerator_create_empty() with a comment
+     * claiming "the responder branch is driven by peer_cfgs directly" —
+     * that's wrong. With no ike_cfg returned here, find_ike_cfg fails
+     * even when peer_cfgs is populated, the responder logs
+     * "no IKE config found for 192.168.0.2...192.168.0.1" and replies
+     * NO_PROPOSAL_CHOSEN.
+     *
+     * Project each peer_cfg to its ike_cfg via enumerator_create_filter
+     * — same pattern as pkcs11_creds.c::certs_filter. The me/other args
+     * are unused here; charon's backend_manager handles host-match
+     * filtering after we return the candidates. */
     if (!peer_cfgs) return enumerator_create_empty();
-    /* Project via a custom enumerator. For minimal infrastructure we
-     * return an empty enumerator — the responder branch is driven by
-     * peer_cfgs directly, and the initiator uses wasm_initiate() which
-     * already has the peer_cfg in hand. */
-    return enumerator_create_empty();
+    return enumerator_create_filter(
+        peer_cfgs->create_enumerator(peer_cfgs),
+        ike_cfg_filter, NULL, NULL);
 }
 
 /*─────────────────────────────────────────────────────────────────────*/
@@ -164,11 +191,18 @@ void wasm_setup_config(int unused)
     }
     ike_data.local_port  = 500;
     ike_data.remote_port = 500;
+    /* Childless IKE_SA per RFC 6023: skip the piggybacked CHILD_SA in
+     * IKE_AUTH because the WASM build has no kernel IPSec interface and
+     * CHILD_SA SPI allocation fails ("unable to allocate SPI from kernel").
+     * The IKE_SA still authenticates and reaches ESTABLISHED — which is the
+     * milestone for this in-browser demo. The responder advertises
+     * N(CHDLESS_SUP) so this is mutually negotiated. */
+    ike_data.childless   = CHILDLESS_FORCE;
     ike_cfg = ike_cfg_create(&ike_data);
     ike_cfg->add_proposal(ike_cfg, proposal_create_from_string(PROTO_IKE,
                                                                (char *)ike_prop));
 
-    /* Peer config. */
+    /* Peer config. (Childless behavior is set on ike_cfg_create_t above.) */
     memset(&peer_data, 0, sizeof(peer_data));
     peer_data.cert_policy = CERT_SEND_IF_ASKED;
     peer_data.unique      = UNIQUE_NO;
@@ -220,7 +254,13 @@ void wasm_setup_config(int unused)
         charon->backends->add_backend(charon->backends, &wasm_backend->public);
     }
 
-    /* Pre-register PSK from the WASM_PSK env var. */
+    /* Pre-register PSK from the WASM_PSK env var.
+     *
+     * mem_cred->add_shared() takes a varargs list of identity owners
+     * terminated by NULL. Passing just NULL makes the PSK unowned, which
+     * fails credmgr lookups like "PSK for 192.168.0.1 - %any" because the
+     * lookup tries to match the requested owners against the PSK's owners.
+     * Add a "%any" identity owner so the PSK matches any peer pair. */
     psk_env = getenv("WASM_PSK");
     if (psk_env && *psk_env)
     {
@@ -228,6 +268,7 @@ void wasm_setup_config(int unused)
         creds->add_shared(creds,
             shared_key_create(SHARED_IKE,
                 chunk_clone(chunk_create((u_char *)psk_env, strlen(psk_env)))),
+            identification_create_from_string("%any"),
             NULL);
         lib->credmgr->add_set(lib->credmgr, &creds->set);
     }

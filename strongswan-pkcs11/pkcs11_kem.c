@@ -203,6 +203,24 @@ typedef CK_RV (*decap_fn_t)(CK_SESSION_HANDLE, CK_MECHANISM_PTR, CK_OBJECT_HANDL
 
 static bool get_v3_kem_funcs(encap_fn_t *enc, decap_fn_t *dec)
 {
+#ifdef __EMSCRIPTEN__
+	/* WASM static-link: softhsmv3 is linked directly into charon.wasm and
+	 * the browser has no dynamic linker, so dlopen always fails. The PKCS#11
+	 * v3.2 entry points are in scope as ordinary C symbols — bind them once
+	 * via extern declarations matching encap_fn_t / decap_fn_t. Same in-
+	 * process instance as everything else (handleManager state shared). */
+	extern CK_RV C_EncapsulateKey(CK_SESSION_HANDLE, CK_MECHANISM_PTR,
+	                              CK_OBJECT_HANDLE, CK_ATTRIBUTE_PTR, CK_ULONG,
+	                              CK_BYTE_PTR, CK_ULONG_PTR,
+	                              CK_OBJECT_HANDLE_PTR);
+	extern CK_RV C_DecapsulateKey(CK_SESSION_HANDLE, CK_MECHANISM_PTR,
+	                              CK_OBJECT_HANDLE, CK_ATTRIBUTE_PTR, CK_ULONG,
+	                              CK_BYTE_PTR, CK_ULONG,
+	                              CK_OBJECT_HANDLE_PTR);
+	*enc = C_EncapsulateKey;
+	*dec = C_DecapsulateKey;
+	return TRUE;
+#else
 	static encap_fn_t cached_enc = NULL;
 	static decap_fn_t cached_dec = NULL;
 	if (cached_enc && cached_dec) {
@@ -229,6 +247,7 @@ static bool get_v3_kem_funcs(encap_fn_t *enc, decap_fn_t *dec)
 	*enc = cached_enc;
 	*dec = cached_dec;
 	return TRUE;
+#endif
 }
 
 /* Responder encapsulation — produces ciphertext + shared secret from

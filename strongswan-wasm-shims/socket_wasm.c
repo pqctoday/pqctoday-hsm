@@ -47,24 +47,34 @@ EM_JS(int, wasm_net_receive, (uint8_t *buf, int buflen,
                               uint32_t *dst_ip_out, uint32_t *dst_port_out), {
     var sab = Module._wasm_net_sab;
     if (!sab) return 0;
-    var hdr = new Int32Array(sab, 0, 4);
-    var body = new Uint8Array(sab, 16);
-    // Wait for state==1 (ready).
+    /* Layout — must match bridge.ts case 'PACKET_OUT':
+     *   i32[0] state (0=free, 1=ready)
+     *   i32[1] packet length
+     *   i32[2] src_ip   (network-LE u32: memory bytes match network order)
+     *   i32[3] src_port (lower 16 bits)
+     *   i32[4] dst_ip   (network-LE u32)
+     *   i32[5] dst_port (lower 16 bits)
+     *   bytes 24..24+len = packet payload
+     * dst_ip used to be hardcoded 0 (= 0.0.0.0 / %any in strongSwan's
+     * config matcher) which made the responder reject every IKE_SA_INIT
+     * with NO_PROPOSAL_CHOSEN even when the registered peer_cfg had
+     * local=192.168.0.2. Plumbing the real dst from the SAB fixes this. */
+    var hdr = new Int32Array(sab, 0, 6);
+    var body = new Uint8Array(sab, 24);
     while (Atomics.load(hdr, 0) !== 1) {
         Atomics.wait(hdr, 0, 0);
     }
     var len = Atomics.load(hdr, 1);
     if (len > buflen) len = buflen;
-    // srcIp at u32[2], srcPort at u16[6] (packed: lower 16 bits).
     var srcIp   = Atomics.load(hdr, 2);
     var srcPort = Atomics.load(hdr, 3) & 0xffff;
+    var dstIp   = Atomics.load(hdr, 4);
+    var dstPort = Atomics.load(hdr, 5) & 0xffff;
     for (var i = 0; i < len; i++) HEAPU8[buf + i] = body[i];
     HEAPU32[src_ip_out   >> 2] = srcIp;
     HEAPU32[src_port_out >> 2] = srcPort;
-    // Destination is always us — loopback bound_ip/port (0 = any).
-    HEAPU32[dst_ip_out   >> 2] = 0;
-    HEAPU32[dst_port_out >> 2] = 500;
-    // Mark consumed and notify senders.
+    HEAPU32[dst_ip_out   >> 2] = dstIp;
+    HEAPU32[dst_port_out >> 2] = dstPort || 500;
     Atomics.store(hdr, 0, 0);
     Atomics.notify(hdr, 0, 1);
     return len;
@@ -78,27 +88,33 @@ EM_JS(int, wasm_net_receive, (uint8_t *buf, int buflen,
 EM_JS(int, wasm_net_send, (const uint8_t *buf, int buflen,
                            uint32_t src_ip, uint32_t src_port,
                            uint32_t dst_ip, uint32_t dst_port), {
-    // Peer SAB is reachable via the worker's peer-channel. In this
-    // architecture the _same_ SAB is read by the peer worker (shared
-    // memory between workers) — Module._wasm_net_sab is the outbound
-    // SAB for this direction. The worker bootstrap wires it up.
-    var sab = Module._wasm_net_sab;
-    if (!sab) return 0;
-    var hdr = new Int32Array(sab, 0, 4);
-    var body = new Uint8Array(sab, 16);
-    // Wait for the outbound slot to be free (state == 0).
-    while (Atomics.load(hdr, 0) !== 0) {
-        Atomics.wait(hdr, 0, 1);
-    }
-    var len = buflen;
-    if (len > body.byteLength) len = body.byteLength;
-    for (var i = 0; i < len; i++) body[i] = HEAPU8[buf + i];
-    Atomics.store(hdr, 1, len);
-    Atomics.store(hdr, 2, src_ip);
-    Atomics.store(hdr, 3, (dst_port & 0xffff));
-    Atomics.store(hdr, 0, 1);          // ready
-    Atomics.notify(hdr, 0, 1);
-    return len;
+    /* Cross-worker routing via the bridge (main thread).
+     *
+     * Each worker has its own netInbox SAB (Module._wasm_net_sab). If
+     * wasm_net_send wrote to that SAB, the same worker's wasm_net_receive
+     * would consume it — i.e. self-loopback. The bridge has no polling
+     * loop, so writing locally never reaches the peer worker.
+     *
+     * Instead we postMessage('PACKET_OUT') to the main thread; bridge.ts
+     * case 'PACKET_OUT' routes the packet by destIp into the peer's
+     * netInbox SAB (header layout: 6 × i32 + body at offset 24).
+     *
+     * src_ip / dst_ip are network-byte-order u32 (memcpy'd from
+     * sin_addr.s_addr in socket_wasm.c::wasm_send) — bridge.ts uses the
+     * same network-LE convention for RESPONDER_IP_U32 + destIpStr. */
+    var pkt = new Uint8Array(buflen);
+    for (var i = 0; i < buflen; i++) pkt[i] = HEAPU8[buf + i];
+    self.postMessage({
+        type: 'PACKET_OUT',
+        payload: {
+            srcIp: src_ip >>> 0,
+            srcPort: src_port >>> 0,
+            destIp: dst_ip >>> 0,
+            destPort: dst_port >>> 0,
+            data: pkt.buffer,
+        },
+    }, [pkt.buffer]);
+    return buflen;
 });
 
 /*─────────────────────────────────────────────────────────────────────*/

@@ -365,6 +365,117 @@ if ! grep -q "wasm_receiver_drain_once" "$CHARON_C"; then
     echo "[build]   patched $CHARON_C — main loop now drives receiver"
 fi
 
+# 7.8. Widen return_need_more() / return_failed() / return_success() / return_false()
+#      to take args matching the slot signatures they get cast into. Multiple
+#      ikev2 task and authenticator files cast these 0-arg helpers as
+#      `(void*)return_X` and store them into vtable slots like
+#      `status_t (*)(task_t*, message_t*)` (2 args) or `bool (*)(authenticator_t*)`
+#      (1 arg). Native cdecl forgives the arity mismatch; WASM strict
+#      function-pointer typing traps with "function signature mismatch" deep
+#      inside build_i during IKE_AUTH (PSK auth path: psk_authenticator.c
+#      lines 232,260,235,264 cast (void*)return_failed / return_false; tasks:
+#      ike_cert_pre/ike_config/child_create/ike_mobike cast (void*)return_need_more).
+#      No production direct callers (verified — only test_utils.c calls them
+#      directly, and tests aren't built in WASM), so widening is ABI-safe.
+#      Idempotent via grep guards.
+RNM_C="src/libstrongswan/utils/utils/status.c"
+RNM_H="src/libstrongswan/utils/utils/status.h"
+RNF_C="src/libstrongswan/utils/utils.c"
+RNF_H="src/libstrongswan/utils/utils.h"
+echo "[build] Patching return_need_more/failed/success/false() arities for WASM strict typing..."
+
+# return_need_more — 2 args (status_t (task_t*, message_t*) etc.)
+if grep -q '^status_t return_need_more()$' "$RNM_C"; then
+    sed -i.bak 's|^status_t return_need_more()$|status_t return_need_more(void *unused1, void *unused2)|' "$RNM_C"
+    sed -i.bak '/^status_t return_need_more(void \*unused1, void \*unused2)$/,/^}$/{
+        /^{$/a\
+\	(void)unused1; (void)unused2;
+    }' "$RNM_C"
+    sed -i.bak 's|^status_t return_need_more();$|status_t return_need_more(void *unused1, void *unused2);|' "$RNM_H"
+    echo "[build]   patched return_need_more"
+fi
+
+# return_failed — 2 args (cast into status_t (authenticator_t*, message_t*))
+if grep -q '^status_t return_failed()$' "$RNM_C"; then
+    sed -i.bak 's|^status_t return_failed()$|status_t return_failed(void *unused1, void *unused2)|' "$RNM_C"
+    sed -i.bak '/^status_t return_failed(void \*unused1, void \*unused2)$/,/^}$/{
+        /^{$/a\
+\	(void)unused1; (void)unused2;
+    }' "$RNM_C"
+    sed -i.bak 's|^status_t return_failed();$|status_t return_failed(void *unused1, void *unused2);|' "$RNM_H"
+    echo "[build]   patched return_failed"
+fi
+
+# return_success — 2 args (used as task.build / task.process in ike_dpd.c)
+if grep -q '^status_t return_success()$' "$RNM_C"; then
+    sed -i.bak 's|^status_t return_success()$|status_t return_success(void *unused1, void *unused2)|' "$RNM_C"
+    sed -i.bak '/^status_t return_success(void \*unused1, void \*unused2)$/,/^}$/{
+        /^{$/a\
+\	(void)unused1; (void)unused2;
+    }' "$RNM_C"
+    sed -i.bak 's|^status_t return_success();$|status_t return_success(void *unused1, void *unused2);|' "$RNM_H"
+    echo "[build]   patched return_success"
+fi
+
+# return_false — 1 arg (cast into bool (authenticator_t*) for is_mutual)
+if grep -q '^bool return_false()$' "$RNF_C"; then
+    sed -i.bak 's|^bool return_false()$|bool return_false(void *unused1)|' "$RNF_C"
+    sed -i.bak '/^bool return_false(void \*unused1)$/,/^}$/{
+        /^{$/a\
+\	(void)unused1;
+    }' "$RNF_C"
+    sed -i.bak 's|^bool return_false();$|bool return_false(void *unused1);|' "$RNF_H"
+    echo "[build]   patched return_false"
+fi
+
+# 7.9. credential_set_t method slot casts — many credential set implementations
+#      (auth_cfg_wrapper, cert_cache, ocsp_response_wrapper, mem_cred,
+#      callback_cred) have unsupported methods stubbed via `(void*)return_null`
+#      and `(void*)nop`, but the credential_manager iterates ALL sets and calls
+#      these slots with 3/4/5-arg signatures (create_shared_enumerator: 4-arg,
+#      create_private_enumerator: 3-arg, create_cdp_enumerator: 3-arg,
+#      create_cert_enumerator: 5-arg, cache_cert: 2-arg). 0-arg return_null/nop
+#      cast to those slots traps in WASM during PSK auth (initiator's
+#      `lib->credmgr->create_shared_enumerator(...)` PSK lookup hits
+#      auth_cfg_wrapper.set->create_shared_enumerator → return_null → trap).
+#
+#      Fix: prepend file-local properly-typed stubs to each credential_set.c
+#      and rewrite the cast sites to use them. The stubs return NULL/empty
+#      and have args matching the credential_set_t slot typedef.
+echo "[build] Patching credential_set stubs (return_null/nop) for WASM strict typing..."
+for f in src/libstrongswan/credentials/sets/auth_cfg_wrapper.c \
+         src/libstrongswan/credentials/sets/cert_cache.c \
+         src/libstrongswan/credentials/sets/ocsp_response_wrapper.c \
+         src/libstrongswan/credentials/sets/mem_cred.c \
+         src/libstrongswan/credentials/sets/callback_cred.c; do
+    if [[ -f "$f" ]] && ! grep -q "_wasm_credset_null_shared" "$f"; then
+        # Prepend stubs after the last #include — same pattern as
+        # _wasm_ppcn_cb in plugin_loader.c.
+        awk -v stubs='\n/* WASM strict-typing stubs for credential_set_t method slots\n * (replaces (void*)return_null / (void*)nop casts that traps in WASM). */\nstatic enumerator_t *_wasm_credset_null_shared(void *a, void *b, void *c, void *d) { (void)a;(void)b;(void)c;(void)d; return enumerator_create_empty(); }\nstatic enumerator_t *_wasm_credset_null_private(void *a, void *b, void *c) { (void)a;(void)b;(void)c; return enumerator_create_empty(); }\nstatic enumerator_t *_wasm_credset_null_cdp(void *a, void *b, void *c) { (void)a;(void)b;(void)c; return enumerator_create_empty(); }\nstatic enumerator_t *_wasm_credset_null_cert(void *a, void *b, void *c, void *d, int e) { (void)a;(void)b;(void)c;(void)d;(void)e; return enumerator_create_empty(); }\nstatic void _wasm_credset_nop_cache(void *a, void *b) { (void)a;(void)b; }\n' '
+            /^#include / { last_inc = NR }
+            { lines[NR] = $0 }
+            END {
+                for (i = 1; i <= NR; i++) {
+                    print lines[i]
+                    if (i == last_inc) {
+                        printf "%s", stubs
+                    }
+                }
+            }
+        ' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+        # Replace the cast sites with the typed stubs.
+        sed -i.bak \
+            -e 's|\.create_shared_enumerator = (void\*)return_null|.create_shared_enumerator = (void*)_wasm_credset_null_shared|g' \
+            -e 's|\.create_private_enumerator = (void\*)return_null|.create_private_enumerator = (void*)_wasm_credset_null_private|g' \
+            -e 's|\.create_cdp_enumerator = (void\*)return_null|.create_cdp_enumerator = (void*)_wasm_credset_null_cdp|g' \
+            -e 's|\.create_cdp_enumerator  = (void\*)return_null|.create_cdp_enumerator  = (void*)_wasm_credset_null_cdp|g' \
+            -e 's|\.create_cert_enumerator = (void\*)return_null|.create_cert_enumerator = (void*)_wasm_credset_null_cert|g' \
+            -e 's|\.cache_cert = (void\*)nop|.cache_cert = (void*)_wasm_credset_nop_cache|g' \
+            "$f"
+        echo "[build]   patched $f"
+    fi
+done
+
 echo "[build] Patching plugin_constructors.py to emit non-static constructor..."
 PLUGIN_CTORS_PY="src/libstrongswan/plugins/plugin_constructors.py"
 if grep -q '__attribute__ ((constructor))' "$PLUGIN_CTORS_PY"; then
@@ -486,6 +597,7 @@ LINK_FLAGS="-L${OPENSSL_WASM_DIR_FOR_CONFIGURE} \
     -s ALLOW_MEMORY_GROWTH=1 \
     -s ALLOW_TABLE_GROWTH=1 \
     -s ERROR_ON_UNDEFINED_SYMBOLS=0 \
+    -s EMULATE_FUNCTION_POINTER_CASTS=1 \
     -s EXPORTED_FUNCTIONS=[${EXPORTED_FUNCS}] \
     -s EXPORTED_RUNTIME_METHODS=[${EXPORTED_RUNTIME}] \
     -s INITIAL_MEMORY=67108864 \
@@ -494,6 +606,20 @@ LINK_FLAGS="-L${OPENSSL_WASM_DIR_FOR_CONFIGURE} \
     -s ASSERTIONS=1 \
     -fexceptions \
     -s NO_DISABLE_EXCEPTION_CATCHING=1"
+# EMULATE_FUNCTION_POINTER_CASTS=1 — global trampoline that papers over
+# function-pointer arity mismatches. strongSwan has dozens of (void*)func
+# casts (return_null, return_failed, status helpers, credential set stubs,
+# array_destroy_function destructors, plugin_priority_cmp_name, etc.) where
+# a 0/1-arg helper is stored into a 2/3/4/5-arg slot. Native cdecl forgives
+# the arity mismatch; WASM strict function-signature typing traps. We've
+# patched the largest-impact sites individually (helpers + credential sets
+# + sa/ikev2 task vtables) but the long tail is too large to enumerate.
+# This flag generates type-erased trampolines so any indirect call works
+# regardless of declared arity. Cost: a small per-call overhead and slightly
+# larger code; benefit: full strongSwan IKE_AUTH path completes without
+# whack-a-mole patching. Earlier attempts hit a task_manager_create issue
+# but the engine fixes that have since landed (drain, ike_cfg enum, etc.)
+# should make this safe to re-enable.
 
 # Force-link the plugin constructor: wasm-ld archive selection requires an
 # external symbol reference. Step 7.5 added plugin_constructors.c to
