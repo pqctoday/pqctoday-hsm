@@ -8,6 +8,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Work in progress
+
+- **strongSwan WASM — ML-DSA cert-auth wire-up (WIP, IKE_AUTH still PSK fallback)** (`scripts/build-strongswan-wasm.sh`, `strongswan-wasm-shims/pkcs11_wasm_rpc.c`): partial progress over rebuilds #15–#18. Worker-side ML-DSA keypair gen + cert sign now traces fully through the panel's PKCS#11 log; charon still does not initiate cert-based auth. **Not feature-complete; committed as a WIP milestone.**
+
+  **C-side changes that landed (build #18, 13.8 MB):**
+
+  - **`pkcs11_wasm_C_GetFunctionList` wrapper** (`pkcs11_wasm_rpc.c`): drop-in replacement that calls real `C_GetFunctionList`, then runs the result through `pkcs11_wasm_wrap_function_list` so the strongswan-pkcs11 plugin (which dlsym's its function list) gets the **traced shadow** instead of the raw softhsmv3 table. Without this wrapper, only `pkcs11_kem.c`'s direct `wasm_pkcs11_trace_kem` calls reached the panel — every other crypto op went through the unwrapped fl and was invisible.
+  - **Crypto-only trace shim set** (`pkcs11_wasm_rpc.c`): replaced 10 admin-op shims with 14 crypto-only shims (`C_GenerateKeyPair`, `C_GenerateKey`, `C_SignInit`, `C_Sign`, `C_VerifyInit`, `C_Verify`, `C_DigestInit`, `C_Digest`, `C_DeriveKey`, `C_EncryptInit`, `C_Encrypt`, `C_DecryptInit`, `C_Decrypt`, `C_GenerateRandom`). ML-KEM `C_EncapsulateKey`/`C_DecapsulateKey` traces continue to come from `pkcs11_kem.c`'s direct extern path.
+  - **EXPORTED_FUNCTIONS expanded** (`scripts/build-strongswan-wasm.sh`): added `_pkcs11_wasm_C_GetFunctionList`, `_C_GetSlotList`, `_C_OpenSession`, `_C_CloseSession`, `_C_Login`, `_C_GenerateKeyPair`, `_C_GetAttributeValue`, `_C_SignInit`, `_C_Sign` so the panel's worker-RPC handler can call them directly via `Module._C_*`.
+  - **EXPORTED_RUNTIME expanded** (`scripts/build-strongswan-wasm.sh`): added `HEAPU8`, `HEAP32`, `HEAPU32`, `getValue`, `setValue` so the worker handler can marshal byte buffers and call PKCS#11 functions directly without `'HEAPU8' was not exported` runtime aborts.
+
+  **What still doesn't work:** charon's strongSwan-pkcs11 plugin loads, finds the token (no more `TOKEN_NOT_RECOGNIZED`), enumerates mechanisms, then never attempts to load `/etc/ipsec.d/certs/*.crt` from the WASM FS or call `C_FindObjects(CKA_ID=ski)` to locate a private key. IKE_AUTH proceeds with PSK MAC even when `ipsec.conf` declares `leftauth=pubkey leftcert=...`.
+
+  **Suspected (unverified) cause:** ipsec.conf legacy format may not auto-load filesystem certs the same way `swanctl` does, OR a step in `pkcs11_creds.c` / `pkcs11_private_key.c` that we haven't traced. Next session: read those two source files end-to-end before adding more glue.
+
+  **Note:** the prior `pkcs11_wasm_rpc_function_list` "memcpy stub" entry below is partially superseded — the wrapper now installs a real traced shadow. The ML-DSA cert-auth blocker is no longer the two-instance softhsm split (worker softhsm has the keys via panel-driven RPC) but rather the unverified strongSwan-pkcs11 cert-load path.
+
 ### Fixed
 
 - **strongSwan WASM — full IKE_SA `ESTABLISHED` end-to-end with real ML-KEM-768 + PSK auth** (`scripts/build-strongswan-wasm.sh`, `strongswan-pkcs11/pkcs11_kem.c`, `strongswan-wasm-shims/socket_wasm.c`, `strongswan-wasm-shims/wasm_backend.c`): the WASM charon now completes a full IKEv2 handshake between two browser Web Workers, with real ML-KEM-768 keypair generation, encapsulation, decapsulation via softhsmv3, and PSK MAC verification. Final log lines from a successful run:

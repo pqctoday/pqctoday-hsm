@@ -309,6 +309,18 @@ static bool encapsulate_on_responder(private_pkcs11_kem_t *this)
 	rv = encap_fn(this->session, &encap_mech, hPublicKey,
 	              secret_tmpl, countof(secret_tmpl),
 	              NULL, &ct_len, &hSecretKey);
+#ifdef __EMSCRIPTEN__
+	{
+		extern void wasm_pkcs11_trace_kem(const char *op, uint32_t sess,
+		                                  uint32_t mech, int in_a, int in_b,
+		                                  int rv_, int out_a, int out_b);
+		wasm_pkcs11_trace_kem("C_EncapsulateKey(size)",
+		                      (uint32_t)this->session,
+		                      (uint32_t)this->mech_encap,
+		                      (int)hPublicKey, 0, (int)rv,
+		                      (int)ct_len, 0);
+	}
+#endif
 	if (rv != CKR_OK) {
 		DBG1(DBG_CFG, "PKCS#11 KEM C_EncapsulateKey(size query) failed: %N",
 		     ck_rv_names, rv);
@@ -319,6 +331,18 @@ static bool encapsulate_on_responder(private_pkcs11_kem_t *this)
 	rv = encap_fn(this->session, &encap_mech, hPublicKey,
 	              secret_tmpl, countof(secret_tmpl),
 	              this->ciphertext.ptr, &ct_len, &hSecretKey);
+#ifdef __EMSCRIPTEN__
+	{
+		extern void wasm_pkcs11_trace_kem(const char *op, uint32_t sess,
+		                                  uint32_t mech, int in_a, int in_b,
+		                                  int rv_, int out_a, int out_b);
+		wasm_pkcs11_trace_kem("C_EncapsulateKey",
+		                      (uint32_t)this->session,
+		                      (uint32_t)this->mech_encap,
+		                      (int)hPublicKey, 0, (int)rv,
+		                      (int)ct_len, (int)hSecretKey);
+	}
+#endif
 	if (rv != CKR_OK) {
 		DBG1(DBG_CFG, "PKCS#11 KEM C_EncapsulateKey failed: %N",
 		     ck_rv_names, rv);
@@ -427,6 +451,20 @@ METHOD(key_exchange_t, get_shared_secret, bool,
 		                    this->ciphertext.ptr,
 		                    this->ciphertext.len,
 		                    &hSecretKey);
+#ifdef __EMSCRIPTEN__
+		{
+			extern void wasm_pkcs11_trace_kem(const char *op, uint32_t sess,
+			                                  uint32_t mech, int in_a, int in_b,
+			                                  int rv_, int out_a, int out_b);
+			wasm_pkcs11_trace_kem("C_DecapsulateKey",
+			                      (uint32_t)this->session,
+			                      (uint32_t)this->mech_encap,
+			                      (int)this->pri_key,
+			                      (int)this->ciphertext.len,
+			                      (int)rv,
+			                      (int)hSecretKey, 0);
+		}
+#endif
 		if (rv != CKR_OK) {
 			DBG1(DBG_CFG, "PKCS#11 C_DecapsulateKey() failed: %N", ck_rv_names, rv);
 			return FALSE;

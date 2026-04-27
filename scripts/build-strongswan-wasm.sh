@@ -553,8 +553,8 @@ echo "[build] Running emmake (-j${NCPU})..."
 #    bind lazily in the worker
 #  - EXPORTED_FUNCTIONS: explicitly export every symbol the worker calls
 #  - EXPORTED_RUNTIME_METHODS: runtime helpers used by worker.js
-EXPORTED_FUNCS='_main,_wasm_set_proposal_mode,_pkcs11_set_rpc_mode,_wasm_hsm_init,_wasm_net_set_sab,_wasm_setup_config,_wasm_initiate,_wasm_get_peer_by_name,_wasm_create_peer_enum,_wasm_create_ike_enum,_socket_wasm_create,_wasm_socket_destroy,_pkcs11_wasm_wrap_function_list,_pkcs11_wasm_rpc_function_list,_C_GetFunctionList,_malloc,_free'
-EXPORTED_RUNTIME='stackAlloc,stackSave,stackRestore,addFunction,removeFunction,lengthBytesUTF8,stringToUTF8,UTF8ToString,FS,ENV'
+EXPORTED_FUNCS='_main,_wasm_set_proposal_mode,_pkcs11_set_rpc_mode,_wasm_hsm_init,_wasm_net_set_sab,_wasm_setup_config,_wasm_initiate,_wasm_get_peer_by_name,_wasm_create_peer_enum,_wasm_create_ike_enum,_socket_wasm_create,_wasm_socket_destroy,_pkcs11_wasm_wrap_function_list,_pkcs11_wasm_rpc_function_list,_pkcs11_wasm_C_GetFunctionList,_C_GetFunctionList,_C_GetSlotList,_C_OpenSession,_C_CloseSession,_C_Login,_C_GenerateKeyPair,_C_GetAttributeValue,_C_SignInit,_C_Sign,_malloc,_free'
+EXPORTED_RUNTIME='stackAlloc,stackSave,stackRestore,addFunction,removeFunction,lengthBytesUTF8,stringToUTF8,UTF8ToString,FS,ENV,HEAPU8,HEAP32,HEAPU32,getValue,setValue'
 
 # The softhsm static archive is linked ONLY into the final charon
 # executable — not into libstrongswan.la (which emar can't swallow since
