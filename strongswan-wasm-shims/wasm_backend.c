@@ -47,16 +47,6 @@
 #include <credentials/auth_cfg.h>
 #include <credentials/sets/mem_cred.h>
 
-/* PKCS#11 types for the WASM-DIAG block at the end of wasm_setup_config. */
-#define CK_PTR *
-#define CK_DECLARE_FUNCTION(rt, n)         rt n
-#define CK_DECLARE_FUNCTION_POINTER(rt, n) rt (* n)
-#define CK_CALLBACK_FUNCTION(rt, n)        rt (* n)
-#ifndef NULL_PTR
-#define NULL_PTR 0
-#endif
-#include "pkcs11.h"
-
 /*─────────────────────────────────────────────────────────────────────*/
 /* Globals                                                             */
 /*─────────────────────────────────────────────────────────────────────*/
@@ -186,135 +176,6 @@ void wasm_setup_config(int unused)
     const char *psk_env;
     mem_cred_t *creds;
     certificate_t *my_cert = NULL;
-
-    /* WASM-DIAG (always-on, runs first): probe in-process softhsm for
-     * worker-provisioned ML-DSA pubkeys via the same no-login public RO
-     * session lookup that strongswan-pkcs11's find_lib_by_keyid uses at
-     * IKE_AUTH. Use fprintf(stderr) which Emscripten routes to console.error,
-     * bypassing libstrongswan's logger initialisation order in case DBG1
-     * isn't ready yet at this point in _main. */
-    fprintf(stderr, "WASM-DIAG: entering wasm_setup_config auth_mode=%d role=%s\n",
-            wasm_auth_mode, getenv("WASM_ROLE") ? getenv("WASM_ROLE") : "?");
-    fflush(stderr);
-    {
-        extern CK_RV C_GetFunctionList(CK_FUNCTION_LIST_PTR_PTR);
-        CK_FUNCTION_LIST_PTR fl = NULL;
-        CK_RV rv = C_GetFunctionList(&fl);
-        if (rv != CKR_OK || !fl)
-        {
-            fprintf(stderr, "WASM-DIAG: C_GetFunctionList failed: 0x%lx\n", (unsigned long)rv);
-        }
-        else
-        {
-            CK_ULONG nSlots = 0;
-            CK_SLOT_ID slots[16];
-            rv = fl->C_GetSlotList(CK_TRUE, NULL, &nSlots);
-            if (nSlots > 16) nSlots = 16;
-            if (rv == CKR_OK && nSlots > 0)
-            {
-                fl->C_GetSlotList(CK_TRUE, slots, &nSlots);
-            }
-            fprintf(stderr, "WASM-DIAG: tokenPresent slot count = %lu (rv=0x%lx) role=%s slots[0..2]=%lu,%lu,%lu\n",
-                 (unsigned long)nSlots, (unsigned long)rv,
-                 getenv("WASM_ROLE") ? getenv("WASM_ROLE") : "?",
-                 (unsigned long)(nSlots > 0 ? slots[0] : 0xFFFF),
-                 (unsigned long)(nSlots > 1 ? slots[1] : 0xFFFF),
-                 (unsigned long)(nSlots > 2 ? slots[2] : 0xFFFF));
-            fflush(stderr);
-            for (CK_ULONG i = 0; i < nSlots; i++)
-            {
-                fprintf(stderr, "WASM-DIAG: -- slot loop iter role=%s i=%lu slotId=%lu --\n",
-                     getenv("WASM_ROLE") ? getenv("WASM_ROLE") : "?",
-                     (unsigned long)i, (unsigned long)slots[i]);
-                fflush(stderr);
-                CK_SESSION_HANDLE hSess = 0;
-                CK_RV ors = fl->C_OpenSession(slots[i], CKF_SERIAL_SESSION,
-                                              NULL_PTR, NULL_PTR, &hSess);
-                fprintf(stderr, "WASM-DIAG: slot %lu C_OpenSession rv=0x%lx hSess=%lu\n",
-                     (unsigned long)slots[i], (unsigned long)ors, (unsigned long)hSess);
-                fflush(stderr);
-                if (ors != CKR_OK)
-                {
-                    continue;
-                }
-                CK_OBJECT_CLASS pubClass = CKO_PUBLIC_KEY;
-                CK_ATTRIBUTE tmpl[] = { {CKA_CLASS, &pubClass, sizeof(pubClass)} };
-                CK_RV initRv = fl->C_FindObjectsInit(hSess, tmpl, 1);
-                fprintf(stderr, "WASM-DIAG: slot %lu C_FindObjectsInit rv=0x%lx\n",
-                     (unsigned long)slots[i], (unsigned long)initRv);
-                fflush(stderr);
-                CK_OBJECT_HANDLE handles[16];
-                CK_ULONG cnt = 0;
-                CK_RV findRv = fl->C_FindObjects(hSess, handles, 16, &cnt);
-                fl->C_FindObjectsFinal(hSess);
-                fprintf(stderr, "WASM-DIAG: slot %lu has %lu pubkey object(s) visible (no-login) findRv=0x%lx\n",
-                     (unsigned long)slots[i], (unsigned long)cnt, (unsigned long)findRv);
-                fflush(stderr);
-
-                /* THE CRITICAL TEST: replicate charon's find_lib_by_keyid query
-                 * exactly — {CKA_CLASS=CKO_PUBLIC_KEY, CKA_ID=<local_keyid>}
-                 * decoded from the WASM_LOCAL_KEYID env var. If this returns 0
-                 * objects despite the unfiltered query above returning the key,
-                 * softhsm has a CKA_ID matching bug. If it returns 1, the bug
-                 * is in strongswan-pkcs11's find_lib_by_keyid call path. */
-                {
-                    const char *kid = getenv("WASM_LOCAL_KEYID");
-                    if (kid && strlen(kid) >= 40)
-                    {
-                        CK_BYTE keyid_bin[20]; memset(keyid_bin, 0, sizeof(keyid_bin));
-                        for (int b = 0; b < 20; b++)
-                        {
-                            unsigned int byte;
-                            if (sscanf(kid + b * 2, "%2x", &byte) == 1)
-                                keyid_bin[b] = (CK_BYTE)byte;
-                        }
-                        CK_OBJECT_CLASS pubClass2 = CKO_PUBLIC_KEY;
-                        CK_ATTRIBUTE tmpl2[] = {
-                            {CKA_CLASS, &pubClass2, sizeof(pubClass2)},
-                            {CKA_ID,    keyid_bin, sizeof(keyid_bin)},
-                        };
-                        CK_RV initRv2 = fl->C_FindObjectsInit(hSess, tmpl2, 2);
-                        CK_OBJECT_HANDLE handles2[4];
-                        CK_ULONG cnt2 = 0;
-                        CK_RV findRv2 = CKR_OK;
-                        if (initRv2 == CKR_OK)
-                        {
-                            findRv2 = fl->C_FindObjects(hSess, handles2, 4, &cnt2);
-                            fl->C_FindObjectsFinal(hSess);
-                        }
-                        fprintf(stderr, "WASM-DIAG:   ★ CKA_ID-filtered (charon-style) slot %lu found=%lu initRv=0x%lx findRv=0x%lx kid=%.16s…\n",
-                             (unsigned long)slots[i], (unsigned long)cnt2,
-                             (unsigned long)initRv2, (unsigned long)findRv2, kid);
-                        fflush(stderr);
-                    }
-                }
-                for (CK_ULONG j = 0; j < cnt && j < 4; j++)
-                {
-                    CK_BYTE id_buf[32]; memset(id_buf, 0, sizeof(id_buf));
-                    CK_BBOOL priv_v = 0xff;
-                    CK_KEY_TYPE kt = 0;
-                    CK_ATTRIBUTE getAttrs[] = {
-                        {CKA_ID, id_buf, sizeof(id_buf)},
-                        {CKA_PRIVATE, &priv_v, sizeof(priv_v)},
-                        {CKA_KEY_TYPE, &kt, sizeof(kt)},
-                    };
-                    fl->C_GetAttributeValue(hSess, handles[j], getAttrs, 3);
-                    char hex[80]; hex[0] = 0;
-                    CK_ULONG idLen = getAttrs[0].ulValueLen;
-                    if (idLen > 32) idLen = 32;
-                    for (CK_ULONG k = 0; k < idLen && (k * 2) < (sizeof(hex) - 3); k++)
-                    {
-                        snprintf(hex + k * 2, 3, "%02x", id_buf[k]);
-                    }
-                    fprintf(stderr, "WASM-DIAG:   pubkey[%lu] hObj=%lu kt=0x%lx priv=%u idLen=%lu id=%s\n",
-                         (unsigned long)j, (unsigned long)handles[j],
-                         (unsigned long)kt, (unsigned)priv_v,
-                         (unsigned long)idLen, hex);
-                }
-                fl->C_CloseSession(hSess);
-            }
-        }
-    }
 
     /* Lazy-init backend + storage. */
     if (!peer_cfgs) peer_cfgs = linked_list_create();
@@ -531,9 +392,9 @@ void wasm_setup_config(int unused)
         peer_cfg->add_auth_cfg(peer_cfg, auth_remote, FALSE);
     }
 
-    /* Child config. */
     memset(&child_data, 0, sizeof(child_data));
     child_data.mode = MODE_TUNNEL;
+    child_data.start_action = ACTION_NONE;
     child_cfg = child_cfg_create("wasm-child", &child_data);
     child_cfg->add_proposal(child_cfg, proposal_create_from_string(PROTO_ESP,
                                                                    (char *)proposal_esp));
