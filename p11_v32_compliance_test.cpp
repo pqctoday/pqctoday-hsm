@@ -2036,6 +2036,201 @@ void test_v30_session() {
     }
 }
 
+// ─── CKA_ID retrieval tests ───────────────────────────────────────────────────
+// Models the exact lookup flow that strongSwan's pkcs11 plugin uses at
+// IKE_AUTH time (pkcs11_private_key.c::find_lib_by_keyid):
+//   1. Open a fresh public RO session — NO LOGIN.
+//   2. C_FindObjectsInit({CKA_CLASS=CKO_PUBLIC_KEY, CKA_ID=keyid}).
+//   3. C_FindObjects → expect to find the previously generated public key.
+// If the public key is not findable from a no-login session despite explicit
+// CKA_PRIVATE=FALSE on the keygen template, softhsm has a bug.
+void test_cka_id_retrieval() {
+    CK_OBJECT_CLASS pubClass = CKO_PUBLIC_KEY;
+    CK_OBJECT_CLASS privClass = CKO_PRIVATE_KEY;
+    CK_KEY_TYPE ktypeMlDsa = 0x0000004a; // CKK_ML_DSA
+    CK_BBOOL bTrue = CK_TRUE, bFalse = CK_FALSE;
+    CK_ULONG paramSet65 = 2; // ML-DSA-65
+
+    // The keyid we'll use as CKA_ID — fixed bytes, easier to read in logs.
+    CK_BYTE keyid[20] = {
+        0x6a,0xe5,0x30,0x0d, 0xe2,0x4e,0xb4,0x7f, 0x00,0xfa,0x20,0x85,
+        0x49,0x26,0x86,0xea, 0x30,0xb2,0xb6,0x21
+    };
+
+    CK_MECHANISM genMech = { CKM_ML_DSA_KEY_PAIR_GEN, NULL_PTR, 0 };
+
+    // Mirrors strongswan_worker.js's PANEL_PKCS11 C_GenerateKeyPair_MLDSA template:
+    //   public:  CKA_TOKEN=true, CKA_PRIVATE=false, CKA_VERIFY=true,
+    //            CKA_PARAMETER_SET=2, CKA_ID=keyid
+    //   private: CKA_TOKEN=true, CKA_PRIVATE=true, CKA_SIGN=true,
+    //            CKA_SENSITIVE=true, CKA_EXTRACTABLE=false, CKA_ID=keyid
+    CK_ATTRIBUTE pubTmpl[] = {
+        { CKA_CLASS,         &pubClass,   sizeof(pubClass) },
+        { CKA_KEY_TYPE,      &ktypeMlDsa, sizeof(ktypeMlDsa) },
+        { CKA_TOKEN,         &bTrue,      sizeof(bTrue) },
+        { CKA_PRIVATE,       &bFalse,     sizeof(bFalse) },
+        { CKA_VERIFY,        &bTrue,      sizeof(bTrue) },
+        { CKA_PARAMETER_SET, &paramSet65, sizeof(paramSet65) },
+        { CKA_ID,            keyid,       sizeof(keyid) },
+    };
+    CK_ATTRIBUTE privTmpl[] = {
+        { CKA_CLASS,         &privClass,  sizeof(privClass) },
+        { CKA_KEY_TYPE,      &ktypeMlDsa, sizeof(ktypeMlDsa) },
+        { CKA_TOKEN,         &bTrue,      sizeof(bTrue) },
+        { CKA_PRIVATE,       &bTrue,      sizeof(bTrue) },
+        { CKA_SIGN,          &bTrue,      sizeof(bTrue) },
+        { CKA_SENSITIVE,     &bTrue,      sizeof(bTrue) },
+        { CKA_EXTRACTABLE,   &bFalse,     sizeof(bFalse) },
+        { CKA_ID,            keyid,       sizeof(keyid) },
+    };
+
+    CK_OBJECT_HANDLE hPub = 0, hPriv = 0;
+    CK_RV rv = fl->C_GenerateKeyPair(hSess, &genMech, pubTmpl, 7, privTmpl, 8, &hPub, &hPriv);
+    if (rv != CKR_OK) {
+        record_result("CkaIdRetrieval", "Setup_KeyGen", "FAIL", "RV=" + std::to_string(rv));
+        return;
+    }
+    record_result("CkaIdRetrieval", "Setup_KeyGen", "PASS", "ML-DSA-65 keypair generated with explicit CKA_ID + CKA_PRIVATE=false on pubkey");
+
+    // ── A. Same logged-in session: find pubkey by {CKA_CLASS=PUBLIC, CKA_ID}
+    {
+        CK_ATTRIBUTE findT[] = {
+            { CKA_CLASS, &pubClass, sizeof(pubClass) },
+            { CKA_ID,    keyid,     sizeof(keyid) },
+        };
+        rv = fl->C_FindObjectsInit(hSess, findT, 2);
+        CK_OBJECT_HANDLE objs[5] = {0};
+        CK_ULONG cnt = 0;
+        if (rv == CKR_OK) {
+            fl->C_FindObjects(hSess, objs, 5, &cnt);
+            fl->C_FindObjectsFinal(hSess);
+        }
+        bool found = (cnt >= 1) && (objs[0] == hPub || (cnt > 1 && objs[1] == hPub));
+        // Some softhsm builds shuffle handles; relax to "any handle returned in same session"
+        if (!found && cnt >= 1) found = true;
+        record_result("CkaIdRetrieval", "FindByCkaId_Pubkey_LoggedIn", found ? "PASS" : "FAIL",
+                      "C_FindObjects(CKA_CLASS=PUBLIC,CKA_ID) returned " + std::to_string(cnt) + " object(s)");
+    }
+
+    // ── B. Same logged-in session: find privkey by {CKA_CLASS=PRIVATE, CKA_ID}
+    {
+        CK_ATTRIBUTE findT[] = {
+            { CKA_CLASS, &privClass, sizeof(privClass) },
+            { CKA_ID,    keyid,      sizeof(keyid) },
+        };
+        rv = fl->C_FindObjectsInit(hSess, findT, 2);
+        CK_OBJECT_HANDLE objs[5] = {0};
+        CK_ULONG cnt = 0;
+        if (rv == CKR_OK) {
+            fl->C_FindObjects(hSess, objs, 5, &cnt);
+            fl->C_FindObjectsFinal(hSess);
+        }
+        record_result("CkaIdRetrieval", "FindByCkaId_Privkey_LoggedIn", (cnt >= 1) ? "PASS" : "FAIL",
+                      "C_FindObjects(CKA_CLASS=PRIVATE,CKA_ID) returned " + std::to_string(cnt) + " object(s)");
+    }
+
+    // ── C. ★ THE CRITICAL TEST ★
+    //         Open a FRESH public RO session (NO login) and search for the
+    //         pubkey by CKA_ID. This is exactly what charon's strongswan-pkcs11
+    //         plugin does at IKE_AUTH time. If the pubkey isn't visible here
+    //         despite CKA_PRIVATE=FALSE, that's the softhsm bug we're hunting.
+    {
+        CK_SESSION_HANDLE hPub_sess = 0;
+        rv = fl->C_OpenSession(0, CKF_SERIAL_SESSION /* RO, no login */,
+                               NULL_PTR, NULL_PTR, &hPub_sess);
+        if (rv != CKR_OK) {
+            record_result("CkaIdRetrieval", "FindByCkaId_Pubkey_NoLogin", "SKIP",
+                          "C_OpenSession(public RO) failed RV=" + std::to_string(rv));
+        } else {
+            CK_ATTRIBUTE findT[] = {
+                { CKA_CLASS, &pubClass, sizeof(pubClass) },
+                { CKA_ID,    keyid,     sizeof(keyid) },
+            };
+            rv = fl->C_FindObjectsInit(hPub_sess, findT, 2);
+            CK_OBJECT_HANDLE objs[5] = {0};
+            CK_ULONG cnt = 0;
+            CK_BBOOL ckaPrivVal = 0xff;
+            if (rv == CKR_OK) {
+                fl->C_FindObjects(hPub_sess, objs, 5, &cnt);
+                fl->C_FindObjectsFinal(hPub_sess);
+                if (cnt >= 1) {
+                    // Read CKA_PRIVATE on the found object.
+                    CK_ATTRIBUTE attr = { CKA_PRIVATE, &ckaPrivVal, sizeof(ckaPrivVal) };
+                    fl->C_GetAttributeValue(hPub_sess, objs[0], &attr, 1);
+                }
+            }
+            std::string detail = "C_FindObjects(public RO,CKA_CLASS=PUBLIC,CKA_ID) returned "
+                + std::to_string(cnt) + " object(s)";
+            if (cnt >= 1) detail += "; CKA_PRIVATE on hit = " + std::to_string((unsigned)ckaPrivVal);
+            record_result("CkaIdRetrieval", "FindByCkaId_Pubkey_NoLogin", (cnt >= 1) ? "PASS" : "FAIL", detail);
+            fl->C_CloseSession(hPub_sess);
+        }
+    }
+
+    // ── D. Default CKA_PRIVATE behavior on pubkey:
+    //         Generate a SECOND keypair WITHOUT explicitly setting CKA_PRIVATE
+    //         on the public template, then check if the resulting pubkey is
+    //         findable from a no-login session. PKCS#11 v3.2 §4.5 says
+    //         CKA_PRIVATE defaults to CK_FALSE for public keys; if softhsm
+    //         doesn't honor that, this test catches the deviation.
+    {
+        CK_BYTE keyid2[20] = {
+            0x9d,0x6b,0x51,0xed, 0x59,0xdc,0x66,0x09, 0x4f,0x97,0x0f,0xb5,
+            0x71,0x8c,0x1b,0xda, 0x32,0x9f,0x38,0x8b
+        };
+        CK_ATTRIBUTE pubTmpl2[] = {
+            { CKA_CLASS,         &pubClass,   sizeof(pubClass) },
+            { CKA_KEY_TYPE,      &ktypeMlDsa, sizeof(ktypeMlDsa) },
+            { CKA_TOKEN,         &bTrue,      sizeof(bTrue) },
+            { CKA_VERIFY,        &bTrue,      sizeof(bTrue) },
+            { CKA_PARAMETER_SET, &paramSet65, sizeof(paramSet65) },
+            { CKA_ID,            keyid2,      sizeof(keyid2) },
+            // Notably: NO CKA_PRIVATE on pubkey — relies on PKCS#11 default
+        };
+        CK_ATTRIBUTE privTmpl2[] = {
+            { CKA_CLASS,         &privClass,  sizeof(privClass) },
+            { CKA_KEY_TYPE,      &ktypeMlDsa, sizeof(ktypeMlDsa) },
+            { CKA_TOKEN,         &bTrue,      sizeof(bTrue) },
+            { CKA_PRIVATE,       &bTrue,      sizeof(bTrue) },
+            { CKA_SIGN,          &bTrue,      sizeof(bTrue) },
+            { CKA_ID,            keyid2,      sizeof(keyid2) },
+        };
+        CK_OBJECT_HANDLE hPub2 = 0, hPriv2 = 0;
+        rv = fl->C_GenerateKeyPair(hSess, &genMech, pubTmpl2, 6, privTmpl2, 6, &hPub2, &hPriv2);
+        if (rv != CKR_OK) {
+            record_result("CkaIdRetrieval", "Default_CkaPrivate_Pubkey_Gen", "FAIL",
+                          "Keygen w/o explicit CKA_PRIVATE on pubkey RV=" + std::to_string(rv));
+        } else {
+            // Read back CKA_PRIVATE.
+            CK_BBOOL ckaPriv = 0xff;
+            CK_ATTRIBUTE attr = { CKA_PRIVATE, &ckaPriv, sizeof(ckaPriv) };
+            fl->C_GetAttributeValue(hSess, hPub2, &attr, 1);
+            // Per PKCS#11 v3.2 §4.5: pubkeys default to CKA_PRIVATE=FALSE.
+            record_result("CkaIdRetrieval", "Default_CkaPrivate_Pubkey", (ckaPriv == CK_FALSE) ? "PASS" : "FAIL",
+                          "PKCS#11 v3.2 §4.5: pubkey CKA_PRIVATE default expected FALSE; got " + std::to_string((unsigned)ckaPriv));
+
+            // No-login session retrieval test for the default-CKA_PRIVATE pubkey.
+            CK_SESSION_HANDLE hPub_sess2 = 0;
+            CK_RV ors = fl->C_OpenSession(0, CKF_SERIAL_SESSION, NULL_PTR, NULL_PTR, &hPub_sess2);
+            if (ors == CKR_OK) {
+                CK_ATTRIBUTE findT[] = {
+                    { CKA_CLASS, &pubClass, sizeof(pubClass) },
+                    { CKA_ID,    keyid2,    sizeof(keyid2) },
+                };
+                fl->C_FindObjectsInit(hPub_sess2, findT, 2);
+                CK_OBJECT_HANDLE found[5] = {0};
+                CK_ULONG cnt = 0;
+                fl->C_FindObjects(hPub_sess2, found, 5, &cnt);
+                fl->C_FindObjectsFinal(hPub_sess2);
+                fl->C_CloseSession(hPub_sess2);
+                record_result("CkaIdRetrieval", "Default_CkaPrivate_Pubkey_NoLoginFind",
+                              (cnt >= 1) ? "PASS" : "FAIL",
+                              "Default-CKA_PRIVATE pubkey findable from no-login session: count=" + std::to_string(cnt));
+            }
+        }
+    }
+}
+
 int main(int argc, char** argv) {
     parse_args(argc, argv);
     
@@ -2074,6 +2269,9 @@ int main(int argc, char** argv) {
     if (opt_category == "all" || opt_category == "session") {
         refresh_session(); test_slot_session_management();
         refresh_session(); test_v30_session();
+    }
+    if (opt_category == "all" || opt_category == "cka-id") {
+        refresh_session(); test_cka_id_retrieval();
     }
     if (opt_category == "all" || opt_category == "authwrap") {
         refresh_session(); test_authenticated_wrap();

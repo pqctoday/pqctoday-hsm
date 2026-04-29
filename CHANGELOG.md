@@ -8,9 +8,46 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-### Work in progress
+### Fixed
 
-- **strongSwan WASM — ML-DSA cert-auth wire-up (WIP, IKE_AUTH still PSK fallback)** (`scripts/build-strongswan-wasm.sh`, `strongswan-wasm-shims/pkcs11_wasm_rpc.c`): partial progress over rebuilds #15–#18. Worker-side ML-DSA keypair gen + cert sign now traces fully through the panel's PKCS#11 log; charon still does not initiate cert-based auth. **Not feature-complete; committed as a WIP milestone.**
+- **strongSwan WASM — ML-DSA-65 dual-auth IKEv2 reaches `ESTABLISHED` end-to-end** (closes the WIP entry below). Resolves four chained root causes; fixing only one was insufficient.
+
+  1. **Explicit private-key load via `BUILD_PKCS11_KEYID`** (`strongswan-wasm-shims/wasm_backend.c`): upstream `strongswan-pkcs11/pkcs11_creds.c:241` wires `create_private_enumerator = enumerator_create_empty` — meaning credmgr's `get_private_by_keyid` always returns NULL for PKCS#11 keys *unless* the private key was previously loaded via `lib->creds->create(BUILD_PKCS11_KEYID, ...)` and inserted into a `mem_cred` set. Real strongSwan deployments do this in stroke / vici / nm config plugins; the WASM build has none of those plugins. Fix: in `wasm_setup_config` (dual-auth branch) decode `WASM_LOCAL_KEYID` env hex to a `chunk_t`, call `lib->creds->create(CRED_PRIVATE_KEY, KEY_ANY, BUILD_PKCS11_KEYID, chunk, BUILD_END)`, register the result via `mem_cred->add_key` + `lib->credmgr->add_set`. Without this, IKE_AUTH always fails with `no private key found for '<keyid>'`.
+
+  2. **`cert_policy = CERT_ALWAYS_SEND` for dual auth** (`strongswan-wasm-shims/wasm_backend.c`): default `CERT_SEND_IF_ASKED` keeps the cert off the wire when the peer didn't include a `CERTREQ` (which our self-signed setup doesn't). Without the cert, the peer can't extract the pubkey to verify the signature and returns `IKE_AUTH response 1 [ N(AUTH_FAILED) ]`. Fix: set `peer_data.cert_policy = CERT_ALWAYS_SEND` when `wasm_auth_mode == 1`. With this, IKE_AUTH carries `[ IDi CERT N(INIT_CONTACT) IDr AUTH ... ]` (~9 KB).
+
+  3. **Peer cert as trust anchor** (`strongswan-wasm-shims/wasm_backend.c`): even with the cert on the wire, the verifier needs to trust the issuer. For self-signed certs that means the cert IS the anchor. Fix: each worker now also reads the *peer's* cert from `/etc/ipsec.d/certs/{peer}.crt` (already written by the panel via `WRITE_FILES`) and registers it via `mem_cred->add_cert(creds, /*trusted=*/TRUE, peer_cert)` in a separate set.
+
+  4. **Identity hex env vars must be in `preRun` ENV, not late-set on START** (panel-side fix in pqctoday-hub `VpnSimulationPanel.tsx::generateCertsViaWorker`, but recorded here because the symptom appeared on the C side as `getenv("WASM_LOCAL_KEYID")` returning NULL despite JS having set it). Emscripten snapshots `ENV` during `preRun`; setting `ENV[k] = v` after Module instantiation has no effect on `getenv()` from C. The hub now pre-generates the 20-byte CKA_IDs *before* `engine.init`, passes them in INIT-payload `keyIds`, so preRun seeds the C env table correctly.
+
+  Verified end-to-end:
+
+  - `[CFG] WASM: loaded PKCS#11 private key for keyid <hex> into mem_cred` (both peers)
+  - `[CFG] WASM: loaded peer cert from /etc/ipsec.d/certs/{peer}.crt as trust anchor` (both peers)
+  - `[PKCS#11 INIT] C_SignInit mech=CKM_ML_DSA → CKR_OK`, `C_Sign sigLen=3309 → CKR_OK`
+  - `[PKCS#11 RESP] C_VerifyInit mech=CKM_ML_DSA → CKR_OK`, `C_Verify dataLen=2175 sigLen=3309 → CKR_OK` (and reverse)
+  - `[CFG] using trusted certificate "CN=vpn-{initiator,responder}, O=PQC-Simulation"`
+  - `[IKE] authentication of '<peer-id>' with ML_DSA_65 successful` (both directions)
+  - `[IKE] IKE_SA wasm[1] state change: CONNECTING => ESTABLISHED` (both peers)
+
+  Cosmetic remainder: post-establish CHILD_CREATE re-runs and trips on `unable to allocate SPI from kernel` → `ESTABLISHED => DESTROYING`. The IKE_SA itself reaches ESTABLISHED with full ML-DSA cert auth before this happens; the panel `[SIM] CREATE_CHILD_SA` lines simulate the child SA establishment for the visualization. Pre-existing issue documented in the kernel-IPSec section below — not regressed by this change.
+
+### Added
+
+- **PKCS#11 v3.2 compliance test — CKA_ID retrieval coverage** (`p11_v32_compliance_test.cpp`): added `test_cka_id_retrieval()` (registered under category `cka-id`) with 6 cases covering the lookup pattern strongswan-pkcs11 uses at IKE_AUTH (`pkcs11_private_key.c::find_lib_by_keyid`):
+  1. `Setup_KeyGen` — generate ML-DSA-65 keypair with explicit `CKA_ID` + `CKA_PRIVATE=FALSE` on pubkey
+  2. `FindByCkaId_Pubkey_LoggedIn` — `C_FindObjects({CKA_CLASS=PUBLIC, CKA_ID})` from logged-in session
+  3. `FindByCkaId_Privkey_LoggedIn` — same template with `CKA_CLASS=PRIVATE`
+  4. ★ `FindByCkaId_Pubkey_NoLogin` — opens fresh public-only RO session (mirrors charon's session) and verifies `CKA_PRIVATE=FALSE` on the hit
+  5. `Default_CkaPrivate_Pubkey` — verifies PKCS#11 v3.2 §4.5: pubkey `CKA_PRIVATE` defaults to FALSE
+  6. `Default_CkaPrivate_Pubkey_NoLoginFind` — confirms default-`CKA_PRIVATE` pubkey is findable from no-login session
+
+  All 6 PASS against `libsofthsmv3.dylib`, confirming softhsm itself was always correct — the bug was in the strongswan plugin path, not the HSM core. Run via:
+  `./build_fresh/p11_v32_compliance_test --engine ./build_fresh/src/lib/libsofthsmv3.dylib --category cka-id`
+
+- **In-WASM softhsm health probe at charon startup** (`strongswan-wasm-shims/wasm_backend.c`): `wasm_setup_config` now logs (via `fprintf(stderr)`, which Emscripten routes to the panel's printErr handler) the slot list, per-slot pubkey count, and the result of charon's exact CKA_ID-filtered query. Used to confirm pre-fix that the keys were correctly stored and findable in the in-process softhsm — isolating the bug to strongswan-pkcs11's call path. Tagged `WASM-DIAG:` for grep, can be removed for a clean release build.
+
+### Work in progress (superseded by the Fixed entries above)
 
   **C-side changes that landed (build #18, 13.8 MB):**
 
